@@ -1,0 +1,38 @@
+package loop
+
+import "strings"
+
+type EchoTool struct{}
+
+func NewEchoTool() *EchoTool {
+	return &EchoTool{}
+}
+
+func (t *EchoTool) Name() string {
+	return "echo"
+}
+
+func (t *EchoTool) Description() string {
+	return "Returns the same text passed in arguments."
+}
+
+func (t *EchoTool) Params() string {
+	return `{"type":"object","required":["text"],"properties":{"text":{"type":"string","description":"Text to echo back"}}}`
+}
+
+type echoArgs struct {
+	Text string `json:"text"`
+}
+
+func (t *EchoTool) Function(req *ToolRequest) (*ToolResponse, error) {
+	var args echoArgs
+	if err := DecodeToolArgs(req, &args); err != nil {
+		return nil, err
+	}
+
+	text := strings.TrimSpace(args.Text)
+	if text == "" {
+		text = "(empty)"
+	}
+	return &ToolResponse{Text: text}, nil
+}
