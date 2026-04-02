@@ -11,14 +11,7 @@ import (
 
 const (
 	defaultMaxLoopIterations = 8
-	defaultToolSystemPrompt  = `When a tool is required, respond ONLY with one JSON object using this exact shape:
-{"id":"<tool-name>","type":"function","arguments":{...}}
-Rules:
-- No prose, markdown, or code fences.
-- "id" must match one tool name from <tools>.
-- "type" must be "function".
-- "arguments" must be a JSON object that satisfies the tool signature.`
-	defaultMaxMessages = 100
+	defaultMaxMessages       = 100
 )
 
 type Agent struct {
@@ -31,68 +24,33 @@ type Agent struct {
 	MemorySystem      memory.Memory
 }
 
-func NewAgent(model ai.Model, tools []Tool, systemPrompt string, sessionID int) (*Agent, error) {
+func NewAgent(model ai.Model, tools []Tool, systemPrompt string, sessionID int, toolPrompt string) (*Agent, error) {
 	m, err := memory.NewMemory(sessionID)
 	if err != nil {
 		return nil, err
-	}
-	return NewAgentWithMemory(model, tools, systemPrompt, m)
-}
-
-func NewAgentWithMemory(model ai.Model, tools []Tool, systemPrompt string, memorySystem memory.Memory) (*Agent, error) {
-	if memorySystem == nil {
-		return nil, ErrMemoryNotConfigured
 	}
 	agent := &Agent{
 		Model:             model,
 		Tools:             tools,
 		BaseSystemPrompt:  systemPrompt,
-		ToolSystemPrompt:  defaultToolSystemPrompt,
+		ToolSystemPrompt:  toolPrompt,
 		MaxLoopIterations: defaultMaxLoopIterations,
 		MaxMessages:       defaultMaxMessages,
-		MemorySystem:      memorySystem,
-	}
-
-	return agent, nil
-}
-
-func NewAgentWithPrompts(model ai.Model, tools []Tool, baseSystemPrompt, toolSystemPrompt string, sessionID int) (*Agent, error) {
-	m, err := memory.NewMemory(sessionID)
-	if err != nil {
-		return nil, err
-	}
-	return NewAgentWithPromptsAndMemory(model, tools, baseSystemPrompt, toolSystemPrompt, m)
-}
-
-func NewAgentWithPromptsAndMemory(model ai.Model, tools []Tool, baseSystemPrompt, toolSystemPrompt string, memorySystem memory.Memory) (*Agent, error) {
-	agent, err := NewAgentWithMemory(model, tools, baseSystemPrompt, memorySystem)
-	if err != nil {
-		return nil, err
-	}
-	if strings.TrimSpace(toolSystemPrompt) != "" {
-		agent.ToolSystemPrompt = toolSystemPrompt
+		MemorySystem:      m,
 	}
 	return agent, nil
 }
 
-func NewAgentFromPromptFiles(model ai.Model, tools []Tool, basePromptPath, toolPromptPath string, sessionID int) (*Agent, error) {
-	m, err := memory.NewMemory(sessionID)
+func NewAgentFromPromptFiles(model ai.Model, tools []Tool, systemPromptPath string, toolPromptPath string, sessionID int) (*Agent, error) {
+	basePrompt, err := LoadPromptFromFile(systemPromptPath)
 	if err != nil {
 		return nil, err
 	}
-	return NewAgentFromPromptFilesWithMemory(model, tools, basePromptPath, toolPromptPath, m)
-}
-
-func NewAgentFromPromptFilesWithMemory(model ai.Model, tools []Tool, basePromptPath, toolPromptPath string, memorySystem memory.Memory) (*Agent, error) {
-	basePrompt, err := LoadPromptFromFile(basePromptPath)
+	toolPrompt, err := LoadOptionalPromptFromFile(toolPromptPath, toolPromptPath)
 	if err != nil {
 		return nil, err
 	}
-	toolPrompt, err := LoadOptionalPromptFromFile(toolPromptPath, defaultToolSystemPrompt)
-	if err != nil {
-		return nil, err
-	}
-	return NewAgentWithPromptsAndMemory(model, tools, basePrompt, toolPrompt, memorySystem)
+	return NewAgent(model, tools, basePrompt, sessionID, toolPrompt)
 }
 
 func (a *Agent) FollowUp(ctx context.Context, prompt string) (string, error) {
@@ -111,10 +69,12 @@ func (a *Agent) FollowUp(ctx context.Context, prompt string) (string, error) {
 
 	userMessage := memory.Message{Content: prompt, Role: memory.RoleUser}
 	var response strings.Builder
+
 	err := a.Loop(ctx, userMessage, &response)
 	if err != nil {
 		return response.String(), err
 	}
+
 	return response.String(), nil
 }
 
@@ -218,9 +178,6 @@ func buildSystemPrompt(baseSystemPrompt, toolSystemPrompt string, tools []Tool) 
 
 	if len(tools) > 0 {
 		prompt := strings.TrimSpace(toolSystemPrompt)
-		if prompt == "" {
-			prompt = defaultToolSystemPrompt
-		}
 		builder.WriteString(prompt)
 		builder.WriteString("<tools>\n")
 		builder.WriteString(RenderToolSignatures(tools))
