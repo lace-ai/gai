@@ -1,22 +1,22 @@
-package memory_test
+package context_test
 
 import (
 	"strings"
 	"sync"
 	"testing"
 
-	"agent-backend/gai/memory"
+	"agent-backend/gai/context"
 )
 
 func TestNewMemoryValidation(t *testing.T) {
-	_, err := memory.NewMemory(0)
-	if err == nil || err != memory.ErrSessionIDInvalid {
+	_, err := context.NewMemory(0)
+	if err == nil || err != context.ErrSessionIDInvalid {
 		t.Fatalf("expected ErrSessionIDInvalid, got %v", err)
 	}
 }
 
 func TestMemoryAddGetAndLimit(t *testing.T) {
-	m, err := memory.NewMemory(1)
+	m, err := context.NewMemory(1)
 	if err != nil {
 		t.Fatalf("NewMemory returned error: %v", err)
 	}
@@ -25,13 +25,13 @@ func TestMemoryAddGetAndLimit(t *testing.T) {
 		t.Fatalf("expected session id 1, got %q", got)
 	}
 
-	if _, err := m.AddMessage("first", memory.RoleUser); err != nil {
+	if _, err := m.AddMessage("first", context.RoleUser); err != nil {
 		t.Fatalf("AddMessage first returned error: %v", err)
 	}
-	if _, err := m.AddMessage("second", memory.RoleAssistant); err != nil {
+	if _, err := m.AddMessage("second", context.RoleAssistant); err != nil {
 		t.Fatalf("AddMessage second returned error: %v", err)
 	}
-	if _, err := m.AddMessage("third", memory.RoleTool); err != nil {
+	if _, err := m.AddMessage("third", context.RoleTool); err != nil {
 		t.Fatalf("AddMessage third returned error: %v", err)
 	}
 
@@ -56,15 +56,15 @@ func TestMemoryAddGetAndLimit(t *testing.T) {
 }
 
 func TestMemoryEnrichPromptConversationOnly(t *testing.T) {
-	m, err := memory.NewMemory(1)
+	m, err := context.NewMemory(1)
 	if err != nil {
 		t.Fatalf("NewMemory returned error: %v", err)
 	}
 
-	if _, err := m.AddMessage("hello", memory.RoleUser); err != nil {
+	if _, err := m.AddMessage("hello", context.RoleUser); err != nil {
 		t.Fatalf("AddMessage returned error: %v", err)
 	}
-	if _, err := m.AddMessage("hi there", memory.RoleAssistant); err != nil {
+	if _, err := m.AddMessage("hi there", context.RoleAssistant); err != nil {
 		t.Fatalf("AddMessage returned error: %v", err)
 	}
 
@@ -85,21 +85,21 @@ func TestMemoryEnrichPromptConversationOnly(t *testing.T) {
 }
 
 func TestMemoryAddMessageValidation(t *testing.T) {
-	m, err := memory.NewMemory(1)
+	m, err := context.NewMemory(1)
 	if err != nil {
 		t.Fatalf("NewMemory returned error: %v", err)
 	}
 
-	if _, err := m.AddMessage("   ", memory.RoleUser); err != memory.ErrMessageContentEmpty {
+	if _, err := m.AddMessage("   ", context.RoleUser); err != context.ErrMessageContentEmpty {
 		t.Fatalf("expected ErrMessageContentEmpty, got %v", err)
 	}
-	if _, err := m.AddMessage("ok", memory.Role("invalid")); err != memory.ErrRoleInvalid {
+	if _, err := m.AddMessage("ok", context.Role("invalid")); err != context.ErrRoleInvalid {
 		t.Fatalf("expected ErrRoleInvalid, got %v", err)
 	}
 }
 
 func TestMemoryConcurrentAdds(t *testing.T) {
-	m, err := memory.NewMemory(1)
+	m, err := context.NewMemory(1)
 	if err != nil {
 		t.Fatalf("NewMemory returned error: %v", err)
 	}
@@ -107,10 +107,10 @@ func TestMemoryConcurrentAdds(t *testing.T) {
 	const n = 50
 	var wg sync.WaitGroup
 	wg.Add(n)
-	for i := 0; i < n; i++ {
+	for range n {
 		go func() {
 			defer wg.Done()
-			if _, addErr := m.AddMessage("msg", memory.RoleUser); addErr != nil {
+			if _, addErr := m.AddMessage("msg", context.RoleUser); addErr != nil {
 				t.Errorf("AddMessage returned error: %v", addErr)
 			}
 		}()
