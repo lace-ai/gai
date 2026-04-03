@@ -1,6 +1,7 @@
 package context
 
 import (
+	"fmt"
 	"strings"
 )
 
@@ -10,10 +11,10 @@ type MemoryService struct {
 
 func (m *MemoryService) AddMessage(content string, role Role, sessionID int) (Message, error) {
 	if strings.TrimSpace(content) == "" {
-		return Message{}, ErrMessageContentEmpty
+		return Message{}, fmt.Errorf("%w: content is empty", ErrMessageInvalid)
 	}
 	if !IsValidRole(role) {
-		return Message{}, ErrRoleInvalid
+		return Message{}, fmt.Errorf("%w: role %s is invalid", ErrMessageInvalid, role)
 	}
 	return m.repo.AddMessage(content, role, sessionID)
 }
