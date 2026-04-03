@@ -69,7 +69,7 @@ func DetectToolCall(s string) (*ToolRequest, bool) {
 	return &tr, true
 }
 
-func callTool(req *ToolRequest, tools []Tool) (*ToolResponse, error) {
+func CallTool(req *ToolRequest, tools []Tool) (*ToolResponse, error) {
 	if err := req.Validate(); err != nil {
 		return nil, err
 	}

@@ -89,7 +89,7 @@ func (a *Loop) Loop(ctx context.Context, sysPrompt string, buildContext func([]I
 			return ErrToolCallMalformed
 		}
 
-		toolRes, err := callTool(toolReq, a.Tools)
+		toolRes, err := CallTool(toolReq, a.Tools)
 		if err != nil {
 			return err
 		}

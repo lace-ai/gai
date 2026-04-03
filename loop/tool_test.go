@@ -75,3 +75,73 @@ func TestDetectToolCall(t *testing.T) {
 		})
 	}
 }
+
+func TestDecodeToolArgs(t *testing.T) {
+	t.Parallel()
+
+	type SampleArgs struct {
+		Foo string `json:"foo"`
+		Bar int    `json:"bar"`
+	}
+
+	ValideArgs := SampleArgs{
+		Foo: "hello",
+		Bar: 42,
+	}
+
+	jsonArgs, err := json.Marshal(ValideArgs)
+	if err != nil {
+		t.Fatalf("marshal sample args: %v", err)
+		return
+	}
+
+	req := loop.ToolRequest{
+		ID:   "test_tool",
+		Type: "function",
+	}
+
+	tests := []struct {
+		name     string
+		input    json.RawMessage
+		wantErr  bool
+		wantArgs SampleArgs
+	}{
+		{
+			name:     "valide args",
+			input:    jsonArgs,
+			wantErr:  false,
+			wantArgs: ValideArgs,
+		},
+		{
+			name:    "invalid json",
+			input:   json.RawMessage(`{"foo": "hello", "bar": }`),
+			wantErr: true,
+		},
+		{
+			name:    "invalide Tool Args",
+			input:   json.RawMessage(`{"foo": "hello", "bar": "not an int"}`),
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotArgs SampleArgs
+
+			tReq := req
+			tReq.Args = tt.input
+			err := loop.DecodeToolArgs(&tReq, &gotArgs)
+
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("DecodeToolArgs() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
+			}
+
+			if !reflect.DeepEqual(gotArgs, tt.wantArgs) {
+				t.Errorf("Decoded args = %#v, want %#v", gotArgs, tt.wantArgs)
+			}
+		})
+	}
+}
