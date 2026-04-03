@@ -33,7 +33,21 @@ func (a *Loop) Validate() error {
 	return nil
 }
 
-func New(model ai.Model, tools []Tool, systemPrompt string, sessionID int, toolPrompt string) *Loop {
+func NewWithPromptFiles(model ai.Model, tools []Tool, systemPromptFile string, toolPromptFile string) (*Loop, error) {
+	systemPrompt, err := LoadPromptFromFile(systemPromptFile)
+	if err != nil {
+		return nil, err
+	}
+
+	toolPrompt, err := LoadPromptFromFile(toolPromptFile)
+	if err != nil {
+		return nil, err
+	}
+
+	return New(model, tools, systemPrompt, toolPrompt), nil
+}
+
+func New(model ai.Model, tools []Tool, systemPrompt string, toolPrompt string) *Loop {
 	agent := &Loop{
 		Model:             model,
 		Tools:             tools,

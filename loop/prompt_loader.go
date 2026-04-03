@@ -29,19 +29,3 @@ func LoadPromptFromFile(path string) (string, error) {
 
 	return strings.TrimSpace(string(content)), nil
 }
-
-func LoadOptionalPromptFromFile(path, fallback string) (string, error) {
-	cleanPath := strings.TrimSpace(path)
-	if cleanPath == "" {
-		return strings.TrimSpace(fallback), nil
-	}
-
-	prompt, err := LoadPromptFromFile(cleanPath)
-	if err != nil {
-		if errors.Is(err, ErrPromptMissing) {
-			return strings.TrimSpace(fallback), nil
-		}
-		return "", err
-	}
-	return prompt, nil
-}
