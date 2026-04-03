@@ -2,7 +2,6 @@ package loop
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -29,11 +28,17 @@ type ToolRequest struct {
 }
 
 func (r *ToolRequest) Validate() error {
+	if r == nil {
+		return fmt.Errorf("%w: request is nil", ErrToolReqValidation)
+	}
 	if strings.TrimSpace(r.ID) == "" {
-		return errors.New("emty ID")
+		return fmt.Errorf("%w: ID is empty", ErrToolReqValidation)
 	}
 	if strings.TrimSpace(r.Type) == "" {
-		return errors.New("emty Type")
+		return fmt.Errorf("%w: Type is empty", ErrToolReqValidation)
+	}
+	if strings.TrimSpace(r.Type) != "function" {
+		return fmt.Errorf(`%w: Type has to be "function", got=%v`, ErrToolReqValidation, r.Type)
 	}
 	return nil
 }
@@ -65,20 +70,8 @@ func DetectToolCall(s string) (*ToolRequest, bool) {
 }
 
 func callTool(req *ToolRequest, tools []Tool) (*ToolResponse, error) {
-	if req == nil {
-		return nil, ErrInvalidToolRequest
-	}
-	if strings.TrimSpace(req.Type) == "" {
-		return nil, ErrToolCallType
-	}
-	if req.Type != "function" {
-		return nil, fmt.Errorf("%w: got=%s", ErrToolCallType, req.Type)
-	}
-	if strings.TrimSpace(req.ID) == "" {
-		return nil, ErrToolCallID
-	}
-	if len(req.Args) == 0 {
-		return nil, ErrToolArgsMissing
+	if err := req.Validate(); err != nil {
+		return nil, err
 	}
 
 	for _, tool := range tools {
@@ -91,14 +84,11 @@ func callTool(req *ToolRequest, tools []Tool) (*ToolResponse, error) {
 }
 
 func DecodeToolArgs[T any](req *ToolRequest, target *T) error {
-	if req == nil {
-		return ErrInvalidToolRequest
+	if err := req.Validate(); err != nil {
+		return err
 	}
 	if target == nil {
 		return ErrArgsDecodeTarget
-	}
-	if len(req.Args) == 0 {
-		return ErrToolArgsMissing
 	}
 	if err := json.Unmarshal(req.Args, target); err != nil {
 		return fmt.Errorf("%w: %v", ErrToolCallMalformed, err)
@@ -139,20 +129,17 @@ func RenderToolSignatures(tools []Tool) string {
 
 func (r *ToolRequest) String() string {
 	var builder strings.Builder
-	builder.WriteString("{\"id\":\"")
+	builder.WriteString("id: ")
 	builder.WriteString(r.ID)
-	builder.WriteString("\",\"type\":\"")
+	builder.WriteString(",type: ")
 	builder.WriteString(r.Type)
-	builder.WriteString("\",\"arguments\":")
+	builder.WriteString(",arguments: ")
 	builder.Write(r.Args)
-	builder.WriteString("}")
 	return builder.String()
 }
 
 func (r *ToolResponse) String() string {
 	var builder strings.Builder
-	builder.WriteString("{\"text\":\"")
 	builder.WriteString(r.Text)
-	builder.WriteString("\"}")
 	return builder.String()
 }
