@@ -18,6 +18,7 @@ type ToolArgs struct {
 
 type ToolResponse struct {
 	Text string
+	Err  error
 }
 
 type ToolRequest struct {
@@ -44,7 +45,7 @@ func detectToolCall(s string) (*ToolRequest, bool) {
 
 	var tr ToolRequest
 	if err := json.Unmarshal([]byte(payload), &tr); err != nil {
-		return nil, true
+		return nil, false
 	}
 	return &tr, true
 }
@@ -133,5 +134,25 @@ func RenderToolSignatures(tools []Tool) string {
 		builder.WriteString("</signature>")
 		builder.WriteString("\n</tool>")
 	}
+	return builder.String()
+}
+
+func (r *ToolRequest) String() string {
+	var builder strings.Builder
+	builder.WriteString("{\"id\":\"")
+	builder.WriteString(r.ID)
+	builder.WriteString("\",\"type\":\"")
+	builder.WriteString(r.Type)
+	builder.WriteString("\",\"arguments\":")
+	builder.Write(r.Args)
+	builder.WriteString("}")
+	return builder.String()
+}
+
+func (r *ToolResponse) String() string {
+	var builder strings.Builder
+	builder.WriteString("{\"text\":\"")
+	builder.WriteString(r.Text)
+	builder.WriteString("\"}")
 	return builder.String()
 }
