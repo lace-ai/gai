@@ -77,7 +77,7 @@ func (a *Loop) Loop(ctx context.Context, sysPrompt string, buildContext func([]I
 
 		iteration.response = res
 
-		toolReq, tCall := detectToolCall(res.Text)
+		toolReq, tCall := DetectToolCall(res.Text)
 		if !tCall {
 			iteration.Type = IterationTypeResponse
 			return nil

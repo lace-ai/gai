@@ -2,6 +2,7 @@ package loop
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -27,6 +28,16 @@ type ToolRequest struct {
 	Args json.RawMessage `json:"arguments"`
 }
 
+func (r *ToolRequest) Validate() error {
+	if strings.TrimSpace(r.ID) == "" {
+		return errors.New("emty ID")
+	}
+	if strings.TrimSpace(r.Type) == "" {
+		return errors.New("emty Type")
+	}
+	return nil
+}
+
 type Tool interface {
 	Name() string
 	Description() string
@@ -34,7 +45,7 @@ type Tool interface {
 	Function(req *ToolRequest) (*ToolResponse, error)
 }
 
-func detectToolCall(s string) (*ToolRequest, bool) {
+func DetectToolCall(s string) (*ToolRequest, bool) {
 	payload := strings.TrimSpace(s)
 	if payload == "" {
 		return nil, false
@@ -47,21 +58,10 @@ func detectToolCall(s string) (*ToolRequest, bool) {
 	if err := json.Unmarshal([]byte(payload), &tr); err != nil {
 		return nil, false
 	}
+	if err := tr.Validate(); err != nil {
+		return nil, false
+	}
 	return &tr, true
-}
-
-func (r *ToolRequest) ArgsString() string {
-	if r == nil {
-		return ""
-	}
-	if len(r.Args) == 0 {
-		return ""
-	}
-	var s string
-	if err := json.Unmarshal(r.Args, &s); err == nil {
-		return s
-	}
-	return string(r.Args)
 }
 
 func callTool(req *ToolRequest, tools []Tool) (*ToolResponse, error) {

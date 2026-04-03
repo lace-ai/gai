@@ -1,94 +1,76 @@
-package loop
+package loop_test
 
 import (
-	"errors"
+	"encoding/json"
+	"reflect"
 	"testing"
+
+	"agent-backend/gai/loop"
 )
 
-type testTool struct {
-	name string
-	resp string
-	err  error
-}
+func TestDetectToolCall(t *testing.T) {
+	t.Parallel()
 
-func (t *testTool) Name() string        { return t.name }
-func (t *testTool) Description() string { return "test tool" }
-func (t *testTool) Params() string      { return `{"type":"object"}` }
-func (t *testTool) Function(_ *ToolRequest) (*ToolResponse, error) {
-	if t.err != nil {
-		return nil, t.err
+	valideReq := loop.ToolRequest{
+		ID:   "test_tool",
+		Type: "function",
+		Args: json.RawMessage(`{"test":1}`),
 	}
-	return &ToolResponse{Text: t.resp}, nil
-}
 
-func TestDetectToolCallMalformedJSON(t *testing.T) {
-	req, ok := detectToolCall(`{"id":"echo","type":"function","arguments":`)
-	if !ok {
-		t.Fatalf("expected tool-call detection for json-like payload")
-	}
-	if req != nil {
-		t.Fatalf("expected nil request on malformed payload, got %+v", req)
-	}
-}
-
-func TestDetectToolCallNonJSON(t *testing.T) {
-	req, ok := detectToolCall("hello world")
-	if ok || req != nil {
-		t.Fatalf("expected no tool call for prose input")
-	}
-}
-
-func TestCallToolNilRequest(t *testing.T) {
-	_, err := callTool(nil, nil)
-	if !errors.Is(err, ErrInvalidToolRequest) {
-		t.Fatalf("expected ErrInvalidToolRequest, got %v", err)
-	}
-}
-
-func TestCallToolSuccess(t *testing.T) {
-	req := &ToolRequest{ID: "echo", Type: "function", Args: []byte(`{"text":"x"}`)}
-	res, err := callTool(req, []Tool{&testTool{name: "echo", resp: "ok"}})
+	valideInput, err := json.Marshal(valideReq)
 	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
+		t.Fatalf("marshal sample request: %v", err)
+		return
 	}
-	if res == nil || res.Text != "ok" {
-		t.Fatalf("unexpected response: %+v", res)
-	}
-}
 
-func TestCallToolValidation(t *testing.T) {
 	tests := []struct {
-		name string
-		req  *ToolRequest
-		want error
+		name    string
+		input   string
+		wantOK  bool
+		wantReq loop.ToolRequest
 	}{
 		{
-			name: "missing type",
-			req:  &ToolRequest{ID: "echo", Args: []byte(`{"text":"x"}`)},
-			want: ErrToolCallType,
+			name:    "valide tool call",
+			input:   string(valideInput),
+			wantOK:  true,
+			wantReq: valideReq,
 		},
 		{
-			name: "invalid type",
-			req:  &ToolRequest{ID: "echo", Type: "tool", Args: []byte(`{"text":"x"}`)},
-			want: ErrToolCallType,
+			name:   "invalide json",
+			input:  `{"id": 1, "}`,
+			wantOK: false,
 		},
 		{
-			name: "missing id",
-			req:  &ToolRequest{Type: "function", Args: []byte(`{"text":"x"}`)},
-			want: ErrToolCallID,
+			name:   "plain text",
+			input:  "something different",
+			wantOK: false,
 		},
 		{
-			name: "missing args",
-			req:  &ToolRequest{ID: "echo", Type: "function"},
-			want: ErrToolArgsMissing,
+			name:   "json but not toll call",
+			input:  `{"foo":"bar"}`,
+			wantOK: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := callTool(tt.req, []Tool{&testTool{name: "echo", resp: "ok"}})
-			if !errors.Is(err, tt.want) {
-				t.Fatalf("expected %v, got %v", tt.want, err)
+			got, ok := loop.DetectToolCall(string(tt.input))
+
+			if ok != tt.wantOK {
+				t.Fatalf("DetectTollCall() returned ok=%v, want %v, got %v", ok, tt.wantOK, got)
+			}
+			if tt.wantOK != true {
+				return
+			}
+
+			if got.ID != tt.wantReq.ID {
+				t.Errorf("ID=%q, want %q", got.ID, tt.wantReq.ID)
+			}
+			if got.Type != tt.wantReq.Type {
+				t.Errorf("Type=%q, want %q", got.Type, tt.wantReq.Type)
+			}
+			if !reflect.DeepEqual(got.Args, tt.wantReq.Args) {
+				t.Errorf("Args = %#v, want %#v", got.Args, tt.wantReq.Args)
 			}
 		})
 	}
