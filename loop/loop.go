@@ -80,6 +80,7 @@ func (a *Loop) Loop(ctx context.Context, sysPrompt string, buildContext func([]I
 		toolReq, tCall := DetectToolCall(res.Text)
 		if !tCall {
 			iteration.Type = IterationTypeResponse
+			a.Iterations = append(a.Iterations, iteration)
 			return nil
 		}
 
