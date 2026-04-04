@@ -5,12 +5,25 @@ import (
 )
 
 type Session struct {
-	ID       int
-	Messages []Message
+	ID           int
+	SessionStore SessionStore
 }
 
-func (s Session) BuildHistory() string {
+func NewSession(id int, sessionStore SessionStore) *Session {
+	return &Session{
+		ID:           id,
+		SessionStore: sessionStore,
+	}
+}
+
+func (s Session) BuildHistory() (string, error) {
 	var builder strings.Builder
-	RenderMessages(s.Messages[len(s.Messages)-3:], &builder)
-	return builder.String()
+
+	messages, err := s.SessionStore.GetMessages(s.ID, 5, 0)
+	if err != nil {
+		return "", err
+	}
+
+	RenderMessages(messages, &builder)
+	return builder.String(), nil
 }
