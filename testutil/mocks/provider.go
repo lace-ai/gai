@@ -1,10 +1,25 @@
 package mocks
 
-import "agent-backend/gai/ai"
+import (
+	"fmt"
+	"strings"
+
+	"agent-backend/gai/ai"
+)
 
 type MockProvider struct {
 	ProviderName string
 	Models       map[string]ai.Model
+}
+
+func (p *MockProvider) Validate() error {
+	if p.ProviderName == "" {
+		return ai.ErrProviderNotFound
+	}
+	if strings.TrimSpace(p.ProviderName) == "" {
+		return fmt.Errorf("%v: name is empty", ai.ErrProviderInvalid)
+	}
+	return nil
 }
 
 func (p *MockProvider) Name() string {

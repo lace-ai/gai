@@ -1,35 +1,57 @@
 package ai
 
 type ModelRepository struct {
-	Providers map[string]Provider
+	providers map[string]Provider
 }
 
 func NewModelRepository() *ModelRepository {
 	return &ModelRepository{
-		Providers: make(map[string]Provider),
+		providers: make(map[string]Provider),
 	}
 }
 
+func (r *ModelRepository) Validate() error {
+	if r == nil {
+		return ErrNilModelRepository
+	}
+	return nil
+}
+
 func (r *ModelRepository) RegisterProvider(provider Provider) error {
-	_, exists := r.Providers[provider.Name()]
+	if err := r.Validate(); err != nil {
+		return err
+	}
+	if err := provider.Validate(); err != nil {
+		return err
+	}
+
+	_, exists := r.providers[provider.Name()]
 	if exists {
 		return ErrProviderAlreadyExists
 	}
-	r.Providers[provider.Name()] = provider
+	r.providers[provider.Name()] = provider
 	return nil
 }
 
 func (r *ModelRepository) UnregisterProvider(providerName string) error {
-	_, exists := r.Providers[providerName]
+	if err := r.Validate(); err != nil {
+		return err
+	}
+
+	_, exists := r.providers[providerName]
 	if !exists {
 		return ErrProviderNotFound
 	}
-	delete(r.Providers, providerName)
+	delete(r.providers, providerName)
 	return nil
 }
 
 func (r *ModelRepository) GetModel(providerName, modelName string) (Model, error) {
-	provider, ok := r.Providers[providerName]
+	if err := r.Validate(); err != nil {
+		return nil, err
+	}
+
+	provider, ok := r.providers[providerName]
 	if !ok {
 		return nil, ErrProviderNotFound
 	}
@@ -38,7 +60,7 @@ func (r *ModelRepository) GetModel(providerName, modelName string) (Model, error
 
 func (r *ModelRepository) ListModels() ([]string, error) {
 	var models []string
-	for _, provider := range r.Providers {
+	for _, provider := range r.providers {
 		providerModels, err := provider.ListModels()
 		if err != nil {
 			return nil, err
