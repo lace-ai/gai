@@ -25,6 +25,9 @@ type Iteration struct {
 }
 
 func (i *Iteration) String() string {
+	if i == nil {
+		return "<I>nil</I>"
+	}
 	var builder strings.Builder
 	builder.WriteString("<I c=")
 	builder.WriteString(strconv.Itoa(i.Count))
@@ -33,6 +36,10 @@ func (i *Iteration) String() string {
 	builder.WriteString(">")
 	switch i.Type {
 	case IterationTypeToolCall:
+		if i.ToolReq == nil || i.ToolResp == nil {
+			builder.WriteString("<Error>missing tool request/response</Error>")
+			break
+		}
 		builder.WriteString("<Req u=assistant>")
 		builder.WriteString(i.ToolReq.String())
 		builder.WriteString("</Req>")
@@ -40,10 +47,18 @@ func (i *Iteration) String() string {
 		builder.WriteString(i.ToolResp.String())
 		builder.WriteString("</Resp>")
 	case IterationTypeResponse:
+		if i.response == nil {
+			builder.WriteString("<Resp u=assistant></Resp>")
+			break
+		}
 		builder.WriteString("<Resp u=assistant>")
 		builder.WriteString(i.response.Text)
 		builder.WriteString("</Resp>")
 	case IterationTypeToolError:
+		if i.ToolResp == nil || i.ToolResp.Err == nil {
+			builder.WriteString("<Error u=tool>unknown error</Error>")
+			break
+		}
 		builder.WriteString("<Error u=tool>")
 		builder.WriteString(i.ToolResp.Err.Error())
 		builder.WriteString("</Error>")
