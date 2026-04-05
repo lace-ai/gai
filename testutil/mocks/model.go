@@ -1,4 +1,4 @@
-package loop_test
+package mocks
 
 import (
 	"context"
@@ -6,26 +6,28 @@ import (
 	"agent-backend/gai/ai"
 )
 
+type MockModelResponse struct {
+	Res ai.AIResponse
+	Err error
+}
+
 type MockModel struct {
-	name      string
-	count     int
-	responses []struct {
-		res ai.AIResponse
-		err error
-	}
+	ModelName string
+	Count     int
+	Responses []MockModelResponse
 }
 
 func (m *MockModel) Name() string {
-	return m.name
+	return m.ModelName
 }
 
 func (m *MockModel) Generate(ctx context.Context, req ai.AIRequest) (*ai.AIResponse, error) {
-	if m.count >= len(m.responses) {
+	if m.Count >= len(m.Responses) {
 		return nil, nil
 	}
-	r := m.responses[m.count]
-	m.count++
-	return &r.res, r.err
+	r := m.Responses[m.Count]
+	m.Count++
+	return &r.Res, r.Err
 }
 
 func (m *MockModel) Close() error {

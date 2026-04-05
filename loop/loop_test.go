@@ -7,67 +7,53 @@ import (
 
 	"agent-backend/gai/ai"
 	"agent-backend/gai/loop"
+	"agent-backend/gai/testutil/mocks"
 )
 
 func TestLoop(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name       string
-		iterations []struct {
-			res ai.AIResponse
-			err error
-		}
+		name           string
+		iterations     []mocks.MockModelResponse
 		wantIterations int
 		wantError      bool
 		maxIterations  int
 	}{
 		{
 			name: "Single iteration",
-			iterations: []struct {
-				res ai.AIResponse
-				err error
-			}{
-				{res: ai.AIResponse{Text: "Hello, World!"}, err: nil},
+			iterations: []mocks.MockModelResponse{
+				{Res: ai.AIResponse{Text: "Hello, World!"}, Err: nil},
 			},
 			wantIterations: 1,
 			maxIterations:  8,
 		},
 		{
 			name: "single Tool call",
-			iterations: []struct {
-				res ai.AIResponse
-				err error
-			}{
-				{res: ai.AIResponse{Text: `{"id":"echo","type":"function","arguments":{"text":"test"}}`}, err: nil},
-				{res: ai.AIResponse{Text: "How are you?"}, err: nil},
+			iterations: []mocks.MockModelResponse{
+				{Res: ai.AIResponse{Text: `{"id":"echo","type":"function","arguments":{"text":"test"}}`}, Err: nil},
+				{Res: ai.AIResponse{Text: "How are you?"}, Err: nil},
 			},
 			wantIterations: 2,
 			maxIterations:  8,
 		},
 		{
 			name: "Multiple iterations with tool calls",
-			iterations: []struct {
-				res ai.AIResponse
-				err error
-			}{
-				{res: ai.AIResponse{Text: `{"id":"echo","type":"function","arguments":{"text":"test"}}`}, err: nil},
-				{res: ai.AIResponse{Text: `{"id":"echo","type":"function","arguments":{"text":"test"}}`}, err: nil},
-				{res: ai.AIResponse{Text: "How are you?"}, err: nil},
+			iterations: []mocks.MockModelResponse{
+				{Res: ai.AIResponse{Text: `{"id":"echo","type":"function","arguments":{"text":"test"}}`}, Err: nil},
+				{Res: ai.AIResponse{Text: `{"id":"echo","type":"function","arguments":{"text":"test"}}`}, Err: nil},
+				{Res: ai.AIResponse{Text: "How are you?"}, Err: nil},
 			},
 			wantIterations: 3,
 			maxIterations:  8,
 		},
 		{
 			name: "Exceeding max iterations",
-			iterations: []struct {
-				res ai.AIResponse
-				err error
-			}{
-				{res: ai.AIResponse{Text: `{"id":"echo","type":"function","arguments":{"text":"test"}}`}, err: nil},
-				{res: ai.AIResponse{Text: `{"id":"echo","type":"function","arguments":{"text":"test"}}`}, err: nil},
-				{res: ai.AIResponse{Text: `{"id":"echo","type":"function","arguments":{"text":"test"}}`}, err: nil},
-				{res: ai.AIResponse{Text: `{"id":"echo","type":"function","arguments":{"text":"test"}}`}, err: nil},
+			iterations: []mocks.MockModelResponse{
+				{Res: ai.AIResponse{Text: `{"id":"echo","type":"function","arguments":{"text":"test"}}`}, Err: nil},
+				{Res: ai.AIResponse{Text: `{"id":"echo","type":"function","arguments":{"text":"test"}}`}, Err: nil},
+				{Res: ai.AIResponse{Text: `{"id":"echo","type":"function","arguments":{"text":"test"}}`}, Err: nil},
+				{Res: ai.AIResponse{Text: `{"id":"echo","type":"function","arguments":{"text":"test"}}`}, Err: nil},
 			},
 			wantIterations: 2,
 			maxIterations:  2,
@@ -75,11 +61,8 @@ func TestLoop(t *testing.T) {
 		},
 		{
 			name: "Call wrong tool",
-			iterations: []struct {
-				res ai.AIResponse
-				err error
-			}{
-				{res: ai.AIResponse{Text: `{"id":"nonexistent_tool","type":"function","arguments":{"text":"test"}}`}, err: nil},
+			iterations: []mocks.MockModelResponse{
+				{Res: ai.AIResponse{Text: `{"id":"nonexistent_tool","type":"function","arguments":{"text":"test"}}`}, Err: nil},
 			},
 			wantIterations: 0,
 			maxIterations:  8,
@@ -87,26 +70,20 @@ func TestLoop(t *testing.T) {
 		},
 		{
 			name: "No tool calls after response",
-			iterations: []struct {
-				res ai.AIResponse
-				err error
-			}{
-				{res: ai.AIResponse{Text: "Just a normal response."}, err: nil},
-				{res: ai.AIResponse{Text: `{"id":"nonexistent_tool","type":"function","arguments":{"text":"test"}}`}, err: nil},
-				{res: ai.AIResponse{Text: `{"id":"nonexistent_tool","type":"function","arguments":{"text":"test"}}`}, err: nil},
+			iterations: []mocks.MockModelResponse{
+				{Res: ai.AIResponse{Text: "Just a normal response."}, Err: nil},
+				{Res: ai.AIResponse{Text: `{"id":"nonexistent_tool","type":"function","arguments":{"text":"test"}}`}, Err: nil},
+				{Res: ai.AIResponse{Text: `{"id":"nonexistent_tool","type":"function","arguments":{"text":"test"}}`}, Err: nil},
 			},
 			wantIterations: 1,
 			maxIterations:  8,
 		},
 		{
 			name: "Tool call with error",
-			iterations: []struct {
-				res ai.AIResponse
-				err error
-			}{
-				{res: ai.AIResponse{Text: `{"id":"echo","type":"function","arguments":{"text":"test"}}`}, err: nil},
-				{res: ai.AIResponse{Text: `{"id":"echo","type":"function","arguments":{"text":"test"}}`}, err: errors.New("tool execution failed")},
-				{res: ai.AIResponse{Text: `{"id":"echo","type":"function","arguments":{"text":"test"}}`}, err: nil},
+			iterations: []mocks.MockModelResponse{
+				{Res: ai.AIResponse{Text: `{"id":"echo","type":"function","arguments":{"text":"test"}}`}, Err: nil},
+				{Res: ai.AIResponse{Text: `{"id":"echo","type":"function","arguments":{"text":"test"}}`}, Err: errors.New("tool execution failed")},
+				{Res: ai.AIResponse{Text: `{"id":"echo","type":"function","arguments":{"text":"test"}}`}, Err: nil},
 			},
 			wantIterations: 1,
 			maxIterations:  8,
@@ -119,8 +96,8 @@ func TestLoop(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			model := &MockModel{}
-			model.responses = tt.iterations
+			model := &mocks.MockModel{}
+			model.Responses = tt.iterations
 			tools := []loop.Tool{loop.NewEchoTool()}
 			l := loop.New(model, tools, "", "")
 			l.MaxLoopIterations = tt.maxIterations
