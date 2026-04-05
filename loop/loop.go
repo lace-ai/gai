@@ -21,11 +21,11 @@ type Loop struct {
 }
 
 func (a *Loop) Validate() error {
-	if a.MaxLoopIterations <= 0 {
-		a.MaxLoopIterations = defaultMaxLoopIterations
-	}
 	if a == nil {
 		return ErrNilAgent
+	}
+	if a.MaxLoopIterations <= 0 {
+		a.MaxLoopIterations = defaultMaxLoopIterations
 	}
 	if a.Model == nil {
 		return ErrModelNotConfigured
@@ -33,22 +33,9 @@ func (a *Loop) Validate() error {
 	return nil
 }
 
-func NewWithPromptFiles(model ai.Model, tools []Tool, systemPromptFile string, toolPromptFile string) (*Loop, error) {
-	systemPrompt, err := LoadPromptFromFile(systemPromptFile)
-	if err != nil {
-		return nil, err
-	}
-
-	toolPrompt, err := LoadPromptFromFile(toolPromptFile)
-	if err != nil {
-		return nil, err
-	}
-
-	return New(model, tools, systemPrompt, toolPrompt), nil
-}
-
-func New(model ai.Model, tools []Tool, systemPrompt string, toolPrompt string) *Loop {
+func New(model ai.Model, tools []Tool, initialPrompt string) *Loop {
 	agent := &Loop{
+		InitialPrompt:     initialPrompt,
 		Model:             model,
 		Tools:             tools,
 		MaxLoopIterations: defaultMaxLoopIterations,
