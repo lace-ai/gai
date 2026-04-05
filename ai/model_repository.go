@@ -1,5 +1,9 @@
 package ai
 
+import (
+	"sort"
+)
+
 type ModelRepository struct {
 	providers map[string]Provider
 }
@@ -69,5 +73,6 @@ func (r *ModelRepository) ListModels() ([]string, error) {
 			models = append(models, provider.Name()+":"+model)
 		}
 	}
+	sort.Strings(models)
 	return models, nil
 }
