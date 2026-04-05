@@ -14,6 +14,16 @@ func New(apiKey string) *Provider {
 	return &Provider{apiKey: apiKey}
 }
 
+func (p *Provider) Validate() error {
+	if p == nil {
+		return ai.ErrNilProvider
+	}
+	if strings.TrimSpace(p.apiKey) == "" {
+		return ErrInvalidAPIKey
+	}
+	return nil
+}
+
 func (p *Provider) Name() string {
 	return "gemini"
 }

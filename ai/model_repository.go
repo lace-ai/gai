@@ -63,6 +63,10 @@ func (r *ModelRepository) GetModel(providerName, modelName string) (Model, error
 }
 
 func (r *ModelRepository) ListModels() ([]string, error) {
+	if err := r.Validate(); err != nil {
+		return nil, err
+	}
+
 	var models []string
 	for _, provider := range r.providers {
 		providerModels, err := provider.ListModels()
