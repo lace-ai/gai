@@ -9,6 +9,16 @@ type Session struct {
 	SessionStore SessionStore
 }
 
+func (s Session) Validate() error {
+	if s.ID < 0 {
+		return ErrInvalidSessionID
+	}
+	if s.SessionStore == nil {
+		return ErrSessionStoreNotFound
+	}
+	return nil
+}
+
 func NewSession(id int, sessionStore SessionStore) *Session {
 	return &Session{
 		ID:           id,
@@ -17,6 +27,9 @@ func NewSession(id int, sessionStore SessionStore) *Session {
 }
 
 func (s Session) BuildHistory() (string, error) {
+	if err := s.Validate(); err != nil {
+		return "", err
+	}
 	var builder strings.Builder
 
 	messages, err := s.SessionStore.GetMessages(s.ID, 5, 0)
