@@ -11,16 +11,15 @@ import (
 func TestDetectToolCall(t *testing.T) {
 	t.Parallel()
 
-	valideReq := loop.ToolRequest{
+	validReq := loop.ToolRequest{
 		ID:   "test_tool",
 		Type: "function",
 		Args: json.RawMessage(`{"test":1}`),
 	}
 
-	valideInput, err := json.Marshal(valideReq)
+	validInput, err := json.Marshal(validReq)
 	if err != nil {
 		t.Fatalf("marshal sample request: %v", err)
-		return
 	}
 
 	tests := []struct {
@@ -30,13 +29,13 @@ func TestDetectToolCall(t *testing.T) {
 		wantReq loop.ToolRequest
 	}{
 		{
-			name:    "valide tool call",
-			input:   string(valideInput),
+			name:    "valid tool call",
+			input:   string(validInput),
 			wantOK:  true,
-			wantReq: valideReq,
+			wantReq: validReq,
 		},
 		{
-			name:   "invalide json",
+			name:   "invalid json",
 			input:  `{"id": 1, "}`,
 			wantOK: false,
 		},
@@ -46,7 +45,7 @@ func TestDetectToolCall(t *testing.T) {
 			wantOK: false,
 		},
 		{
-			name:   "json but not toll call",
+			name:   "json but not tool call",
 			input:  `{"foo":"bar"}`,
 			wantOK: false,
 		},
@@ -84,15 +83,14 @@ func TestDecodeToolArgs(t *testing.T) {
 		Bar int    `json:"bar"`
 	}
 
-	ValideArgs := SampleArgs{
+	ValidArgs := SampleArgs{
 		Foo: "hello",
 		Bar: 42,
 	}
 
-	jsonArgs, err := json.Marshal(ValideArgs)
+	jsonArgs, err := json.Marshal(ValidArgs)
 	if err != nil {
 		t.Fatalf("marshal sample args: %v", err)
-		return
 	}
 
 	req := loop.ToolRequest{
@@ -107,10 +105,10 @@ func TestDecodeToolArgs(t *testing.T) {
 		wantArgs SampleArgs
 	}{
 		{
-			name:     "valide args",
+			name:     "valid args",
 			input:    jsonArgs,
 			wantErr:  false,
-			wantArgs: ValideArgs,
+			wantArgs: ValidArgs,
 		},
 		{
 			name:    "invalid json",
@@ -118,7 +116,7 @@ func TestDecodeToolArgs(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "invalide Tool Args",
+			name:    "invalid Tool Args",
 			input:   json.RawMessage(`{"foo": "hello", "bar": "not an int"}`),
 			wantErr: true,
 		},

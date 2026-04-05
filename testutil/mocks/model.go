@@ -2,6 +2,7 @@ package mocks
 
 import (
 	"context"
+	"errors"
 
 	"agent-backend/gai/ai"
 )
@@ -21,9 +22,11 @@ func (m *MockModel) Name() string {
 	return m.ModelName
 }
 
+var ErrNoMockResponses = errors.New("mock model: no scripted responses left")
+
 func (m *MockModel) Generate(ctx context.Context, req ai.AIRequest) (*ai.AIResponse, error) {
 	if m.Count >= len(m.Responses) {
-		return nil, nil
+		return nil, ErrNoMockResponses
 	}
 	r := m.Responses[m.Count]
 	m.Count++
