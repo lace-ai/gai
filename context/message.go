@@ -32,12 +32,16 @@ type Content struct {
 
 func (c Content) String() string {
 	var builder strings.Builder
+	hasText := false
 	if c.Text != "" {
+		hasText = true
 		builder.WriteString(c.Text)
 	}
 
-	for _, iter := range c.Iterations {
-		builder.WriteString("\n")
+	for i, iter := range c.Iterations {
+		if hasText || i > 0 {
+			builder.WriteString("\n")
+		}
 		builder.WriteString(iter.String())
 	}
 	return builder.String()
