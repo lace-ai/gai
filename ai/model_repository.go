@@ -10,8 +10,22 @@ func NewModelRepository() *ModelRepository {
 	}
 }
 
-func (r *ModelRepository) RegisterProvider(provider Provider) {
+func (r *ModelRepository) RegisterProvider(provider Provider) error {
+	_, exists := r.Providers[provider.Name()]
+	if exists {
+		return ErrProviderAlreadyExists
+	}
 	r.Providers[provider.Name()] = provider
+	return nil
+}
+
+func (r *ModelRepository) UnregisterProvider(providerName string) error {
+	_, exists := r.Providers[providerName]
+	if !exists {
+		return ErrProviderNotFound
+	}
+	delete(r.Providers, providerName)
+	return nil
 }
 
 func (r *ModelRepository) GetModel(providerName, modelName string) (Model, error) {
