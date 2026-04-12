@@ -13,7 +13,7 @@ const (
 )
 
 type Loop struct {
-	InitialPrompt     string
+	InitialPrompt     ai.Prompt
 	Iterations        []Iteration
 	Model             ai.Model
 	Tools             []Tool
@@ -33,9 +33,13 @@ func (a *Loop) Validate() error {
 	return nil
 }
 
-func New(model ai.Model, tools []Tool, initialPrompt string) *Loop {
+func New(model ai.Model, tools []Tool, initialPrompt string, sysPrompt string) *Loop {
+	prompt := ai.Prompt{
+		Prompt: initialPrompt,
+		System: sysPrompt,
+	}
 	agent := &Loop{
-		InitialPrompt:     initialPrompt,
+		InitialPrompt:     prompt,
 		Model:             model,
 		Tools:             tools,
 		MaxLoopIterations: defaultMaxLoopIterations,
@@ -51,10 +55,10 @@ func (a *Loop) Loop(ctx context.Context, sysPrompt string, buildContext func([]I
 	var iteration Iteration
 	for i := range a.MaxLoopIterations {
 		iteration = Iteration{Count: i + 1}
+
+		a.InitialPrompt.Context = buildContext(a.Iterations)
 		request := ai.AIRequest{
-			SystemPrompt: sysPrompt,
-			Prompt:       a.InitialPrompt,
-			Context:      buildContext(a.Iterations),
+			Prompt: a.InitialPrompt,
 		}
 
 		res, err := a.Model.Generate(ctx, request)
