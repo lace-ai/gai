@@ -99,7 +99,7 @@ func TestLoop(t *testing.T) {
 			model := &mocks.MockModel{}
 			model.Responses = tt.iterations
 			tools := []loop.Tool{loop.NewEchoTool()}
-			l := loop.New(model, tools, "")
+			l := loop.New(model, tools, "", "")
 			l.MaxLoopIterations = tt.maxIterations
 
 			if err := l.Loop(context.Background(), "", func(i []loop.Iteration) string {
