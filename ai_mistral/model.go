@@ -66,7 +66,12 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (*ai.AIResponse,
 		return nil, err
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, m.client.baseURL+"/v1/chat/completions", bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		m.client.baseURL+"/v1/chat/completions",
+		bytes.NewReader(body),
+	)
 	if err != nil {
 		return nil, err
 	}
