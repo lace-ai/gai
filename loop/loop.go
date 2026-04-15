@@ -12,12 +12,21 @@ const (
 	defaultMaxMessages       = 100
 )
 
+type ContextBuilder interface {
+	BuildContext(iterations []Iteration) string
+}
+type ToolResPreProcessor interface {
+	Process(req ToolRequest, res *ToolResponse) error
+}
+
 type Loop struct {
 	InitialPrompt     ai.Prompt
 	Iterations        []Iteration
 	Model             ai.Model
 	Tools             []Tool
 	MaxLoopIterations int
+	ContextBuilder    ContextBuilder
+	PreProcessToolRes ToolResPreProcessor
 }
 
 func (a *Loop) Validate() error {
@@ -33,7 +42,7 @@ func (a *Loop) Validate() error {
 	return nil
 }
 
-func New(model ai.Model, tools []Tool, initialPrompt string, sysPrompt string) *Loop {
+func New(model ai.Model, tools []Tool, initialPrompt string, sysPrompt string, contextBuilder ContextBuilder, toolResPreProcessor ToolResPreProcessor) *Loop {
 	prompt := ai.Prompt{
 		Prompt: initialPrompt,
 		System: sysPrompt,
@@ -43,11 +52,13 @@ func New(model ai.Model, tools []Tool, initialPrompt string, sysPrompt string) *
 		Model:             model,
 		Tools:             tools,
 		MaxLoopIterations: defaultMaxLoopIterations,
+		ContextBuilder:    contextBuilder,
+		PreProcessToolRes: toolResPreProcessor,
 	}
 	return agent
 }
 
-func (a *Loop) Loop(ctx context.Context, sysPrompt string, buildContext func([]Iteration) string, preProcessToolRes func(req ToolRequest, res *ToolResponse) error) error {
+func (a *Loop) Loop(ctx context.Context, sysPrompt string) error {
 	if err := a.Validate(); err != nil {
 		return err
 	}
@@ -56,10 +67,11 @@ func (a *Loop) Loop(ctx context.Context, sysPrompt string, buildContext func([]I
 	for i := range a.MaxLoopIterations {
 		iteration = Iteration{Count: i + 1}
 
-		a.InitialPrompt.Context = buildContext(a.Iterations)
+		a.InitialPrompt.Context = a.ContextBuilder.BuildContext(a.Iterations)
 		request := ai.AIRequest{
 			Prompt: a.InitialPrompt,
 		}
+		iteration.request = &request
 
 		res, err := a.Model.Generate(ctx, request)
 		if err != nil {
@@ -70,12 +82,12 @@ func (a *Loop) Loop(ctx context.Context, sysPrompt string, buildContext func([]I
 
 		toolReq, tCall := DetectToolCall(res.Text)
 		if !tCall {
-			iteration.Type = IterationTypeResponse
+			iteration.IterType = IterationTypeResponse
 			a.Iterations = append(a.Iterations, iteration)
 			return nil
 		}
 
-		iteration.Type = IterationTypeToolCall
+		iteration.IterType = IterationTypeToolCall
 
 		if toolReq == nil {
 			return ErrToolCallMalformed
@@ -86,7 +98,7 @@ func (a *Loop) Loop(ctx context.Context, sysPrompt string, buildContext func([]I
 			return err
 		}
 
-		if err := preProcessToolRes(*toolReq, toolRes); err != nil {
+		if err := a.PreProcessToolRes.Process(*toolReq, toolRes); err != nil {
 			return fmt.Errorf("%w: %v", ErrPreProcessToolRes, err)
 		}
 

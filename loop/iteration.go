@@ -19,6 +19,7 @@ const (
 type Iteration struct {
 	Count    int
 	Type     IterationType
+	request  *ai.AIRequest
 	response *ai.AIResponse
 	ToolReq  *ToolRequest
 	ToolResp *ToolResponse
