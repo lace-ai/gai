@@ -59,7 +59,7 @@ func New(model ai.Model, tools []Tool, initialPrompt string, sysPrompt string, c
 	return agent
 }
 
-func (a *Loop) Loop(ctx context.Context, sysPrompt string) error {
+func (a *Loop) Loop(ctx context.Context) error {
 	if err := a.Validate(); err != nil {
 		return err
 	}

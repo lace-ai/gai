@@ -102,7 +102,7 @@ func TestLoop(t *testing.T) {
 			l := loop.New(model, tools, "Initial prompt", "System prompt", nil, nil)
 			l.MaxLoopIterations = tt.maxIterations
 
-			if err := l.Loop(context.Background(), ""); (err != nil) != tt.wantError {
+			if err := l.Loop(context.Background()); (err != nil) != tt.wantError {
 				t.Fatalf("Loop failed: %v", err)
 			}
 
