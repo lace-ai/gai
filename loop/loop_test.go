@@ -99,14 +99,10 @@ func TestLoop(t *testing.T) {
 			model := &mocks.MockModel{}
 			model.Responses = tt.iterations
 			tools := []loop.Tool{loop.NewEchoTool()}
-			l := loop.New(model, tools, "", "")
+			l := loop.New(model, tools, "Initial prompt", "System prompt", nil, nil)
 			l.MaxLoopIterations = tt.maxIterations
 
-			if err := l.Loop(context.Background(), "", func(i []loop.Iteration) string {
-				return ""
-			}, func(req loop.ToolRequest, res *loop.ToolResponse) error {
-				return nil
-			}); (err != nil) != tt.wantError {
+			if err := l.Loop(context.Background(), ""); (err != nil) != tt.wantError {
 				t.Fatalf("Loop failed: %v", err)
 			}
 

@@ -68,7 +68,10 @@ func (a *Loop) Loop(ctx context.Context, sysPrompt string) error {
 	for i := range a.MaxLoopIterations {
 		iteration = Iteration{Count: i + 1}
 
-		a.InitialPrompt.Context = a.ContextBuilder.BuildContext(a)
+		if a.ContextBuilder != nil {
+			a.InitialPrompt.Context = a.ContextBuilder.BuildContext(a)
+		}
+
 		request := ai.AIRequest{
 			Prompt: a.InitialPrompt,
 		}
@@ -99,8 +102,10 @@ func (a *Loop) Loop(ctx context.Context, sysPrompt string) error {
 			return err
 		}
 
-		if err := a.PreProcessToolRes.Process(*toolReq, toolRes); err != nil {
-			return fmt.Errorf("%w: %v", ErrPreProcessToolRes, err)
+		if a.PreProcessToolRes != nil {
+			if err := a.PreProcessToolRes.Process(*toolReq, toolRes); err != nil {
+				return fmt.Errorf("%w: %v", ErrPreProcessToolRes, err)
+			}
 		}
 
 		iteration.ToolResp = toolRes
