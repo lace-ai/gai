@@ -14,7 +14,7 @@ const (
 )
 
 type ContextBuilder interface {
-	BuildContext(conv aicontext.Conversation) string
+	BuildContext(conv aicontext.Conversation) (string, error)
 }
 type ToolResPreProcessor interface {
 	Process(req ToolRequest, res *ToolResponse) error
@@ -69,7 +69,11 @@ func (a *Loop) Loop(ctx context.Context) error {
 		iteration = Iteration{Count: i + 1}
 
 		if a.ContextBuilder != nil {
-			a.InitialPrompt.Context = a.ContextBuilder.BuildContext(a)
+			context, err := a.ContextBuilder.BuildContext(a)
+			if err != nil {
+				return fmt.Errorf("%w: %v", ErrBuildContext, err)
+			}
+			a.InitialPrompt.Context = context
 		}
 
 		request := ai.AIRequest{

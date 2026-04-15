@@ -14,4 +14,5 @@ var (
 	ErrPromptMissing      = errors.New("prompt file is missing")
 	ErrArgsDecodeTarget   = errors.New("tool args decode target is nil")
 	ErrPreProcessToolRes  = errors.New("pre-process tool response error")
+	ErrBuildContext       = errors.New("build context error")
 )
