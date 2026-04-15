@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"agent-backend/gai/ai"
+	aicontext "agent-backend/gai/context"
 )
 
 type IterationType string
@@ -72,4 +73,50 @@ func BuildIterationsString(builder *strings.Builder, iterations []Iteration) {
 	for _, i := range iterations {
 		builder.WriteString(i.String())
 	}
+}
+
+func (i *Iteration) Massages() []aicontext.Message {
+	if i == nil {
+		return nil
+	}
+	var msgs []aicontext.Message
+
+	if i.Count == 1 {
+		msgs = append(msgs, aicontext.Message{
+			Role:    aicontext.RoleUser,
+			Content: aicontext.NewTextContent("System prompt: " + i.request.Prompt.Prompt),
+		})
+	}
+
+	switch i.Type {
+	case IterationTypeToolCall, IterationTypeToolError:
+		if i.ToolReq != nil {
+			msgs = append(msgs, aicontext.Message{
+				Role:    aicontext.RoleAssistant,
+				Content: aicontext.NewToolCallContent(i.ToolReq.ID, string(i.ToolReq.Args)),
+			})
+		}
+		if i.ToolResp != nil {
+			if i.ToolResp.Err != nil {
+				msgs = append(msgs, aicontext.Message{
+					Role:    aicontext.RoleTool,
+					Content: aicontext.NewTextContent("Error: " + i.ToolResp.Err.Error()),
+				})
+			} else {
+				msgs = append(msgs, aicontext.Message{
+					Role:    aicontext.RoleTool,
+					Content: aicontext.NewToolResultContent(i.ToolReq.ID, i.ToolResp.Text, false, ""),
+				})
+			}
+		}
+	case IterationTypeResponse:
+		if i.response != nil {
+			msgs = append(msgs, aicontext.Message{
+				Role:    aicontext.RoleAssistant,
+				Content: aicontext.NewTextContent(i.response.Text),
+			})
+		}
+	}
+
+	return msgs
 }

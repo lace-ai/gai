@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"agent-backend/gai/ai"
+	aicontext "agent-backend/gai/context"
 )
 
 const (
@@ -13,7 +14,7 @@ const (
 )
 
 type ContextBuilder interface {
-	BuildContext(iterations []Iteration) string
+	BuildContext(conv aicontext.Conversation) string
 }
 type ToolResPreProcessor interface {
 	Process(req ToolRequest, res *ToolResponse) error
@@ -67,7 +68,7 @@ func (a *Loop) Loop(ctx context.Context, sysPrompt string) error {
 	for i := range a.MaxLoopIterations {
 		iteration = Iteration{Count: i + 1}
 
-		a.InitialPrompt.Context = a.ContextBuilder.BuildContext(a.Iterations)
+		a.InitialPrompt.Context = a.ContextBuilder.BuildContext(a)
 		request := ai.AIRequest{
 			Prompt: a.InitialPrompt,
 		}
@@ -82,12 +83,12 @@ func (a *Loop) Loop(ctx context.Context, sysPrompt string) error {
 
 		toolReq, tCall := DetectToolCall(res.Text)
 		if !tCall {
-			iteration.IterType = IterationTypeResponse
+			iteration.Type = IterationTypeResponse
 			a.Iterations = append(a.Iterations, iteration)
 			return nil
 		}
 
-		iteration.IterType = IterationTypeToolCall
+		iteration.Type = IterationTypeToolCall
 
 		if toolReq == nil {
 			return ErrToolCallMalformed
@@ -109,4 +110,14 @@ func (a *Loop) Loop(ctx context.Context, sysPrompt string) error {
 	}
 
 	return fmt.Errorf("%w: limit=%d", ErrMaxIterations, a.MaxLoopIterations)
+}
+
+func (a *Loop) Messages() []aicontext.Message {
+	var msgs []aicontext.Message
+
+	for _, i := range a.Iterations {
+		msgs = append(msgs, i.Massages()...)
+	}
+
+	return msgs
 }
