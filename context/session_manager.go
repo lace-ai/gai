@@ -1,6 +1,8 @@
 package context
 
-import "strings"
+import (
+	"strings"
+)
 
 type SessionManager struct {
 	store SessionStore
@@ -14,13 +16,19 @@ func NewSessionManager(store SessionStore, id int) *SessionManager {
 	}
 }
 
-func (s *SessionManager) BuildContext(iterations []Message) string {
+func (s *SessionManager) BuildContext(conv Conversation) (string, error) {
 	var builder strings.Builder
 
-	for _, msg := range iterations {
+	messages, err := s.store.GetMessages(s.id, 5, 0)
+	if err != nil {
+		return "", err
+	}
+	RenderMessages(messages, &builder)
+
+	for _, msg := range conv.Messages() {
 		builder.WriteString(msg.Content.String())
 		builder.WriteString("\n")
 	}
 
-	return builder.String()
+	return builder.String(), nil
 }
