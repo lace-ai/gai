@@ -47,6 +47,10 @@ func (c Content) String() string {
 	return builder.String()
 }
 
+func (m Message) Type() string {
+	return "message"
+}
+
 func IsValidRole(role Role) bool {
 	switch role {
 	case RoleSystem, RoleUser, RoleAssistant, RoleTool:
