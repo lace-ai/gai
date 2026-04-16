@@ -16,7 +16,7 @@ func TestAIRequestCombinedPrompt(t *testing.T) {
 	}
 
 	got := req.Prompt.CombinedPrompt()
-	want := "system\n\nuser prompt\n\n<conversation>...</conversation>"
+	want := "system\n\n<conversation>...</conversation>user prompt\n\n"
 	if got != want {
 		t.Fatalf("unexpected combined prompt:\nwant: %q\ngot:  %q", want, got)
 	}
