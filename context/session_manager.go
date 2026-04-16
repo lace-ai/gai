@@ -24,11 +24,7 @@ func (s *SessionManager) BuildContext(conv Conversation) (string, error) {
 		return "", err
 	}
 	RenderMessages(messages, &builder)
-
-	for _, msg := range conv.Messages() {
-		builder.WriteString(msg.Content.String())
-		builder.WriteString("\n")
-	}
+	RenderMessages(conv.Messages(), &builder)
 
 	return builder.String(), nil
 }
