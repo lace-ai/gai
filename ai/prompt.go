@@ -18,12 +18,12 @@ func (p Prompt) CombinedPrompt() string {
 		res.WriteString(systemPrompt)
 		res.WriteString("\n\n")
 	}
+	if context != "" {
+		res.WriteString(context)
+	}
 	if prompt != "" {
 		res.WriteString(prompt)
 		res.WriteString("\n\n")
-	}
-	if context != "" {
-		res.WriteString(context)
 	}
 
 	return res.String()
