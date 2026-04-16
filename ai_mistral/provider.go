@@ -1,17 +1,27 @@
-package gemini
+package mistral
 
 import (
+	"net/http"
 	"strings"
+	"time"
 
 	"agent-backend/gai/ai"
 )
 
 type Provider struct {
-	apiKey string
+	apiKey     string
+	baseURL    string
+	httpClient *http.Client
 }
 
 func New(apiKey string) *Provider {
-	return &Provider{apiKey: apiKey}
+	return &Provider{
+		apiKey:  apiKey,
+		baseURL: "https://api.mistral.ai",
+		httpClient: &http.Client{
+			Timeout: 60 * time.Second,
+		},
+	}
 }
 
 func (p *Provider) Validate() error {
@@ -25,7 +35,7 @@ func (p *Provider) Validate() error {
 }
 
 func (p *Provider) Name() string {
-	return "gemini"
+	return "mistral"
 }
 
 func (p *Provider) Model(name string) (ai.Model, error) {
@@ -40,7 +50,5 @@ func (p *Provider) Model(name string) (ai.Model, error) {
 }
 
 func (p *Provider) ListModels() ([]string, error) {
-	out := make([]string, len(models))
-	copy(out, models)
-	return out, nil
+	return models, nil
 }

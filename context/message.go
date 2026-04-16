@@ -1,4 +1,4 @@
-package memory
+package context
 
 import (
 	"strconv"
@@ -19,7 +19,7 @@ type Message struct {
 	ID        int
 	SessionID int
 	CreatedAt time.Time
-	Content   string
+	Content   Content
 	Role      Role
 }
 
@@ -39,7 +39,7 @@ func RenderMessages(messages []Message, builder *strings.Builder) {
 		builder.WriteString(" key=")
 		builder.WriteString(strconv.Itoa(i))
 		builder.WriteString(">\n")
-		builder.WriteString(m.Content)
+		builder.WriteString(m.Content.String())
 		builder.WriteString("\n")
 		builder.WriteString("</")
 		builder.WriteString(string(m.Role))

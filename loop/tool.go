@@ -18,12 +18,29 @@ type ToolArgs struct {
 
 type ToolResponse struct {
 	Text string
+	Err  error
 }
 
 type ToolRequest struct {
 	ID   string          `json:"id"`
 	Type string          `json:"type"`
 	Args json.RawMessage `json:"arguments"`
+}
+
+func (r *ToolRequest) Validate() error {
+	if r == nil {
+		return fmt.Errorf("%w: request is nil", ErrToolReqValidation)
+	}
+	if strings.TrimSpace(r.ID) == "" {
+		return fmt.Errorf("%w: ID is empty", ErrToolReqValidation)
+	}
+	if strings.TrimSpace(r.Type) == "" {
+		return fmt.Errorf("%w: Type is empty", ErrToolReqValidation)
+	}
+	if strings.TrimSpace(r.Type) != "function" {
+		return fmt.Errorf(`%w: Type has to be "function", got=%v`, ErrToolReqValidation, r.Type)
+	}
+	return nil
 }
 
 type Tool interface {
@@ -33,7 +50,7 @@ type Tool interface {
 	Function(req *ToolRequest) (*ToolResponse, error)
 }
 
-func detectToolCall(s string) (*ToolRequest, bool) {
+func DetectToolCall(s string) (*ToolRequest, bool) {
 	payload := strings.TrimSpace(s)
 	if payload == "" {
 		return nil, false
@@ -44,40 +61,17 @@ func detectToolCall(s string) (*ToolRequest, bool) {
 
 	var tr ToolRequest
 	if err := json.Unmarshal([]byte(payload), &tr); err != nil {
-		return nil, true
+		return nil, false
+	}
+	if err := tr.Validate(); err != nil {
+		return nil, false
 	}
 	return &tr, true
 }
 
-func (r *ToolRequest) ArgsString() string {
-	if r == nil {
-		return ""
-	}
-	if len(r.Args) == 0 {
-		return ""
-	}
-	var s string
-	if err := json.Unmarshal(r.Args, &s); err == nil {
-		return s
-	}
-	return string(r.Args)
-}
-
-func callTool(req *ToolRequest, tools []Tool) (*ToolResponse, error) {
-	if req == nil {
-		return nil, ErrInvalidToolRequest
-	}
-	if strings.TrimSpace(req.Type) == "" {
-		return nil, ErrToolCallType
-	}
-	if req.Type != "function" {
-		return nil, fmt.Errorf("%w: got=%s", ErrToolCallType, req.Type)
-	}
-	if strings.TrimSpace(req.ID) == "" {
-		return nil, ErrToolCallID
-	}
-	if len(req.Args) == 0 {
-		return nil, ErrToolArgsMissing
+func CallTool(req *ToolRequest, tools []Tool) (*ToolResponse, error) {
+	if err := req.Validate(); err != nil {
+		return nil, err
 	}
 
 	for _, tool := range tools {
@@ -90,17 +84,14 @@ func callTool(req *ToolRequest, tools []Tool) (*ToolResponse, error) {
 }
 
 func DecodeToolArgs[T any](req *ToolRequest, target *T) error {
-	if req == nil {
-		return ErrInvalidToolRequest
+	if err := req.Validate(); err != nil {
+		return err
 	}
 	if target == nil {
 		return ErrArgsDecodeTarget
 	}
-	if len(req.Args) == 0 {
-		return ErrToolArgsMissing
-	}
 	if err := json.Unmarshal(req.Args, target); err != nil {
-		return fmt.Errorf("%w: %v", ErrToolCallMalformed, err)
+		return fmt.Errorf("%w: %w", ErrToolCallMalformed, err)
 	}
 	return nil
 }
@@ -133,5 +124,22 @@ func RenderToolSignatures(tools []Tool) string {
 		builder.WriteString("</signature>")
 		builder.WriteString("\n</tool>")
 	}
+	return builder.String()
+}
+
+func (r *ToolRequest) String() string {
+	var builder strings.Builder
+	builder.WriteString("id: ")
+	builder.WriteString(r.ID)
+	builder.WriteString(",type: ")
+	builder.WriteString(r.Type)
+	builder.WriteString(",arguments: ")
+	builder.Write(r.Args)
+	return builder.String()
+}
+
+func (r *ToolResponse) String() string {
+	var builder strings.Builder
+	builder.WriteString(r.Text)
 	return builder.String()
 }
