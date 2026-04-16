@@ -1,10 +1,9 @@
 package mocks
 
 import (
+	"agent-backend/gai/ai"
 	"fmt"
 	"strings"
-
-	"agent-backend/gai/ai"
 )
 
 type MockProvider struct {
@@ -17,7 +16,7 @@ func (p *MockProvider) Validate() error {
 		return ai.ErrProviderNotFound
 	}
 	if strings.TrimSpace(p.ProviderName) == "" {
-		return fmt.Errorf("%v: name is empty", ai.ErrProviderInvalid)
+		return fmt.Errorf("%w: name is empty", ai.ErrProviderInvalid)
 	}
 	return nil
 }

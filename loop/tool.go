@@ -91,7 +91,7 @@ func DecodeToolArgs[T any](req *ToolRequest, target *T) error {
 		return ErrArgsDecodeTarget
 	}
 	if err := json.Unmarshal(req.Args, target); err != nil {
-		return fmt.Errorf("%w: %v", ErrToolCallMalformed, err)
+		return fmt.Errorf("%w: %w", ErrToolCallMalformed, err)
 	}
 	return nil
 }

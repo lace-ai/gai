@@ -1,10 +1,9 @@
 package ai_test
 
 import (
-	"testing"
-
 	"agent-backend/gai/ai"
 	"agent-backend/gai/testutil/mocks"
+	"testing"
 )
 
 func TestModelRepository(t *testing.T) {

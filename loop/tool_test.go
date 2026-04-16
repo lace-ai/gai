@@ -1,11 +1,10 @@
 package loop_test
 
 import (
+	"agent-backend/gai/loop"
 	"encoding/json"
 	"reflect"
 	"testing"
-
-	"agent-backend/gai/loop"
 )
 
 func TestDetectToolCall(t *testing.T) {
@@ -19,7 +18,7 @@ func TestDetectToolCall(t *testing.T) {
 
 	validInput, err := json.Marshal(validReq)
 	if err != nil {
-		t.Fatalf("marshal sample request: %v", err)
+		t.Fatalf("marshal sample request: %w", err)
 	}
 
 	tests := []struct {
@@ -90,7 +89,7 @@ func TestDecodeToolArgs(t *testing.T) {
 
 	jsonArgs, err := json.Marshal(ValidArgs)
 	if err != nil {
-		t.Fatalf("marshal sample args: %v", err)
+		t.Fatalf("marshal sample args: %w", err)
 	}
 
 	req := loop.ToolRequest{

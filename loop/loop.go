@@ -1,10 +1,10 @@
 package loop
 
 import (
+	"agent-backend/gai/ai"
 	"context"
 	"fmt"
 
-	"agent-backend/gai/ai"
 	aicontext "agent-backend/gai/context"
 )
 
@@ -71,7 +71,7 @@ func (a *Loop) Loop(ctx context.Context) error {
 		if a.ContextBuilder != nil {
 			context, err := a.ContextBuilder.BuildContext(a)
 			if err != nil {
-				return fmt.Errorf("%w: %v", ErrBuildContext, err)
+				return fmt.Errorf("%w: %w", ErrBuildContext, err)
 			}
 			a.InitialPrompt.Context = context
 		}
@@ -108,7 +108,7 @@ func (a *Loop) Loop(ctx context.Context) error {
 
 		if a.PreProcessToolRes != nil {
 			if err := a.PreProcessToolRes.Process(*toolReq, toolRes); err != nil {
-				return fmt.Errorf("%w: %v", ErrPreProcessToolRes, err)
+				return fmt.Errorf("%w: %w", ErrPreProcessToolRes, err)
 			}
 		}
 
