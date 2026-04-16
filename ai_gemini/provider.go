@@ -40,5 +40,7 @@ func (p *Provider) Model(name string) (ai.Model, error) {
 }
 
 func (p *Provider) ListModels() ([]string, error) {
-	return models, nil
+	out := make([]string, len(models))
+	copy(out, models)
+	return out, nil
 }
