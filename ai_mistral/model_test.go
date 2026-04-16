@@ -1,17 +1,16 @@
 package mistral
 
 import (
-	"agent-backend/gai/ai"
 	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"agent-backend/gai/ai"
 )
 
 func TestModelGenerate(t *testing.T) {
-	t.Helper()
-
 	var gotAuth string
 	var gotReq chatCompletionRequest
 
@@ -25,7 +24,7 @@ func TestModelGenerate(t *testing.T) {
 
 		gotAuth = r.Header.Get("Authorization")
 		if err := json.NewDecoder(r.Body).Decode(&gotReq); err != nil {
-			t.Fatalf("decode request: %w", err)
+			t.Fatalf("decode request: %v", err)
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -38,7 +37,7 @@ func TestModelGenerate(t *testing.T) {
 
 	m, err := p.Model(MistralSmallLatest)
 	if err != nil {
-		t.Fatalf("Model error: %w", err)
+		t.Fatalf("Model error: %v", err)
 	}
 
 	res, err := m.Generate(context.Background(), ai.AIRequest{
@@ -46,7 +45,7 @@ func TestModelGenerate(t *testing.T) {
 		MaxTokens: 42,
 	})
 	if err != nil {
-		t.Fatalf("Generate error: %w", err)
+		t.Fatalf("Generate error: %v", err)
 	}
 
 	if gotAuth != "Bearer test-key" {
@@ -85,11 +84,11 @@ func TestModelGenerateNoChoices(t *testing.T) {
 
 	m, err := p.Model(MistralSmallLatest)
 	if err != nil {
-		t.Fatalf("Model error: %w", err)
+		t.Fatalf("Model error: %v", err)
 	}
 
 	_, err = m.Generate(context.Background(), ai.AIRequest{Prompt: ai.Prompt{Prompt: "hello"}})
 	if err != ErrNoChoices {
-		t.Fatalf("expected ErrNoChoices, got %w", err)
+		t.Fatalf("expected ErrNoChoices, got %v", err)
 	}
 }
