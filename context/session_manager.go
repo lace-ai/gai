@@ -24,6 +24,7 @@ func (s *SessionManager) BuildContext(conv Conversation) (string, error) {
 		return "", err
 	}
 	RenderMessages(messages, &builder)
+	builder.WriteString("\nCurrent Loop:\n")
 	RenderMessages(conv.Messages(), &builder)
 
 	return builder.String(), nil
