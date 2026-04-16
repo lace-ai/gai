@@ -7,7 +7,7 @@ const (
 	CodestralLatest     = "codestral-latest"
 )
 
-var modules = []string{
+var models = []string{
 	MistralSmallLatest,
 	MistralMediumLatest,
 	MistralLargeLatest,

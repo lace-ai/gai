@@ -7,7 +7,7 @@ const (
 	Gemini2_5FlashLite        = "gemini-2.5-flash-lite"
 )
 
-var modules = []string{
+var models = []string{
 	Gemini3FlashPreview,
 	Gemini2_5Flash,
 	Gemini3_1FlashLitePreview,

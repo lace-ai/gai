@@ -50,5 +50,5 @@ func (p *Provider) Model(name string) (ai.Model, error) {
 }
 
 func (p *Provider) ListModels() ([]string, error) {
-	return modules, nil
+	return models, nil
 }
