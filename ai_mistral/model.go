@@ -84,7 +84,8 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (*ai.AIResponse,
 	}
 	defer res.Body.Close()
 
-	resBody, err := io.ReadAll(res.Body)
+	const maxResponseBody = 1 << 20 // 10MB
+	resBody, err := io.ReadAll(io.LimitReader(res.Body, maxResponseBody))
 	if err != nil {
 		return nil, err
 	}
