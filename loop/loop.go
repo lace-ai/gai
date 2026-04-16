@@ -1,9 +1,10 @@
 package loop
 
 import (
-	"agent-backend/gai/ai"
 	"context"
 	"fmt"
+
+	"agent-backend/gai/ai"
 
 	aicontext "agent-backend/gai/context"
 )
@@ -125,7 +126,7 @@ func (a *Loop) Messages() []aicontext.Message {
 	var msgs []aicontext.Message
 
 	for _, i := range a.Iterations {
-		msgs = append(msgs, i.Massages()...)
+		msgs = append(msgs, i.Messages()...)
 	}
 
 	return msgs

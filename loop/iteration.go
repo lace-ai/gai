@@ -75,7 +75,7 @@ func BuildIterationsString(builder *strings.Builder, iterations []Iteration) {
 	}
 }
 
-func (i *Iteration) Massages() []aicontext.Message {
+func (i *Iteration) Messages() []aicontext.Message {
 	if i == nil {
 		return nil
 	}
