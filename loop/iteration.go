@@ -82,9 +82,15 @@ func (i *Iteration) Messages() []aicontext.Message {
 	var msgs []aicontext.Message
 
 	if i.Count == 1 {
+		if i.request == nil {
+			msgs = append(msgs, aicontext.Message{
+				Role:    aicontext.RoleUser,
+				Content: aicontext.NewTextContent(""),
+			})
+		}
 		msgs = append(msgs, aicontext.Message{
 			Role:    aicontext.RoleUser,
-			Content: aicontext.NewTextContent("System prompt: " + i.request.Prompt.Prompt),
+			Content: aicontext.NewTextContent(i.request.Prompt.Prompt),
 		})
 	}
 
@@ -96,7 +102,7 @@ func (i *Iteration) Messages() []aicontext.Message {
 				Content: aicontext.NewToolCallContent(i.ToolReq.ID, string(i.ToolReq.Args)),
 			})
 		}
-		if i.ToolResp != nil {
+		if i.ToolResp != nil && i.ToolReq != nil {
 			if i.ToolResp.Err != nil {
 				msgs = append(msgs, aicontext.Message{
 					Role:    aicontext.RoleTool,

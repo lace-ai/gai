@@ -3,6 +3,7 @@ package loop
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"agent-backend/gai/ai"
 
@@ -75,6 +76,10 @@ func (a *Loop) Loop(ctx context.Context) error {
 				return fmt.Errorf("%w: %w", ErrBuildContext, err)
 			}
 			a.InitialPrompt.Context = context
+		} else {
+			var builder strings.Builder
+			aicontext.RenderMessages(a.Messages(), &builder)
+			a.InitialPrompt.Context = builder.String()
 		}
 
 		request := ai.AIRequest{
