@@ -5,9 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"agent-backend/gai/ai"
-
-	aicontext "agent-backend/gai/context"
+	"github.com/HecoAI/gai/ai"
+	aicontext "github.com/HecoAI/gai/context"
 )
 
 const (

@@ -8,7 +8,7 @@ import (
 	"io"
 	"net/http"
 
-	"agent-backend/gai/ai"
+	"github.com/HecoAI/gai/ai"
 )
 
 type Model struct {

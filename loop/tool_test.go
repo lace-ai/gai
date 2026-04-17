@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"testing"
 
-	"agent-backend/gai/loop"
+	"github.com/HecoAI/gai/loop"
 )
 
 func TestDetectToolCall(t *testing.T) {

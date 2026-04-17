@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"agent-backend/gai/ai"
+	"github.com/HecoAI/gai/ai"
 )
 
 type MockModelResponse struct {

@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"agent-backend/gai/ai"
-	"agent-backend/gai/loop"
-	"agent-backend/gai/testutil/mocks"
+	"github.com/HecoAI/gai/ai"
+	"github.com/HecoAI/gai/loop"
+	"github.com/HecoAI/gai/testutil/mocks"
 )
 
 func TestLoop(t *testing.T) {

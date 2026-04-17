@@ -3,7 +3,7 @@ package ai_test
 import (
 	"testing"
 
-	"agent-backend/gai/ai"
+	"github.com/HecoAI/gai/ai"
 )
 
 func TestAIRequestCombinedPrompt(t *testing.T) {

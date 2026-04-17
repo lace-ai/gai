@@ -4,8 +4,8 @@ import (
 	"strconv"
 	"strings"
 
-	"agent-backend/gai/ai"
-	aicontext "agent-backend/gai/context"
+	"github.com/HecoAI/gai/ai"
+	aicontext "github.com/HecoAI/gai/context"
 )
 
 type IterationType string

@@ -1,9 +1,10 @@
 package ai_test
 
 import (
-	"agent-backend/gai/ai"
-	"agent-backend/gai/testutil/mocks"
 	"testing"
+
+	"github.com/HecoAI/gai/ai"
+	"github.com/HecoAI/gai/testutil/mocks"
 )
 
 func TestModelRepository(t *testing.T) {

@@ -3,7 +3,7 @@ package gemini
 import (
 	"strings"
 
-	"agent-backend/gai/ai"
+	"github.com/HecoAI/gai/ai"
 )
 
 type Provider struct {

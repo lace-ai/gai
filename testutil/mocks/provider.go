@@ -1,9 +1,10 @@
 package mocks
 
 import (
-	"agent-backend/gai/ai"
 	"fmt"
 	"strings"
+
+	"github.com/HecoAI/gai/ai"
 )
 
 type MockProvider struct {

@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"agent-backend/gai/ai"
+	"github.com/HecoAI/gai/ai"
 )
 
 func TestModelGenerate(t *testing.T) {
