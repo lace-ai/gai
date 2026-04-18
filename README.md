@@ -1,10 +1,21 @@
-# 🤖 GAI (Go Agent Interface or Go AI)
+<div>
+    <a href="https://github.com/HecoAI/gai">
+        <img alt="GAI Logo" src="/docs/GAI_thumbnail.png">
+    </a>
+</div>
 
-![GAI Logo](/docs/GAI_thumbnail.png)
-
-[![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/HecoAI/gai)](#)
-[![CI](https://img.shields.io/badge/ci-passing-brightgreen.svg)](#)
-[![License](https://img.shields.io/badge/license-LGPL-informational.svg)](#copyright-and-license)
+<p align="center">
+    <a href="https://github.com/HecoAI/gai/blob/main/go.mod">
+        <img alt="GitHub go.mod Go version" src="https://img.shields.io/github/go-mod/go-version/HecoAI/gai" style="margin: 0 6px;">
+    </a>
+    <a href="https://github.com/HecoAI/gai/actions">
+        <img alt="CI" src="https://img.shields.io/badge/ci-passing-brightgreen.svg" style="margin: 0 6px;">
+    </a>
+    <a href="https://github.com/HecoAI/gai/blob/main/LICENSE">
+        <img alt="License" src="https://img.shields.io/badge/license-LGPL-informational.svg" style="margin: 0 6px;">
+    </a>
+</p>
+<p></p>
 
 GAI is a flexible Go library for building agent-style applications on top of LLMs.
 It provides a generic interface for providers and models, prompt and context helpers, and a loop for agentic-calling workflows.
