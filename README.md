@@ -514,4 +514,4 @@ If you add a new provider or tool, document the new constructor, model names, an
 
 This library is licensed under the GNU LESSER GENERAL PUBLIC LICENSE v2.1. See [LICENSE](LICENSE) for details.
 
-Copyright (c) 2024 HecoAI. All rights reserved.
+Copyright (c) 2026 HecoAI. All rights reserved.
