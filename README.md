@@ -14,6 +14,7 @@
     <a href="https://github.com/HecoAI/gai/blob/main/LICENSE">
         <img alt="License" src="https://img.shields.io/badge/license-LGPL-informational.svg" style="margin: 0 6px;">
     </a>
+    <a href="https://pkg.go.dev/github.com/HecoAI/gai"><img src="https://pkg.go.dev/badge/github.com/HecoAI/gai.svg" alt="Go Reference"></a>
 </p>
 <p></p>
 
