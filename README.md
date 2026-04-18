@@ -4,7 +4,7 @@
 
 # 🤖 GAI (Go Agent Interface or Go AI)
 
-![GAI Logo](https://raw.githubusercontent.com/HecoAI/gai/main/docs/GAI_thumbnail.png)
+![GAI Logo](/docs/GAI_thumbnail.png)
 
 GAI is a flexible Go library for building agent-style applications on top of LLMs.
 It provides a generic interface for providers and models, prompt and context helpers, and a loop for agentic-calling workflows.
