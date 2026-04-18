@@ -144,6 +144,13 @@ Now you can use your custom provider just like the built-in ones
 
 To build an agent with tools, use the `loop` package:
 
+> [!TIP]
+> User a alias for the `context` package to avoid conflicts with `context` package from the standard library. For example:
+>
+> ```go
+> import aicontext "github.com/HecoAI/gai/context"
+> ```
+
 ```go
 agentLoop := loop.New(
     model, // the model you want to use
@@ -290,7 +297,7 @@ type Model interface {
 `AIRequest` currently contains:
 
 - `Prompt`
-- `MaxTokens`
+- `MaxTokens` maxtokens are ignored by some providers, and might be removed in future versions.
 
 `AIResponse` returns:
 
@@ -357,12 +364,12 @@ Messages have one of four roles:
 - `assistant`
 - `tool`
 
-Each message wraps a `Content` implementation such as text, tool calls, or tool results.
+Each message wraps a `Content` implementation such as text, tool calls, or tool results, (you can also implement your own).
 The renderer formats history as tagged blocks, which is what the loop uses when it builds context automatically.
 
 ### 💬 Conversation
 
-`Conversation` is a minimal interface:
+`Conversation` is a minimal interface used by the `SessionManager` to load and render message history:
 
 ```go
 type Conversation interface {
@@ -379,15 +386,17 @@ You provide your own store that can:
 - fetch sessions and messages
 - add one or many messages
 
-### 🧭 SessionManager
+### 🧭 SessionManager (WIP)
 
 `SessionManager` builds prompt context from stored history.
 It loads the last 5 messages for the configured session, renders them, and appends the current loop messages.
 
+> [!NOTE]
+> `NewSessionManager(store, id)` expects an integer session ID. If you want to start a new session, create one first.
+
 ### 📄 Prompt Files
 
 `LoadPromptFromFile` reads `.md` and `.txt` files, trims whitespace, and returns the prompt text.
-It rejects empty paths, unsupported extensions, and missing files.
 
 ## 🔄 Loop and Tools
 
@@ -433,19 +442,15 @@ Tool calls are expected to arrive as JSON with this shape:
 }
 ```
 
+> [!TIP]
+> Keep tool `Params()` aligned with the JSON fields your `Function(...)` decodes through `DecodeToolArgs`.
+
 ### 🧪 Helper Functions
 
 - `DetectToolCall` checks whether a model response looks like a tool call.
 - `CallTool` runs a tool by name.
 - `DecodeToolArgs` unmarshals tool arguments into a typed struct.
 - `RenderToolSignatures` formats tool metadata for prompting.
-
-### 🛤️ Example Tool Flow
-
-1. The model returns a JSON tool call.
-2. `DetectToolCall` parses it into a `ToolRequest`.
-3. `CallTool` matches the tool by name and executes it.
-4. The loop appends the tool result and asks the model again.
 
 ## ❗ Errors
 
@@ -463,6 +468,8 @@ Common exported errors include:
 - `mistral.ErrInvalidAPIKey`
 
 Handle provider and tool errors at the call site, especially when a model or session store is user-configured.
+
+To see all the errors, check the errors.go file in each package.
 
 ## 🧪 Development
 
@@ -483,7 +490,6 @@ go test ./context/...
 ## 📝 Notes
 
 - The `context` package name intentionally mirrors the domain it manages, but it is easy to confuse with `context.Context` from the standard library. Use an alias in imports. The context package is likely to be renamed before official `1.0` release.
-- `ModelRepository.ListModels()` returns provider-prefixed names and sorts the final list.
 - `SessionManager` currently uses a fixed history window of 5 messages.
 
 ## 🤝 Contributing
