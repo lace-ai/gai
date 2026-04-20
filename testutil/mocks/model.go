@@ -33,6 +33,27 @@ func (m *MockModel) Generate(ctx context.Context, req ai.AIRequest) (*ai.AIRespo
 	return &r.Res, r.Err
 }
 
+func (m *MockModel) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.Token {
+	out := make(chan ai.Token, 1)
+
+	go func() {
+		defer close(out)
+
+		res, err := m.Generate(ctx, req)
+		if err != nil {
+			out <- ai.Token{Type: ai.TokenTypeErr, Err: err}
+			return
+		}
+		if res == nil || res.Text == "" {
+			return
+		}
+
+		out <- ai.Token{Type: ai.TokenTypeText, Data: []byte(res.Text)}
+	}()
+
+	return out
+}
+
 func (m *MockModel) Close() error {
 	return nil
 }

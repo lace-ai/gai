@@ -3,6 +3,7 @@ package mistral
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -90,5 +91,73 @@ func TestModelGenerateNoChoices(t *testing.T) {
 	_, err = m.Generate(context.Background(), ai.AIRequest{Prompt: ai.Prompt{Prompt: "hello"}})
 	if err != ErrNoChoices {
 		t.Fatalf("expected ErrNoChoices, got %v", err)
+	}
+}
+
+func TestModelGenerateStream(t *testing.T) {
+	var gotReq chatCompletionRequest
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("expected POST, got %s", r.Method)
+		}
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotReq); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("response writer is not a flusher")
+		}
+
+		for _, chunk := range []string{
+			`data: {"choices":[{"delta":{"content":"hel"}}]}` + "\n\n",
+			`data: {"choices":[{"delta":{"content":"lo"}}]}` + "\n\n",
+			"data: [DONE]\n\n",
+		} {
+			if _, err := fmt.Fprint(w, chunk); err != nil {
+				t.Fatalf("write stream chunk: %v", err)
+			}
+			flusher.Flush()
+		}
+	}))
+	defer ts.Close()
+
+	p := New("test-key")
+	p.baseURL = ts.URL
+
+	m, err := p.Model(MistralSmallLatest)
+	if err != nil {
+		t.Fatalf("Model error: %v", err)
+	}
+
+	stream := m.GenerateStream(context.Background(), ai.AIRequest{
+		Prompt:    ai.Prompt{Prompt: "hello"},
+		MaxTokens: 55,
+	})
+
+	var gotText string
+	for tok := range stream {
+		if tok.Err != nil {
+			t.Fatalf("unexpected stream error: %v", tok.Err)
+		}
+		if tok.Type != ai.TokenTypeText {
+			t.Fatalf("unexpected token type: %s", tok.Type)
+		}
+		gotText += tok.String()
+	}
+
+	if !gotReq.Stream {
+		t.Fatalf("expected stream=true in payload")
+	}
+	if gotReq.MaxTokens == nil || *gotReq.MaxTokens != 55 {
+		t.Fatalf("expected max_tokens=55, got %+v", gotReq.MaxTokens)
+	}
+	if gotText != "hello" {
+		t.Fatalf("unexpected streamed text: %q", gotText)
 	}
 }
