@@ -37,7 +37,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 
 		client, err := m.getClient(ctx)
 		if err != nil {
-			out <- ai.Token{Err: err, Type: ai.TokenTypeErr}
+			out <- ai.Token{Err: err, Type: ai.TokenTypeErr, Text: err.Error()}
 			return
 		}
 
@@ -52,7 +52,8 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 
 		for resp, err := range client.Models.GenerateContentStream(ctx, m.name, contents, config) {
 			if err != nil {
-				out <- ai.Token{Err: fmt.Errorf("error generating content stream: %w", err), Type: ai.TokenTypeErr}
+				streamErr := fmt.Errorf("error generating content stream: %w", err)
+				out <- ai.Token{Err: streamErr, Type: ai.TokenTypeErr, Text: streamErr.Error()}
 				return
 			}
 
@@ -65,6 +66,13 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 					continue
 				}
 
+				rawPart, err := json.Marshal(part)
+				if err != nil {
+					encodeErr := fmt.Errorf("error encoding part: %w", err)
+					out <- ai.Token{Err: encodeErr, Type: ai.TokenTypeErr, Text: encodeErr.Error()}
+					return
+				}
+
 				switch {
 				case part.Text != "":
 					tokenType := ai.TokenTypeText
@@ -73,27 +81,32 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 					}
 					out <- ai.Token{
 						Type: tokenType,
-						Data: []byte(part.Text),
+						Data: rawPart,
+						Text: part.Text,
 					}
 				case part.ToolCall != nil:
-					toolCall, err := json.Marshal(part.ToolCall)
+					toolCall, err := mapServerToolCall(part.ToolCall)
 					if err != nil {
-						out <- ai.Token{Err: fmt.Errorf("error encoding tool call: %w", err), Type: ai.TokenTypeErr}
+						mapErr := fmt.Errorf("error mapping tool call: %w", err)
+						out <- ai.Token{Err: mapErr, Type: ai.TokenTypeErr, Text: mapErr.Error()}
 						return
 					}
 					out <- ai.Token{
-						Type: ai.TokenTypeToolCall,
-						Data: toolCall,
+						Type:     ai.TokenTypeToolCall,
+						Data:     rawPart,
+						ToolCall: toolCall,
 					}
 				case part.FunctionCall != nil:
-					functionCall, err := json.Marshal(part.FunctionCall)
+					toolCall, err := mapFunctionCall(part.FunctionCall)
 					if err != nil {
-						out <- ai.Token{Err: fmt.Errorf("error encoding function call: %w", err), Type: ai.TokenTypeErr}
+						mapErr := fmt.Errorf("error mapping function call: %w", err)
+						out <- ai.Token{Err: mapErr, Type: ai.TokenTypeErr, Text: mapErr.Error()}
 						return
 					}
 					out <- ai.Token{
-						Type: ai.TokenTypeToolCall,
-						Data: functionCall,
+						Type:     ai.TokenTypeToolCall,
+						Data:     rawPart,
+						ToolCall: toolCall,
 					}
 				}
 			}
@@ -124,6 +137,45 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (*ai.AIResponse,
 		InputTokens:  int(result.UsageMetadata.PromptTokenCount),
 		OutputTokens: int(result.UsageMetadata.CandidatesTokenCount),
 	}, nil
+}
+
+func mapServerToolCall(toolCall *genai.ToolCall) (*ai.ToolCall, error) {
+	args, err := marshalArgs(toolCall.Args)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ai.ToolCall{
+		ID:   toolCall.ID,
+		Name: string(toolCall.ToolType),
+		Args: args,
+	}, nil
+}
+
+func mapFunctionCall(functionCall *genai.FunctionCall) (*ai.ToolCall, error) {
+	args, err := marshalArgs(functionCall.Args)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ai.ToolCall{
+		ID:   functionCall.ID,
+		Name: functionCall.Name,
+		Args: args,
+	}, nil
+}
+
+func marshalArgs(args map[string]any) (json.RawMessage, error) {
+	if args == nil {
+		return nil, nil
+	}
+
+	raw, err := json.Marshal(args)
+	if err != nil {
+		return nil, err
+	}
+
+	return json.RawMessage(raw), nil
 }
 
 func (m *Model) getClient(ctx context.Context) (*genai.Client, error) {
