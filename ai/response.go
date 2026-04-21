@@ -1,5 +1,7 @@
 package ai
 
+import "encoding/json"
+
 type AIResponse struct {
 	Text         string
 	InputTokens  int
@@ -18,7 +20,16 @@ var (
 type Token struct {
 	Type TokenType
 	Data []byte
-	Err  error
+
+	ToolCall *ToolCall
+	Text     string
+	Err      error
+}
+
+type ToolCall struct {
+	ID   string
+	Name string
+	Args json.RawMessage
 }
 
 func (t Token) String() string {
