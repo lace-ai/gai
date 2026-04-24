@@ -141,15 +141,24 @@ func (i *Iteration) CurrentPart() *IterationPart {
 }
 
 func (i *Iteration) AppendToken(t ai.Token) {
-	last := &i.Parts[len(i.Parts)-1]
+	text := t.Text
+	if text == "" && len(t.Data) > 0 {
+		text = string(t.Data)
+	}
+
+	var last *IterationPart
+	if len(i.Parts) > 0 {
+		last = &i.Parts[len(i.Parts)-1]
+	}
+
 	switch t.Type {
 	case ai.TokenTypeText:
-		if last.Type == IterationTypeResponse {
+		if last != nil && last.Type == IterationTypeResponse {
 			last.response.AppendToken(t)
 		} else {
 			i.Parts = append(i.Parts, IterationPart{
 				Type:     IterationTypeResponse,
-				response: &ai.AIResponse{Text: t.Text, OutputTokens: t.TokenUsage},
+				response: &ai.AIResponse{Text: text, OutputTokens: t.TokenUsage},
 			})
 		}
 	case ai.TokenTypeErr:
@@ -160,12 +169,12 @@ func (i *Iteration) AppendToken(t ai.Token) {
 			},
 		})
 	case ai.TokenTypeTought:
-		if last.Type == IterationTypeResponse {
+		if last != nil && last.Type == IterationTypeResponse {
 			last.response.AppendToken(t)
 		} else {
 			i.Parts = append(i.Parts, IterationPart{
 				Type:     IterationTypeResponse,
-				response: &ai.AIResponse{Text: t.Text, OutputTokens: t.TokenUsage},
+				response: &ai.AIResponse{Text: text, OutputTokens: t.TokenUsage},
 			})
 		}
 	case ai.TokenTypeToolCall:

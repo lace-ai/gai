@@ -65,6 +65,8 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan error) {
 	tokenCh := make(chan ai.Token)
 	if err := a.Validate(); err != nil {
 		errCh <- err
+		close(errCh)
+		close(tokenCh)
 		return tokenCh, errCh
 	}
 
@@ -75,6 +77,7 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan error) {
 		var iteration Iteration
 		for i := range a.MaxLoopIterations {
 			iteration = Iteration{Count: i + 1}
+			toolCalls := 0
 
 			if a.ContextBuilder != nil {
 				context, err := a.ContextBuilder.BuildContext(a)
@@ -95,44 +98,43 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan error) {
 			iteration.request = &request
 
 			tokens := a.Model.GenerateStream(ctx, request)
+
 			wg := sync.WaitGroup{}
 			for t := range tokens {
 				iteration.AppendToken(t)
+				tokenCh <- t
 
-				switch t.Type {
-				case ai.TokenTypeErr:
-					errCh <- t.Err
-				case ai.TokenTypeText:
-					tokenCh <- t
-				case ai.TokenTypeTought:
-					tokenCh <- t
-				case ai.TokenTypeToolCall:
-					part := iteration.CurrentPart()
-					tokenCh <- t
+				if t.Type == ai.TokenTypeToolCall {
+					toolReq := t.ToolCall
+					partIdx := len(iteration.Parts) - 1
+
+					toolCalls++
+
 					wg.Go(func() {
-						res, err := CallTool(t.ToolCall, a.Tools)
-						if err != nil {
-							errCh <- err
-							return
-						}
+						res := CallTool(toolReq, a.Tools)
 						if a.PreProcessToolRes != nil {
-							if err := a.PreProcessToolRes.Process(*t.ToolCall, res); err != nil {
-								errCh <- err
-								return
+							if err := a.PreProcessToolRes.Process(*toolReq, res); err != nil {
+								res.Err = err
 							}
 						}
-						part.ToolResp = res
+
+						iteration.Parts[partIdx].ToolResp = res
 					})
 				}
 			}
+
 			wg.Wait()
+
 			a.Iterations = append(a.Iterations, iteration)
+			if toolCalls == 0 {
+				return
+			}
 		}
 
 		errCh <- fmt.Errorf("%w: limit=%d", ErrMaxIterations, a.MaxLoopIterations)
 	}()
 
-	return nil, nil
+	return tokenCh, errCh
 }
 
 func (a *Loop) Messages() []aicontext.Message {
