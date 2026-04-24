@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/HecoAI/gai/ai"
 	aicontext "github.com/HecoAI/gai/context"
@@ -11,14 +12,13 @@ import (
 
 const (
 	defaultMaxLoopIterations = 8
-	defaultMaxMessages       = 100
 )
 
 type ContextBuilder interface {
 	BuildContext(conv aicontext.Conversation) (string, error)
 }
 type ToolResPreProcessor interface {
-	Process(req ToolRequest, res *ToolResponse) error
+	Process(req ai.ToolCall, res *ToolResponse) error
 }
 
 type Loop struct {
@@ -60,70 +60,79 @@ func New(model ai.Model, tools []Tool, initialPrompt string, sysPrompt string, c
 	return agent
 }
 
-func (a *Loop) Loop(ctx context.Context) error {
+func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan error) {
+	errCh := make(chan error, 1)
+	tokenCh := make(chan ai.Token)
 	if err := a.Validate(); err != nil {
-		return err
+		errCh <- err
+		return tokenCh, errCh
 	}
 
-	var iteration Iteration
-	for i := range a.MaxLoopIterations {
-		iteration = Iteration{Count: i + 1}
+	go func() {
+		defer close(errCh)
+		defer close(tokenCh)
 
-		if a.ContextBuilder != nil {
-			context, err := a.ContextBuilder.BuildContext(a)
-			if err != nil {
-				return fmt.Errorf("%w: %w", ErrBuildContext, err)
+		var iteration Iteration
+		for i := range a.MaxLoopIterations {
+			iteration = Iteration{Count: i + 1}
+
+			if a.ContextBuilder != nil {
+				context, err := a.ContextBuilder.BuildContext(a)
+				if err != nil {
+					errCh <- err
+					return
+				}
+				a.InitialPrompt.Context = context
+			} else {
+				var builder strings.Builder
+				aicontext.RenderMessages(a.Messages(), &builder)
+				a.InitialPrompt.Context = builder.String()
 			}
-			a.InitialPrompt.Context = context
-		} else {
-			var builder strings.Builder
-			aicontext.RenderMessages(a.Messages(), &builder)
-			a.InitialPrompt.Context = builder.String()
-		}
 
-		request := ai.AIRequest{
-			Prompt: a.InitialPrompt,
-		}
-		iteration.request = &request
+			request := ai.AIRequest{
+				Prompt: a.InitialPrompt,
+			}
+			iteration.request = &request
 
-		res, err := a.Model.Generate(ctx, request)
-		if err != nil {
-			return err
-		}
+			tokens := a.Model.GenerateStream(ctx, request)
+			wg := sync.WaitGroup{}
+			for t := range tokens {
+				iteration.AppendToken(t)
 
-		iteration.response = res
-
-		toolReq, tCall := DetectToolCall(res.Text)
-		if !tCall {
-			iteration.Type = IterationTypeResponse
+				switch t.Type {
+				case ai.TokenTypeErr:
+					errCh <- t.Err
+				case ai.TokenTypeText:
+					tokenCh <- t
+				case ai.TokenTypeTought:
+					tokenCh <- t
+				case ai.TokenTypeToolCall:
+					part := iteration.CurrentPart()
+					tokenCh <- t
+					wg.Go(func() {
+						res, err := CallTool(t.ToolCall, a.Tools)
+						if err != nil {
+							errCh <- err
+							return
+						}
+						if a.PreProcessToolRes != nil {
+							if err := a.PreProcessToolRes.Process(*t.ToolCall, res); err != nil {
+								errCh <- err
+								return
+							}
+						}
+						part.ToolResp = res
+					})
+				}
+			}
+			wg.Wait()
 			a.Iterations = append(a.Iterations, iteration)
-			return nil
 		}
 
-		iteration.Type = IterationTypeToolCall
+		errCh <- fmt.Errorf("%w: limit=%d", ErrMaxIterations, a.MaxLoopIterations)
+	}()
 
-		if toolReq == nil {
-			return ErrToolCallMalformed
-		}
-
-		toolRes, err := CallTool(toolReq, a.Tools)
-		if err != nil {
-			return err
-		}
-
-		if a.PreProcessToolRes != nil {
-			if err := a.PreProcessToolRes.Process(*toolReq, toolRes); err != nil {
-				return fmt.Errorf("%w: %w", ErrPreProcessToolRes, err)
-			}
-		}
-
-		iteration.ToolResp = toolRes
-		iteration.ToolReq = toolReq
-
-		a.Iterations = append(a.Iterations, iteration)
-	}
-
-	return fmt.Errorf("%w: limit=%d", ErrMaxIterations, a.MaxLoopIterations)
+	return nil, nil
 }
 
 func (a *Loop) Messages() []aicontext.Message {

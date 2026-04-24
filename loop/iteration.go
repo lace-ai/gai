@@ -133,6 +133,13 @@ func (i *Iteration) Messages() []aicontext.Message {
 	return msgs
 }
 
+func (i *Iteration) CurrentPart() *IterationPart {
+	if len(i.Parts) == 0 {
+		return nil
+	}
+	return &i.Parts[len(i.Parts)-1]
+}
+
 func (i *Iteration) AppendToken(t ai.Token) {
 	last := &i.Parts[len(i.Parts)-1]
 	switch t.Type {
