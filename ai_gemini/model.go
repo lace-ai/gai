@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/HecoAI/gai/ai"
+	"github.com/lace-ai/gai/ai"
 	"google.golang.org/genai"
 )
 

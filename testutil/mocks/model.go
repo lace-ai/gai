@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/HecoAI/gai/ai"
+	"github.com/lace-ai/gai/ai"
 )
 
 type MockModelResponse struct {

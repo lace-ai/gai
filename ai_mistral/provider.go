@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/HecoAI/gai/ai"
+	"github.com/lace-ai/gai/ai"
 )
 
 type Provider struct {

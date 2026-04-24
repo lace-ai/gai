@@ -3,8 +3,8 @@ package ai_test
 import (
 	"testing"
 
-	"github.com/HecoAI/gai/ai"
-	"github.com/HecoAI/gai/testutil/mocks"
+	"github.com/lace-ai/gai/ai"
+	"github.com/lace-ai/gai/testutil/mocks"
 )
 
 func TestModelRepository(t *testing.T) {

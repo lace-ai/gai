@@ -3,7 +3,7 @@ package gemini
 import (
 	"strings"
 
-	"github.com/HecoAI/gai/ai"
+	"github.com/lace-ai/gai/ai"
 )
 
 type Provider struct {

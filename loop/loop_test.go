@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/HecoAI/gai/ai"
-	"github.com/HecoAI/gai/loop"
-	"github.com/HecoAI/gai/testutil/mocks"
+	"github.com/lace-ai/gai/ai"
+	"github.com/lace-ai/gai/loop"
+	"github.com/lace-ai/gai/testutil/mocks"
 )
 
 func TestLoop(t *testing.T) {
