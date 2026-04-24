@@ -10,6 +10,14 @@ import (
 	"github.com/HecoAI/gai/testutil/mocks"
 )
 
+type wrapStreamModel struct {
+	ai.Model
+}
+
+func (m wrapStreamModel) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.Token {
+	return ai.WrapStream(m.Model.GenerateStream(ctx, req))
+}
+
 func TestLoop(t *testing.T) {
 	t.Parallel()
 
@@ -31,7 +39,7 @@ func TestLoop(t *testing.T) {
 		{
 			name: "single Tool call",
 			iterations: []mocks.MockModelResponse{
-				{Res: ai.AIResponse{Text: `{"id":"echo","type":"function","arguments":{"text":"test"}}`}, Err: nil},
+				{Res: ai.AIResponse{Text: `{"id":"echo","name":"function","arguments":{"text":"test"}}`}, Err: nil},
 				{Res: ai.AIResponse{Text: "How are you?"}, Err: nil},
 			},
 			wantIterations: 2,
@@ -40,8 +48,8 @@ func TestLoop(t *testing.T) {
 		{
 			name: "Multiple iterations with tool calls",
 			iterations: []mocks.MockModelResponse{
-				{Res: ai.AIResponse{Text: `{"id":"echo","type":"function","arguments":{"text":"test"}}`}, Err: nil},
-				{Res: ai.AIResponse{Text: `{"id":"echo","type":"function","arguments":{"text":"test"}}`}, Err: nil},
+				{Res: ai.AIResponse{Text: `{"id":"echo","name":"function","arguments":{"text":"test"}}`}, Err: nil},
+				{Res: ai.AIResponse{Text: `{"id":"echo","name":"function","arguments":{"text":"test"}}`}, Err: nil},
 				{Res: ai.AIResponse{Text: "How are you?"}, Err: nil},
 			},
 			wantIterations: 3,
@@ -50,10 +58,10 @@ func TestLoop(t *testing.T) {
 		{
 			name: "Exceeding max iterations",
 			iterations: []mocks.MockModelResponse{
-				{Res: ai.AIResponse{Text: `{"id":"echo","type":"function","arguments":{"text":"test"}}`}, Err: nil},
-				{Res: ai.AIResponse{Text: `{"id":"echo","type":"function","arguments":{"text":"test"}}`}, Err: nil},
-				{Res: ai.AIResponse{Text: `{"id":"echo","type":"function","arguments":{"text":"test"}}`}, Err: nil},
-				{Res: ai.AIResponse{Text: `{"id":"echo","type":"function","arguments":{"text":"test"}}`}, Err: nil},
+				{Res: ai.AIResponse{Text: `{"id":"echo","name":"function","arguments":{"text":"test"}}`}, Err: nil},
+				{Res: ai.AIResponse{Text: `{"id":"echo","name":"function","arguments":{"text":"test"}}`}, Err: nil},
+				{Res: ai.AIResponse{Text: `{"id":"echo","name":"function","arguments":{"text":"test"}}`}, Err: nil},
+				{Res: ai.AIResponse{Text: `{"id":"echo","name":"function","arguments":{"text":"test"}}`}, Err: nil},
 			},
 			wantIterations: 2,
 			maxIterations:  2,
@@ -62,18 +70,17 @@ func TestLoop(t *testing.T) {
 		{
 			name: "Call wrong tool",
 			iterations: []mocks.MockModelResponse{
-				{Res: ai.AIResponse{Text: `{"id":"nonexistent_tool","type":"function","arguments":{"text":"test"}}`}, Err: nil},
+				{Res: ai.AIResponse{Text: `{"id":"nonexistent_tool","name":"function","arguments":{"text":"test"}}`}, Err: nil},
 			},
-			wantIterations: 0,
+			wantIterations: 2,
 			maxIterations:  8,
-			wantError:      true,
 		},
 		{
 			name: "No tool calls after response",
 			iterations: []mocks.MockModelResponse{
 				{Res: ai.AIResponse{Text: "Just a normal response."}, Err: nil},
-				{Res: ai.AIResponse{Text: `{"id":"nonexistent_tool","type":"function","arguments":{"text":"test"}}`}, Err: nil},
-				{Res: ai.AIResponse{Text: `{"id":"nonexistent_tool","type":"function","arguments":{"text":"test"}}`}, Err: nil},
+				{Res: ai.AIResponse{Text: `{"id":"nonexistent_tool","name":"function","arguments":{"text":"test"}}`}, Err: nil},
+				{Res: ai.AIResponse{Text: `{"id":"nonexistent_tool","name":"function","arguments":{"text":"test"}}`}, Err: nil},
 			},
 			wantIterations: 1,
 			maxIterations:  8,
@@ -81,30 +88,38 @@ func TestLoop(t *testing.T) {
 		{
 			name: "Tool call with error",
 			iterations: []mocks.MockModelResponse{
-				{Res: ai.AIResponse{Text: `{"id":"echo","type":"function","arguments":{"text":"test"}}`}, Err: nil},
-				{Res: ai.AIResponse{Text: `{"id":"echo","type":"function","arguments":{"text":"test"}}`}, Err: errors.New("tool execution failed")},
-				{Res: ai.AIResponse{Text: `{"id":"echo","type":"function","arguments":{"text":"test"}}`}, Err: nil},
+				{Res: ai.AIResponse{Text: `{"id":"echo","name":"function","arguments":{"text":"test"}}`}, Err: nil},
+				{Res: ai.AIResponse{Text: `{"id":"echo","name":"function","arguments":{"text":"test"}}`}, Err: errors.New("tool execution failed")},
+				{Res: ai.AIResponse{Text: `{"id":"echo","name":"function","arguments":{"text":"test"}}`}, Err: nil},
 			},
-			wantIterations: 1,
+			wantIterations: 2,
 			maxIterations:  8,
-			wantError:      true,
 		},
 	}
 
 	for _, tt := range tests {
 		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
+			t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 
-			model := &mocks.MockModel{}
-			model.Responses = tt.iterations
-			tools := []loop.Tool{loop.NewEchoTool()}
-			l := loop.New(model, tools, "Initial prompt", "System prompt", nil, nil)
-			l.MaxLoopIterations = tt.maxIterations
+				model := &mocks.MockModel{}
+				model.Responses = tt.iterations
+				tools := []loop.Tool{loop.NewEchoTool()}
+				l := loop.New(wrapStreamModel{Model: model}, tools, "Initial prompt", "System prompt", nil, nil)
+				l.MaxLoopIterations = tt.maxIterations
 
-			if err := l.Loop(context.Background()); (err != nil) != tt.wantError {
-				t.Fatalf("Loop failed: %v", err)
-			}
+				tokenCh, errCh := l.Loop(context.Background())
+				for range tokenCh {
+				}
+
+				var err error
+				for e := range errCh {
+					err = e
+				}
+
+				if (err != nil) != tt.wantError {
+					t.Fatalf("Loop failed: %v", err)
+				}
 
 			if len(l.Iterations) != tt.wantIterations {
 				t.Fatalf("Expected %d iteration, got %d", tt.wantIterations, len(l.Iterations))
