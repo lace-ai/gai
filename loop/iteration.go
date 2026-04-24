@@ -1,7 +1,6 @@
 package loop
 
 import (
-	"strconv"
 	"strings"
 
 	"github.com/HecoAI/gai/ai"
@@ -18,21 +17,24 @@ const (
 )
 
 type Iteration struct {
-	Count    int
+	Count   int
+	Parts   []IterationPart
+	request *ai.AIRequest
+}
+
+type IterationPart struct {
 	Type     IterationType
-	request  *ai.AIRequest
 	response *ai.AIResponse
-	ToolReq  *ToolRequest
+	ToolReq  *ai.ToolCall
 	ToolResp *ToolResponse
 }
 
-func (i *Iteration) String() string {
+func (i *IterationPart) String() string {
 	if i == nil {
 		return "<I>nil</I>"
 	}
 	var builder strings.Builder
-	builder.WriteString("<I c=")
-	builder.WriteString(strconv.Itoa(i.Count))
+	builder.WriteString("<I")
 	builder.WriteString(" t=")
 	builder.WriteString(string(i.Type))
 	builder.WriteString(">")
@@ -71,7 +73,9 @@ func (i *Iteration) String() string {
 
 func BuildIterationsString(builder *strings.Builder, iterations []Iteration) {
 	for _, i := range iterations {
-		builder.WriteString(i.String())
+		for _, part := range i.Parts {
+			builder.WriteString(part.String())
+		}
 	}
 }
 
@@ -94,35 +98,73 @@ func (i *Iteration) Messages() []aicontext.Message {
 		})
 	}
 
-	switch i.Type {
-	case IterationTypeToolCall, IterationTypeToolError:
-		if i.ToolReq != nil {
-			msgs = append(msgs, aicontext.Message{
-				Role:    aicontext.RoleAssistant,
-				Content: aicontext.NewToolCallContent(i.ToolReq.ID, string(i.ToolReq.Args)),
-			})
-		}
-		if i.ToolResp != nil && i.ToolReq != nil {
-			if i.ToolResp.Err != nil {
+	for _, part := range i.Parts {
+		switch part.Type {
+		case IterationTypeToolCall, IterationTypeToolError:
+			if part.ToolReq != nil {
 				msgs = append(msgs, aicontext.Message{
-					Role:    aicontext.RoleTool,
-					Content: aicontext.NewTextContent("Error: " + i.ToolResp.Err.Error()),
-				})
-			} else {
-				msgs = append(msgs, aicontext.Message{
-					Role:    aicontext.RoleTool,
-					Content: aicontext.NewToolResultContent(i.ToolReq.ID, i.ToolResp.Text, false, ""),
+					Role:    aicontext.RoleAssistant,
+					Content: aicontext.NewToolCallContent(part.ToolReq.ID, string(part.ToolReq.Args)),
 				})
 			}
-		}
-	case IterationTypeResponse:
-		if i.response != nil {
-			msgs = append(msgs, aicontext.Message{
-				Role:    aicontext.RoleAssistant,
-				Content: aicontext.NewTextContent(i.response.Text),
-			})
+			if part.ToolResp != nil && part.ToolReq != nil {
+				if part.ToolResp.Err != nil {
+					msgs = append(msgs, aicontext.Message{
+						Role:    aicontext.RoleTool,
+						Content: aicontext.NewTextContent("Error: " + part.ToolResp.Err.Error()),
+					})
+				} else {
+					msgs = append(msgs, aicontext.Message{
+						Role:    aicontext.RoleTool,
+						Content: aicontext.NewToolResultContent(part.ToolReq.ID, part.ToolResp.Text, false, ""),
+					})
+				}
+			}
+		case IterationTypeResponse:
+			if part.response != nil {
+				msgs = append(msgs, aicontext.Message{
+					Role:    aicontext.RoleAssistant,
+					Content: aicontext.NewTextContent(part.response.Text),
+				})
+			}
 		}
 	}
 
 	return msgs
+}
+
+func (i *Iteration) AppendToken(t ai.Token) {
+	last := &i.Parts[len(i.Parts)-1]
+	switch t.Type {
+	case ai.TokenTypeText:
+		if last.Type == IterationTypeResponse {
+			last.response.AppendToken(t)
+		} else {
+			i.Parts = append(i.Parts, IterationPart{
+				Type:     IterationTypeResponse,
+				response: &ai.AIResponse{Text: t.Text, OutputTokens: t.TokenUsage},
+			})
+		}
+	case ai.TokenTypeErr:
+		i.Parts = append(i.Parts, IterationPart{
+			Type: IterationTypeToolError,
+			ToolResp: &ToolResponse{
+				Err: t.Err,
+			},
+		})
+	case ai.TokenTypeTought:
+		if last.Type == IterationTypeResponse {
+			last.response.AppendToken(t)
+		} else {
+			i.Parts = append(i.Parts, IterationPart{
+				Type:     IterationTypeResponse,
+				response: &ai.AIResponse{Text: t.Text, OutputTokens: t.TokenUsage},
+			})
+		}
+	case ai.TokenTypeToolCall:
+		i.Parts = append(i.Parts, IterationPart{
+			Type:    IterationTypeToolCall,
+			ToolReq: t.ToolCall,
+		})
+	}
 }
