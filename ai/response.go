@@ -3,6 +3,7 @@ package ai
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 )
 
@@ -22,8 +23,9 @@ var (
 )
 
 type Token struct {
-	Type TokenType
-	Data []byte
+	Type       TokenType
+	Data       []byte
+	TokenUsage int
 
 	ToolCall *ToolCall
 	Text     string
@@ -38,6 +40,43 @@ type ToolCall struct {
 
 func (t Token) String() string {
 	return string(t.Data)
+}
+
+func (tc *ToolCall) Validate() error {
+	if strings.TrimSpace(tc.ID) == "" {
+		return fmt.Errorf("%w: id empty", ErrInvalidToolCall)
+	}
+	if tc.Name != "function" {
+		return fmt.Errorf("%w: name not function", ErrInvalidToolCall)
+	}
+	return nil
+}
+
+func (r *AIResponse) AppendToken(t Token) {
+	switch t.Type {
+	case TokenTypeText:
+		r.Text += t.Text
+	case TokenTypeTought:
+		r.Text += t.Text
+	case TokenTypeErr:
+		r.Text += string(t.Err.Error())
+	case TokenTypeToolCall:
+		r.Text += string(t.Data)
+	}
+
+	r.OutputTokens += t.TokenUsage
+}
+
+func (tc *ToolCall) String() string {
+	var builder strings.Builder
+	builder.WriteString("id: ")
+	builder.WriteString(tc.ID)
+	builder.WriteString(",type: ")
+	builder.WriteString(tc.Name)
+	builder.WriteString(",arguments: ")
+	builder.Write(tc.Args)
+
+	return builder.String()
 }
 
 // WrapStream detects a leading JSON object in the text stream.
