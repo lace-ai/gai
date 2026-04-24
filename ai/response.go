@@ -43,6 +43,9 @@ func (t Token) String() string {
 }
 
 func (tc *ToolCall) Validate() error {
+	if tc == nil {
+		return fmt.Errorf("%w: tool call nil", ErrInvalidToolCall)
+	}
 	if strings.TrimSpace(tc.ID) == "" {
 		return fmt.Errorf("%w: id empty", ErrInvalidToolCall)
 	}
