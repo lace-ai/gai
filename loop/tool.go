@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/HecoAI/gai/ai"
 )
 
 type ToolArg struct {
@@ -12,64 +14,19 @@ type ToolArg struct {
 	Description string `json:"description"`
 }
 
-type ToolArgs struct {
-	Args map[string]ToolArg `json:"arguments"`
-}
-
 type ToolResponse struct {
 	Text string
 	Err  error
-}
-
-type ToolRequest struct {
-	ID   string          `json:"id"`
-	Type string          `json:"type"`
-	Args json.RawMessage `json:"arguments"`
-}
-
-func (r *ToolRequest) Validate() error {
-	if r == nil {
-		return fmt.Errorf("%w: request is nil", ErrToolReqValidation)
-	}
-	if strings.TrimSpace(r.ID) == "" {
-		return fmt.Errorf("%w: ID is empty", ErrToolReqValidation)
-	}
-	if strings.TrimSpace(r.Type) == "" {
-		return fmt.Errorf("%w: Type is empty", ErrToolReqValidation)
-	}
-	if strings.TrimSpace(r.Type) != "function" {
-		return fmt.Errorf(`%w: Type has to be "function", got=%v`, ErrToolReqValidation, r.Type)
-	}
-	return nil
 }
 
 type Tool interface {
 	Name() string
 	Description() string
 	Params() string
-	Function(req *ToolRequest) (*ToolResponse, error)
+	Function(req *ai.ToolCall) (*ToolResponse, error)
 }
 
-func DetectToolCall(s string) (*ToolRequest, bool) {
-	payload := strings.TrimSpace(s)
-	if payload == "" {
-		return nil, false
-	}
-	if !strings.HasPrefix(payload, "{") {
-		return nil, false
-	}
-
-	var tr ToolRequest
-	if err := json.Unmarshal([]byte(payload), &tr); err != nil {
-		return nil, false
-	}
-	if err := tr.Validate(); err != nil {
-		return nil, false
-	}
-	return &tr, true
-}
-
-func CallTool(req *ToolRequest, tools []Tool) (*ToolResponse, error) {
+func CallTool(req *ai.ToolCall, tools []Tool) (*ToolResponse, error) {
 	if err := req.Validate(); err != nil {
 		return nil, err
 	}
@@ -83,7 +40,7 @@ func CallTool(req *ToolRequest, tools []Tool) (*ToolResponse, error) {
 	return nil, fmt.Errorf("%w: %s", ErrToolNotFound, req.ID)
 }
 
-func DecodeToolArgs[T any](req *ToolRequest, target *T) error {
+func DecodeToolArgs[T any](req *ai.ToolCall, target *T) error {
 	if err := req.Validate(); err != nil {
 		return err
 	}
@@ -127,14 +84,14 @@ func RenderToolSignatures(tools []Tool) string {
 	return builder.String()
 }
 
-func (r *ToolRequest) String() string {
+func ToolCallToString(tc ai.ToolCall) string {
 	var builder strings.Builder
 	builder.WriteString("id: ")
-	builder.WriteString(r.ID)
+	builder.WriteString(tc.ID)
 	builder.WriteString(",type: ")
-	builder.WriteString(r.Type)
+	builder.WriteString(tc.Name)
 	builder.WriteString(",arguments: ")
-	builder.Write(r.Args)
+	builder.Write(tc.Args)
 	return builder.String()
 }
 
