@@ -23,12 +23,12 @@ type Tool interface {
 	Name() string
 	Description() string
 	Params() string
-	Function(req *ai.ToolCall) (*ToolResponse, error)
+	Function(req *ai.ToolCall) *ToolResponse
 }
 
-func CallTool(req *ai.ToolCall, tools []Tool) (*ToolResponse, error) {
+func CallTool(req *ai.ToolCall, tools []Tool) *ToolResponse {
 	if err := req.Validate(); err != nil {
-		return nil, err
+		return &ToolResponse{Err: err}
 	}
 
 	for _, tool := range tools {
@@ -37,7 +37,7 @@ func CallTool(req *ai.ToolCall, tools []Tool) (*ToolResponse, error) {
 		}
 	}
 
-	return nil, fmt.Errorf("%w: %s", ErrToolNotFound, req.ID)
+	return &ToolResponse{Err: fmt.Errorf("%w: %s", ErrToolNotFound, req.ID)}
 }
 
 func DecodeToolArgs[T any](req *ai.ToolCall, target *T) error {

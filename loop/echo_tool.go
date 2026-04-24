@@ -28,15 +28,15 @@ type echoArgs struct {
 	Text string `json:"text"`
 }
 
-func (t *EchoTool) Function(req *ai.ToolCall) (*ToolResponse, error) {
+func (t *EchoTool) Function(req *ai.ToolCall) *ToolResponse {
 	var args echoArgs
 	if err := DecodeToolArgs(req, &args); err != nil {
-		return nil, err
+		return &ToolResponse{Err: err}
 	}
 
 	text := strings.TrimSpace(args.Text)
 	if text == "" {
 		text = "(empty)"
 	}
-	return &ToolResponse{Text: text}, nil
+	return &ToolResponse{Text: text}
 }
