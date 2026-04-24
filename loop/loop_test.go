@@ -99,27 +99,27 @@ func TestLoop(t *testing.T) {
 
 	for _, tt := range tests {
 		tt := tt
-			t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-				model := &mocks.MockModel{}
-				model.Responses = tt.iterations
-				tools := []loop.Tool{loop.NewEchoTool()}
-				l := loop.New(wrapStreamModel{Model: model}, tools, "Initial prompt", "System prompt", nil, nil)
-				l.MaxLoopIterations = tt.maxIterations
+			model := &mocks.MockModel{}
+			model.Responses = tt.iterations
+			tools := []loop.Tool{loop.NewEchoTool()}
+			l := loop.New(wrapStreamModel{Model: model}, tools, "Initial prompt", "System prompt", nil, nil)
+			l.MaxLoopIterations = tt.maxIterations
 
-				tokenCh, errCh := l.Loop(context.Background())
-				for range tokenCh {
-				}
+			tokenCh, errCh := l.Loop(context.Background())
+			for range tokenCh {
+			}
 
-				var err error
-				for e := range errCh {
-					err = e
-				}
+			var err error
+			for e := range errCh {
+				err = e
+			}
 
-				if (err != nil) != tt.wantError {
-					t.Fatalf("Loop failed: %v", err)
-				}
+			if (err != nil) != tt.wantError {
+				t.Fatalf("Loop failed: %v", err)
+			}
 
 			if len(l.Iterations) != tt.wantIterations {
 				t.Fatalf("Expected %d iteration, got %d", tt.wantIterations, len(l.Iterations))
