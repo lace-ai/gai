@@ -1,6 +1,10 @@
 package loop
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/HecoAI/gai/ai"
+)
 
 type EchoTool struct{}
 
@@ -24,7 +28,7 @@ type echoArgs struct {
 	Text string `json:"text"`
 }
 
-func (t *EchoTool) Function(req *ToolRequest) (*ToolResponse, error) {
+func (t *EchoTool) Function(req *ai.ToolCall) (*ToolResponse, error) {
 	var args echoArgs
 	if err := DecodeToolArgs(req, &args); err != nil {
 		return nil, err
