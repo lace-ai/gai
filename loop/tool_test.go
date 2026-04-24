@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/HecoAI/gai/loop"
+	"github.com/lace-ai/gai/loop"
 )
 
 func TestDetectToolCall(t *testing.T) {

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/HecoAI/gai/ai"
+	"github.com/lace-ai/gai/ai"
 )
 
 type MockProvider struct {
