@@ -186,7 +186,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 				return err
 			}
 			if text != "" {
-				out <- ai.Token{Type: ai.TokenTypeText, Data: []byte(text)}
+				out <- ai.Token{Type: ai.TokenTypeText, Text: text, Data: []byte(text)}
 			}
 
 			toolCalls := strings.TrimSpace(string(chunk.Choices[0].Delta.ToolCalls))
