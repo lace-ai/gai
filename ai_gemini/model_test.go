@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/lace-ai/gai/ai"
 	"google.golang.org/genai"
 )
 
@@ -48,5 +49,28 @@ func TestMarshalArgsNilDefaultsToObject(t *testing.T) {
 	}
 	if string(raw) != "{}" {
 		t.Fatalf("expected {}, got %s", string(raw))
+	}
+}
+
+func TestBuildTextToken(t *testing.T) {
+	tok := buildTextToken(&genai.Part{Text: "hello"})
+	if tok.Type != ai.TokenTypeText {
+		t.Fatalf("expected text token, got %s", tok.Type)
+	}
+	if string(tok.Data) != "hello" {
+		t.Fatalf("expected token data to be plain text, got %q", string(tok.Data))
+	}
+	if tok.Text != "hello" {
+		t.Fatalf("expected token text to be set, got %q", tok.Text)
+	}
+}
+
+func TestBuildThoughtToken(t *testing.T) {
+	tok := buildTextToken(&genai.Part{Text: "thinking", Thought: true})
+	if tok.Type != ai.TokenTypeThought {
+		t.Fatalf("expected thought token, got %s", tok.Type)
+	}
+	if string(tok.Data) != "thinking" {
+		t.Fatalf("expected token data to be plain text, got %q", string(tok.Data))
 	}
 }

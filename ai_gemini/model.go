@@ -78,15 +78,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 
 				switch {
 				case part.Text != "":
-					tokenType := ai.TokenTypeText
-					if part.Thought {
-						tokenType = ai.TokenTypeThought
-					}
-					out <- ai.Token{
-						Type: tokenType,
-						Data: rawPart,
-						Text: part.Text,
-					}
+					out <- buildTextToken(part)
 				case part.FunctionCall != nil:
 					toolCall, err := mapFunctionCall(part.FunctionCall)
 					if err != nil {
@@ -153,6 +145,18 @@ func mapFunctionCall(functionCall *genai.FunctionCall) (*ai.ToolCall, error) {
 		Name: "function",
 		Args: args,
 	}, nil
+}
+
+func buildTextToken(part *genai.Part) ai.Token {
+	tokenType := ai.TokenTypeText
+	if part.Thought {
+		tokenType = ai.TokenTypeThought
+	}
+	return ai.Token{
+		Type: tokenType,
+		Data: []byte(part.Text),
+		Text: part.Text,
+	}
 }
 
 func marshalArgs(args map[string]any) (json.RawMessage, error) {
