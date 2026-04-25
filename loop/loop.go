@@ -160,10 +160,11 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan error) {
 				iteration.Parts[tc.ID].ToolResp = &tc.Response
 			}
 
-			if !retrying {
-				retryCount = 0
+			if retrying {
+				continue
 			}
 
+			retryCount = 0
 			a.Iterations = append(a.Iterations, iteration)
 			if toolCalls == 0 && !retrying {
 				return

@@ -71,6 +71,7 @@ func TestLoop(t *testing.T) {
 			name: "Call wrong tool",
 			iterations: []mocks.MockModelResponse{
 				{Res: ai.AIResponse{Text: `{"id":"nonexistent_tool","name":"function","arguments":{"text":"test"}}`}, Err: nil},
+				{Res: ai.AIResponse{Text: "Tool failed, stopping here."}, Err: nil},
 			},
 			wantIterations: 2,
 			maxIterations:  8,
@@ -91,8 +92,9 @@ func TestLoop(t *testing.T) {
 				{Res: ai.AIResponse{Text: `{"id":"echo","name":"function","arguments":{"text":"test"}}`}, Err: nil},
 				{Res: ai.AIResponse{Text: `{"id":"echo","name":"function","arguments":{"text":"test"}}`}, Err: errors.New("tool execution failed")},
 				{Res: ai.AIResponse{Text: `{"id":"echo","name":"function","arguments":{"text":"test"}}`}, Err: nil},
+				{Res: ai.AIResponse{Text: "How are you?"}, Err: nil},
 			},
-			wantIterations: 2,
+			wantIterations: 3,
 			maxIterations:  8,
 		},
 	}
