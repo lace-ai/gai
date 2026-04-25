@@ -86,16 +86,12 @@ func (i *Iteration) Messages() []aicontext.Message {
 	var msgs []aicontext.Message
 
 	if i.Count == 1 {
-		if i.request == nil {
+		if i.request != nil {
 			msgs = append(msgs, aicontext.Message{
 				Role:    aicontext.RoleUser,
-				Content: aicontext.NewTextContent(""),
+				Content: aicontext.NewTextContent(i.request.Prompt.Prompt),
 			})
 		}
-		msgs = append(msgs, aicontext.Message{
-			Role:    aicontext.RoleUser,
-			Content: aicontext.NewTextContent(i.request.Prompt.Prompt),
-		})
 	}
 
 	for _, part := range i.Parts {
