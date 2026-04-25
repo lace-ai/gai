@@ -104,7 +104,7 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan error) {
 				iteration.AppendToken(t)
 				tokenCh <- t
 
-				if t.Type == ai.TokenTypeToolCall {
+				if t.Type == ai.TokenTypeToolCall && t.ToolCall != nil {
 					toolReq := t.ToolCall
 					partIdx := len(iteration.Parts) - 1
 
