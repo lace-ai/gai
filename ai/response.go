@@ -58,11 +58,23 @@ func (tc *ToolCall) Validate() error {
 func (r *AIResponse) AppendToken(t Token) {
 	switch t.Type {
 	case TokenTypeText:
-		r.Text += t.Text
+		if len(t.Text) > 0 {
+			r.Text += t.Text
+		} else {
+			r.Text += string(t.Data)
+		}
 	case TokenTypeTought:
-		r.Text += t.Text
+		if len(t.Text) > 0 {
+			r.Text += t.Text
+		} else {
+			r.Text += string(t.Data)
+		}
 	case TokenTypeErr:
-		r.Text += string(t.Err.Error())
+		if t.Err != nil {
+			r.Text += string(t.Err.Error())
+		} else {
+			r.Text += string(t.Data)
+		}
 	case TokenTypeToolCall:
 		r.Text += string(t.Data)
 	}
