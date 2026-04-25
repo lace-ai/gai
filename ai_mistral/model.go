@@ -60,6 +60,42 @@ type chatCompletionStreamResponse struct {
 	} `json:"choices"`
 }
 
+type mistralStreamFunctionCall struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+type mistralStreamToolCallEntry struct {
+	ID       string                    `json:"id"`
+	Type     string                    `json:"type"`
+	Function mistralStreamFunctionCall `json:"function"`
+}
+
+func mapMistralToolCalls(raw json.RawMessage) ([]ai.ToolCall, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+
+	var calls []mistralStreamToolCallEntry
+	if err := json.Unmarshal(raw, &calls); err != nil {
+		return nil, fmt.Errorf("decode tool_calls: %w", err)
+	}
+
+	result := make([]ai.ToolCall, 0, len(calls))
+	for _, c := range calls {
+		args := json.RawMessage(c.Function.Arguments)
+		if len(args) == 0 {
+			args = json.RawMessage("{}")
+		}
+		result = append(result, ai.ToolCall{
+			ID:   c.Function.Name,
+			Name: "function",
+			Args: args,
+		})
+	}
+	return result, nil
+}
+
 func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.Token {
 	out := make(chan ai.Token, 1)
 
@@ -155,7 +191,18 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 
 			toolCalls := strings.TrimSpace(string(chunk.Choices[0].Delta.ToolCalls))
 			if toolCalls != "" && toolCalls != "null" {
-				out <- ai.Token{Type: ai.TokenTypeToolCall, Data: append([]byte(nil), chunk.Choices[0].Delta.ToolCalls...)}
+				calls, mapErr := mapMistralToolCalls(chunk.Choices[0].Delta.ToolCalls)
+				if mapErr != nil {
+					return fmt.Errorf("map tool_calls: %w", mapErr)
+				}
+				for _, tc := range calls {
+					tcCopy := tc
+					out <- ai.Token{
+						Type:     ai.TokenTypeToolCall,
+						Data:     append([]byte(nil), chunk.Choices[0].Delta.ToolCalls...),
+						ToolCall: &tcCopy,
+					}
+				}
 			}
 
 			return nil
