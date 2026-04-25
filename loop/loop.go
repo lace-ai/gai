@@ -12,6 +12,7 @@ import (
 
 const (
 	defaultMaxLoopIterations = 8
+	defaultRetryCount        = 3
 )
 
 type ContextBuilder interface {
@@ -27,6 +28,7 @@ type Loop struct {
 	Model             ai.Model
 	Tools             []Tool
 	MaxLoopIterations int
+	RetryCount        int
 	ContextBuilder    ContextBuilder
 	PreProcessToolRes ToolResPreProcessor
 }
@@ -54,6 +56,7 @@ func New(model ai.Model, tools []Tool, initialPrompt string, sysPrompt string, c
 		Model:             model,
 		Tools:             tools,
 		MaxLoopIterations: defaultMaxLoopIterations,
+		RetryCount:        defaultRetryCount,
 		ContextBuilder:    contextBuilder,
 		PreProcessToolRes: toolResPreProcessor,
 	}
@@ -73,6 +76,8 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan error) {
 	go func() {
 		defer close(errCh)
 		defer close(tokenCh)
+
+		retryCount := 0
 
 		var iteration Iteration
 		for i := range a.MaxLoopIterations {
@@ -100,7 +105,20 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan error) {
 			tokens := a.Model.GenerateStream(ctx, request)
 
 			wg := sync.WaitGroup{}
+			retrying := false
 			for t := range tokens {
+
+				if t.Err != nil {
+					if retryCount < a.RetryCount {
+						retryCount++
+						retrying = true
+						break
+					} else {
+						errCh <- fmt.Errorf("%w limit:%v error: %v", ErrMaxRetries, a.RetryCount, t.Err)
+						return
+					}
+				}
+
 				iteration.AppendToken(t)
 				tokenCh <- t
 
@@ -124,6 +142,10 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan error) {
 			}
 
 			wg.Wait()
+
+			if !retrying {
+				retryCount = 0
+			}
 
 			a.Iterations = append(a.Iterations, iteration)
 			if toolCalls == 0 {
