@@ -122,7 +122,7 @@ func WrapStream(in <-chan Token) <-chan Token {
 			pending = nil
 		}
 
-		maybeFinish := func() bool {
+		maybeFinish := func(last string) bool {
 			if !isJSONCandidate {
 				return false
 			}
@@ -130,7 +130,7 @@ func WrapStream(in <-chan Token) <-chan Token {
 				return false
 			}
 
-			payload := joinTokenData(pending)
+			payload := append(joinTokenData(pending[:len(pending)-1]), []byte(last)...)
 			if tc, ok := parseToolCall(payload); ok {
 				out <- Token{
 					Type:     TokenTypeToolCall,
@@ -162,7 +162,10 @@ func WrapStream(in <-chan Token) <-chan Token {
 
 			pending = append(pending, t)
 
+			var tokenStr strings.Builder
 			for _, b := range t.Data {
+				tokenStr.WriteByte(b)
+
 				if !seenNonWS {
 					if isWS(b) {
 						continue
@@ -217,9 +220,10 @@ func WrapStream(in <-chan Token) <-chan Token {
 				continue
 			}
 
-			if maybeFinish() {
+			if maybeFinish(tokenStr.String()) {
 				continue
 			}
+
 		}
 
 		// End of stream: unresolved buffer is not a tool call, replay it.
