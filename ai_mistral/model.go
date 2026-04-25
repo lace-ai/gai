@@ -19,6 +19,8 @@ type Model struct {
 	client *Provider
 }
 
+var _ ai.Model = (*Model)(nil)
+
 func (m *Model) Name() string {
 	return m.name
 }

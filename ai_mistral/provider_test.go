@@ -17,6 +17,14 @@ func TestProviderModelValidation(t *testing.T) {
 	if model != nil {
 		t.Fatalf("expected nil model on empty name")
 	}
+
+	model, err = p.Model("unknown-model")
+	if !errors.Is(err, ai.ErrModelNotFound) {
+		t.Fatalf("expected ErrModelNotFound, got %v", err)
+	}
+	if model != nil {
+		t.Fatalf("expected nil model on unknown name")
+	}
 }
 
 func TestProviderModelAndListModels(t *testing.T) {

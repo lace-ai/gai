@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/lace-ai/gai/ai"
@@ -16,6 +17,8 @@ type Model struct {
 	mu     sync.Mutex
 	api    *genai.Client
 }
+
+var _ ai.Model = (*Model)(nil)
 
 func (m *Model) Name() string {
 	return m.name
@@ -84,18 +87,6 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 						Data: rawPart,
 						Text: part.Text,
 					}
-				case part.ToolCall != nil:
-					toolCall, err := mapServerToolCall(part.ToolCall)
-					if err != nil {
-						mapErr := fmt.Errorf("error mapping tool call: %w", err)
-						out <- ai.Token{Err: mapErr, Type: ai.TokenTypeErr, Text: mapErr.Error()}
-						return
-					}
-					out <- ai.Token{
-						Type:     ai.TokenTypeToolCall,
-						Data:     rawPart,
-						ToolCall: toolCall,
-					}
 				case part.FunctionCall != nil:
 					toolCall, err := mapFunctionCall(part.FunctionCall)
 					if err != nil {
@@ -132,42 +123,41 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (*ai.AIResponse,
 		return nil, err
 	}
 
-	return &ai.AIResponse{
-		Text:         result.Text(),
-		InputTokens:  int(result.UsageMetadata.PromptTokenCount),
-		OutputTokens: int(result.UsageMetadata.CandidatesTokenCount),
-	}, nil
-}
-
-func mapServerToolCall(toolCall *genai.ToolCall) (*ai.ToolCall, error) {
-	args, err := marshalArgs(toolCall.Args)
-	if err != nil {
-		return nil, err
+	inputTokens := 0
+	outputTokens := 0
+	if result.UsageMetadata != nil {
+		inputTokens = int(result.UsageMetadata.PromptTokenCount)
+		outputTokens = int(result.UsageMetadata.CandidatesTokenCount)
 	}
 
-	return &ai.ToolCall{
-		ID:   toolCall.ID,
-		Name: string(toolCall.ToolType),
-		Args: args,
+	return &ai.AIResponse{
+		Text:         result.Text(),
+		InputTokens:  inputTokens,
+		OutputTokens: outputTokens,
 	}, nil
 }
 
 func mapFunctionCall(functionCall *genai.FunctionCall) (*ai.ToolCall, error) {
+	toolName := strings.TrimSpace(functionCall.Name)
+	if toolName == "" {
+		return nil, fmt.Errorf("function call name empty")
+	}
+
 	args, err := marshalArgs(functionCall.Args)
 	if err != nil {
 		return nil, err
 	}
 
 	return &ai.ToolCall{
-		ID:   functionCall.ID,
-		Name: functionCall.Name,
+		ID:   toolName,
+		Name: "function",
 		Args: args,
 	}, nil
 }
 
 func marshalArgs(args map[string]any) (json.RawMessage, error) {
 	if args == nil {
-		return nil, nil
+		return json.RawMessage("{}"), nil
 	}
 
 	raw, err := json.Marshal(args)

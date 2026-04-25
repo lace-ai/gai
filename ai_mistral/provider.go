@@ -14,6 +14,8 @@ type Provider struct {
 	httpClient *http.Client
 }
 
+var _ ai.Provider = (*Provider)(nil)
+
 func New(apiKey string) *Provider {
 	return &Provider{
 		apiKey:  apiKey,
@@ -39,16 +41,36 @@ func (p *Provider) Name() string {
 }
 
 func (p *Provider) Model(name string) (ai.Model, error) {
-	if strings.TrimSpace(name) == "" {
+	if err := p.Validate(); err != nil {
+		return nil, err
+	}
+
+	modelName := strings.TrimSpace(name)
+	if modelName == "" || !isKnownModel(modelName) {
 		return nil, ai.ErrModelNotFound
 	}
 
 	return &Model{
-		name:   name,
+		name:   modelName,
 		client: p,
 	}, nil
 }
 
 func (p *Provider) ListModels() ([]string, error) {
-	return models, nil
+	if err := p.Validate(); err != nil {
+		return nil, err
+	}
+
+	out := make([]string, len(models))
+	copy(out, models)
+	return out, nil
+}
+
+func isKnownModel(name string) bool {
+	for _, modelName := range models {
+		if modelName == name {
+			return true
+		}
+	}
+	return false
 }
