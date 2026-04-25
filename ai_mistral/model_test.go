@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/HecoAI/gai/ai"
+	"github.com/lace-ai/gai/ai"
 )
 
 func TestModelGenerate(t *testing.T) {

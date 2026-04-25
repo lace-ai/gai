@@ -6,8 +6,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/HecoAI/gai/ai"
-	aicontext "github.com/HecoAI/gai/context"
+	"github.com/lace-ai/gai/ai"
+	aicontext "github.com/lace-ai/gai/context"
 )
 
 const (

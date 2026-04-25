@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/HecoAI/gai/ai"
+	"github.com/lace-ai/gai/ai"
 )
 
 func TestProviderModelValidation(t *testing.T) {

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/HecoAI/gai/ai"
+	"github.com/lace-ai/gai/ai"
 )
 
 func TestWrapStreamDetectsLeadingToolCallAndPassesThroughRemainder(t *testing.T) {

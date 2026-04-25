@@ -1,4 +1,4 @@
-module github.com/HecoAI/gai
+module github.com/lace-ai/gai
 
 go 1.26.1
 

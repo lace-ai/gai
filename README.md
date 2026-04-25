@@ -1,20 +1,20 @@
 <div>
-    <a href="https://github.com/HecoAI/gai">
+    <a href="https://github.com/lace-ai/gai">
         <img alt="GAI Logo" src="/docs/GAI_thumbnail.png">
     </a>
 </div>
 
 <p align="center">
-    <a href="https://github.com/HecoAI/gai/blob/main/go.mod">
-        <img alt="GitHub go.mod Go version" src="https://img.shields.io/github/go-mod/go-version/HecoAI/gai" style="margin: 0 6px;">
+    <a href="https://github.com/lace-ai/gai/blob/main/go.mod">
+        <img alt="GitHub go.mod Go version" src="https://img.shields.io/github/go-mod/go-version/lace-ai/gai" style="margin: 0 6px;">
     </a>
-    <a href="https://github.com/HecoAI/gai/actions">
+    <a href="https://github.com/lace-ai/gai/actions">
         <img alt="CI" src="https://img.shields.io/badge/ci-passing-brightgreen.svg" style="margin: 0 6px;">
     </a>
-    <a href="https://github.com/HecoAI/gai/blob/main/LICENSE">
+    <a href="https://github.com/lace-ai/gai/blob/main/LICENSE">
         <img alt="License" src="https://img.shields.io/badge/license-LGPL-informational.svg" style="margin: 0 6px;">
     </a>
-    <a href="https://pkg.go.dev/github.com/HecoAI/gai"><img src="https://pkg.go.dev/badge/github.com/HecoAI/gai.svg" alt="Go Reference"></a>
+    <a href="https://pkg.go.dev/github.com/lace-ai/gai"><img src="https://pkg.go.dev/badge/github.com/lace-ai/gai.svg" alt="Go Reference"></a>
 </p>
 <p></p>
 
@@ -39,7 +39,7 @@ The library is organized around three ideas:
 ### 📦 Installation
 
 ```bash
-go get github.com/HecoAI/gai
+go get github.com/lace-ai/gai
 ```
 
 ### 🧭 Usage
@@ -162,7 +162,7 @@ To build an agent with tools, use the `loop` package:
 > User a alias for the `context` package to avoid conflicts with `context` package from the standard library. For example:
 >
 > ```go
-> import aicontext "github.com/HecoAI/gai/context"
+> import aicontext "github.com/lace-ai/gai/context"
 > ```
 
 ```go
@@ -366,7 +366,7 @@ The `context` package is not the standard library `context` package.
 Import it with an alias such as `aicontext` to avoid name collisions.
 
 ```go
-import aicontext "github.com/HecoAI/gai/context"
+import aicontext "github.com/lace-ai/gai/context"
 ```
 
 ### 📨 Messages
@@ -515,4 +515,4 @@ If you add a new provider or tool, document the new constructor, model names, an
 
 This library is licensed under the GNU LESSER GENERAL PUBLIC LICENSE v2.1. See [LICENSE](LICENSE) for details.
 
-Copyright (c) 2026 HecoAI. All rights reserved.
+Copyright (c) 2026 lace-ai. All rights reserved.

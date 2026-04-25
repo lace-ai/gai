@@ -11,7 +11,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/HecoAI/gai/ai"
+	"github.com/lace-ai/gai/ai"
 )
 
 type Model struct {
