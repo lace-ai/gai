@@ -106,6 +106,10 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan error) {
 
 			wg := sync.WaitGroup{}
 			retrying := false
+			tcCh := make(chan struct {
+				ID       int
+				Response ToolResponse
+			}, 5)
 			for t := range tokens {
 
 				if t.Err != nil {
@@ -136,19 +140,32 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan error) {
 							}
 						}
 
-						iteration.Parts[partIdx].ToolResp = res
+						tcCh <- struct {
+							ID       int
+							Response ToolResponse
+						}{
+							ID:       partIdx,
+							Response: *res,
+						}
 					})
 				}
 			}
 
-			wg.Wait()
+			go func() {
+				wg.Wait()
+				close(tcCh)
+			}()
+
+			for tc := range tcCh {
+				iteration.Parts[tc.ID].ToolResp = &tc.Response
+			}
 
 			if !retrying {
 				retryCount = 0
 			}
 
 			a.Iterations = append(a.Iterations, iteration)
-			if toolCalls == 0 {
+			if toolCalls == 0 && !retrying {
 				return
 			}
 		}
