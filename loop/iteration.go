@@ -102,18 +102,18 @@ func (i *Iteration) Messages() []aicontext.Message {
 					Role:    aicontext.RoleAssistant,
 					Content: aicontext.NewToolCallContent(part.ToolReq.ID, string(part.ToolReq.Args)),
 				})
-			}
-			if part.ToolResp != nil && part.ToolReq != nil {
-				if part.ToolResp.Err != nil {
-					msgs = append(msgs, aicontext.Message{
-						Role:    aicontext.RoleTool,
-						Content: aicontext.NewTextContent("Error: " + part.ToolResp.Err.Error()),
-					})
-				} else {
-					msgs = append(msgs, aicontext.Message{
-						Role:    aicontext.RoleTool,
-						Content: aicontext.NewToolResultContent(part.ToolReq.ID, part.ToolResp.Text, false, ""),
-					})
+				if part.ToolResp != nil {
+					if part.ToolResp.Err != nil {
+						msgs = append(msgs, aicontext.Message{
+							Role:    aicontext.RoleTool,
+							Content: aicontext.NewToolResultErrContent(part.ToolReq.ID, part.ToolResp.Err.Error()),
+						})
+					} else {
+						msgs = append(msgs, aicontext.Message{
+							Role:    aicontext.RoleTool,
+							Content: aicontext.NewToolResultContent(part.ToolReq.ID, part.ToolResp.Text, false, ""),
+						})
+					}
 				}
 			}
 		case IterationTypeResponse:
