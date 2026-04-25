@@ -77,7 +77,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 				case part.Text != "":
 					tokenType := ai.TokenTypeText
 					if part.Thought {
-						tokenType = ai.TokenTypeTought
+						tokenType = ai.TokenTypeThought
 					}
 					out <- ai.Token{
 						Type: tokenType,

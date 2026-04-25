@@ -17,7 +17,7 @@ type TokenType string
 
 var (
 	TokenTypeText     TokenType = "text"
-	TokenTypeTought   TokenType = "tought"
+	TokenTypeThought  TokenType = "tought"
 	TokenTypeToolCall TokenType = "tool_call"
 	TokenTypeErr      TokenType = "error"
 )
@@ -63,7 +63,7 @@ func (r *AIResponse) AppendToken(t Token) {
 		} else {
 			r.Text += string(t.Data)
 		}
-	case TokenTypeTought:
+	case TokenTypeThought:
 		if len(t.Text) > 0 {
 			r.Text += t.Text
 		} else {

@@ -164,7 +164,7 @@ func (i *Iteration) AppendToken(t ai.Token) {
 				Err: t.Err,
 			},
 		})
-	case ai.TokenTypeTought:
+	case ai.TokenTypeThought:
 		if last != nil && last.Type == IterationTypeResponse {
 			last.response.AppendToken(t)
 		} else {
