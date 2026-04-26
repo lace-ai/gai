@@ -2,9 +2,12 @@ package ai
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/lace-ai/gai"
 )
 
 type AIResponse struct {
@@ -98,17 +101,17 @@ func (tc *ToolCall) String() string {
 // If it is a valid tool call, emits one ToolCall token.
 // Otherwise, replays buffered tokens and continues passthrough.
 // Use it if your provider doesn't have a native tool call detection
-func WrapStream(in <-chan Token) <-chan Token {
+func WrapStream(ctx context.Context, in <-chan Token, debug gai.DebugSink) <-chan Token {
 	out := make(chan Token, 8)
 
 	go func() {
 		defer close(out)
 
-		deciding := true
 		var pending []Token
 
 		// JSON tracking state
 		seenNonWS := false
+		newLines := 0
 		isJSONCandidate := false
 		objDepth := 0
 		arrDepth := 0
@@ -119,44 +122,74 @@ func WrapStream(in <-chan Token) <-chan Token {
 			for _, t := range pending {
 				out <- t
 			}
+			newLines = 0
+			isJSONCandidate = false
+			objDepth = 0
+			arrDepth = 0
+			inString = false
+			escape = false
 			pending = nil
 		}
 
-		maybeFinish := func(last string) bool {
+		maybeToolCall := func(last string) bool {
 			if !isJSONCandidate {
 				return false
 			}
 			if inString || objDepth != 0 || arrDepth != 0 {
+				if debug != nil {
+					debug.Emit(ctx, gai.DebugEvent{
+						Name:   "wrap_stream_non_tool_call",
+						Source: "ai:WrapStream.maybeToolCall",
+						Fields: map[string]any{
+							"reason": fmt.Sprintf("inString=%v objDepth=%d arrDepth=%d", inString, objDepth, arrDepth),
+							"data":   string(joinTokenData(pending)),
+						},
+					})
+				}
 				return false
 			}
 
 			payload := append(joinTokenData(pending[:len(pending)-1]), []byte(last)...)
 			if tc, ok := parseToolCall(payload); ok {
+				if debug != nil {
+					debug.Emit(ctx, gai.DebugEvent{
+						Name:   "wrap_stream_tool_call_detected",
+						Source: "ai:WrapStream.maybeToolCall",
+						Fields: map[string]any{
+							"id":   tc.ID,
+							"name": tc.Name,
+							"args": string(tc.Args),
+						},
+					})
+				}
 				out <- Token{
 					Type:     TokenTypeToolCall,
 					Data:     payload,
 					ToolCall: tc,
 				}
 			} else {
+				if debug != nil {
+					debug.Emit(ctx, gai.DebugEvent{
+						Name:   "wrap_stream_tool_call_parse_failed",
+						Source: "ai:WrapStream.maybeToolCall",
+						Fields: map[string]any{
+							"reason": "parse failed",
+							"data":   string(payload),
+						},
+					})
+				}
 				flushPending()
 			}
 
 			pending = nil
-			deciding = false
 			return true
 		}
 
 		for t := range in {
-			if !deciding {
-				out <- t
-				continue
-			}
-
-			// If non-text appears before decision, replay and passthrough.
+			// non-text tokens: passthrough.
 			if t.Type != TokenTypeText {
 				pending = append(pending, t)
 				flushPending()
-				deciding = false
 				continue
 			}
 
@@ -172,18 +205,39 @@ func WrapStream(in <-chan Token) <-chan Token {
 					}
 					seenNonWS = true
 					if b == '{' {
+						if debug != nil {
+							debug.Emit(ctx, gai.DebugEvent{
+								Name:   "wrap_stream_json_candidate",
+								Source: "ai:WrapStream",
+								Fields: map[string]any{
+									"data": string(tokenStr.String()),
+								},
+							})
+						}
 						isJSONCandidate = true
 						objDepth = 1
-					} else {
-						isJSONCandidate = false
-						flushPending()
-						deciding = false
-						break
 					}
 					continue
 				}
 
 				if !isJSONCandidate {
+					if b == '\n' {
+						newLines++
+					}
+					if newLines >= 2 && b == '{' {
+						if debug != nil {
+							debug.Emit(ctx, gai.DebugEvent{
+								Name:   "wrap_stream_json_candidate_after_newlines",
+								Source: "ai:WrapStream",
+								Fields: map[string]any{
+									"data": string(tokenStr.String()),
+								},
+							})
+						}
+						isJSONCandidate = true
+						objDepth = 1
+						newLines = 0
+					}
 					continue
 				}
 
@@ -216,18 +270,23 @@ func WrapStream(in <-chan Token) <-chan Token {
 				}
 			}
 
-			if !deciding {
+			if maybeToolCall(tokenStr.String()) {
 				continue
 			}
+		}
 
-			if maybeFinish(tokenStr.String()) {
-				continue
-			}
-
+		if debug != nil {
+			debug.Emit(ctx, gai.DebugEvent{
+				Name:   "wrap_stream_end_of_stream",
+				Source: "ai:WrapStream",
+				Fields: map[string]any{
+					"pending_data": string(joinTokenData(pending)),
+				},
+			})
 		}
 
 		// End of stream: unresolved buffer is not a tool call, replay it.
-		if deciding && len(pending) > 0 {
+		if len(pending) > 0 {
 			flushPending()
 		}
 	}()

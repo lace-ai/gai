@@ -14,7 +14,7 @@ func TestWrapStreamDetectsLeadingToolCallAndPassesThroughRemainder(t *testing.T)
 	in <- ai.Token{Type: ai.TokenTypeText, Data: []byte(" trailing text")}
 	close(in)
 
-	out := collectTokens(ai.WrapStream(in))
+	out := collectTokens(ai.WrapStream(t.Context(), in, nil))
 	if len(out) != 2 {
 		t.Fatalf("expected 2 output tokens, got %d", len(out))
 	}
@@ -46,7 +46,7 @@ func TestWrapStreamPassesThroughNonJSONLeadingText(t *testing.T) {
 	in <- ai.Token{Type: ai.TokenTypeText, Data: []byte(" world")}
 	close(in)
 
-	out := collectTokens(ai.WrapStream(in))
+	out := collectTokens(ai.WrapStream(t.Context(), in, nil))
 	if len(out) != 2 {
 		t.Fatalf("expected 2 output tokens, got %d", len(out))
 	}
@@ -65,7 +65,7 @@ func TestWrapStreamReplaysPendingWhenNonTextArrivesBeforeDecision(t *testing.T) 
 	in <- ai.Token{Type: ai.TokenTypeText, Data: []byte("after")}
 	close(in)
 
-	out := collectTokens(ai.WrapStream(in))
+	out := collectTokens(ai.WrapStream(t.Context(), in, nil))
 	if len(out) != 3 {
 		t.Fatalf("expected 3 output tokens, got %d", len(out))
 	}
@@ -86,7 +86,7 @@ func TestWrapStreamReplaysWhenJSONIsNotValidToolCall(t *testing.T) {
 	in <- ai.Token{Type: ai.TokenTypeText, Data: []byte("tail")}
 	close(in)
 
-	out := collectTokens(ai.WrapStream(in))
+	out := collectTokens(ai.WrapStream(t.Context(), in, nil))
 	if len(out) != 2 {
 		t.Fatalf("expected 2 output tokens, got %d", len(out))
 	}
@@ -103,7 +103,7 @@ func TestWrapStreamReplaysUnclosedJSONAtEndOfStream(t *testing.T) {
 	in <- ai.Token{Type: ai.TokenTypeText, Data: []byte(`{"id":"call-1","name":"function"`)}
 	close(in)
 
-	out := collectTokens(ai.WrapStream(in))
+	out := collectTokens(ai.WrapStream(t.Context(), in, nil))
 	if len(out) != 1 {
 		t.Fatalf("expected 1 output token, got %d", len(out))
 	}
@@ -118,7 +118,7 @@ func TestWrapStreamHandlesBracesInsideStrings(t *testing.T) {
 	in <- ai.Token{Type: ai.TokenTypeText, Data: []byte(`,"items":[1,2,3]}}`)}
 	close(in)
 
-	out := collectTokens(ai.WrapStream(in))
+	out := collectTokens(ai.WrapStream(t.Context(), in, nil))
 	if len(out) != 1 {
 		t.Fatalf("expected 1 output token, got %d", len(out))
 	}
@@ -138,7 +138,7 @@ func TestWrapStreamDefaultsMissingArgumentsToEmptyObject(t *testing.T) {
 	in <- ai.Token{Type: ai.TokenTypeText, Data: []byte(`{"id":"call-3","name":"function"}`)}
 	close(in)
 
-	out := collectTokens(ai.WrapStream(in))
+	out := collectTokens(ai.WrapStream(t.Context(), in, nil))
 	if len(out) != 1 {
 		t.Fatalf("expected 1 output token, got %d", len(out))
 	}
@@ -168,7 +168,7 @@ func TestWrapStreamDetectsToolCallFromProductionLikeChunkedJSON(t *testing.T) {
 	}
 	close(in)
 
-	out := collectTokens(ai.WrapStream(in))
+	out := collectTokens(ai.WrapStream(t.Context(), in, nil))
 	if len(out) != 1 {
 		t.Fatalf("expected exactly 1 output token, got %d", len(out))
 	}
@@ -197,7 +197,7 @@ func TestWrapStreamDoesNotDetectToolCallWhenTextPrefixExists(t *testing.T) {
 	in <- ai.Token{Type: ai.TokenTypeText, Data: []byte(" done")}
 	close(in)
 
-	out := collectTokens(ai.WrapStream(in))
+	out := collectTokens(ai.WrapStream(t.Context(), in, nil))
 	if len(out) != 3 {
 		t.Fatalf("expected 3 output tokens, got %d", len(out))
 	}
@@ -219,7 +219,7 @@ func TestWrapStreamPreservesNonToolJSONObject(t *testing.T) {
 	in <- ai.Token{Type: ai.TokenTypeText, Data: []byte(" tail")}
 	close(in)
 
-	out := collectTokens(ai.WrapStream(in))
+	out := collectTokens(ai.WrapStream(t.Context(), in, nil))
 	if len(out) != 2 {
 		t.Fatalf("expected 2 output tokens, got %d", len(out))
 	}
