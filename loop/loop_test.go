@@ -110,7 +110,7 @@ func TestLoop(t *testing.T) {
 			l := loop.New(wrapStreamModel{Model: model}, tools, "Initial prompt", "System prompt", nil, nil)
 			l.MaxLoopIterations = tt.maxIterations
 
-			tokenCh, errCh := l.Loop(context.Background())
+			tokenCh, _, errCh := l.Loop(context.Background())
 			for range tokenCh {
 			}
 

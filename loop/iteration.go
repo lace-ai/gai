@@ -16,15 +16,22 @@ const (
 	IterationTypeToolError IterationType = "tool_error"
 )
 
+type IterationInformation struct {
+	Iteration      Iteration
+	IterationCount int
+	PartCount      int
+	RetryCount     int
+}
+
 type Iteration struct {
 	Count   int
 	Parts   []IterationPart
-	request *ai.AIRequest
+	Request *ai.AIRequest
 }
 
 type IterationPart struct {
 	Type     IterationType
-	response *ai.AIResponse
+	Response *ai.AIResponse
 	ToolReq  *ai.ToolCall
 	ToolResp *ToolResponse
 }
@@ -51,12 +58,12 @@ func (i *IterationPart) String() string {
 		builder.WriteString(i.ToolResp.String())
 		builder.WriteString("</Resp>")
 	case IterationTypeResponse:
-		if i.response == nil {
+		if i.Response == nil {
 			builder.WriteString("<Resp u=assistant></Resp>")
 			break
 		}
 		builder.WriteString("<Resp u=assistant>")
-		builder.WriteString(i.response.Text)
+		builder.WriteString(i.Response.Text)
 		builder.WriteString("</Resp>")
 	case IterationTypeToolError:
 		if i.ToolResp == nil || i.ToolResp.Err == nil {
@@ -86,10 +93,10 @@ func (i *Iteration) Messages() []aicontext.Message {
 	var msgs []aicontext.Message
 
 	if i.Count == 1 {
-		if i.request != nil {
+		if i.Request != nil {
 			msgs = append(msgs, aicontext.Message{
 				Role:    aicontext.RoleUser,
-				Content: aicontext.NewTextContent(i.request.Prompt.Prompt),
+				Content: aicontext.NewTextContent(i.Request.Prompt.Prompt),
 			})
 		}
 	}
@@ -117,10 +124,10 @@ func (i *Iteration) Messages() []aicontext.Message {
 				}
 			}
 		case IterationTypeResponse:
-			if part.response != nil {
+			if part.Response != nil {
 				msgs = append(msgs, aicontext.Message{
 					Role:    aicontext.RoleAssistant,
-					Content: aicontext.NewTextContent(part.response.Text),
+					Content: aicontext.NewTextContent(part.Response.Text),
 				})
 			}
 		}
@@ -150,11 +157,11 @@ func (i *Iteration) AppendToken(t ai.Token) {
 	switch t.Type {
 	case ai.TokenTypeText:
 		if last != nil && last.Type == IterationTypeResponse {
-			last.response.AppendToken(t)
+			last.Response.AppendToken(t)
 		} else {
 			i.Parts = append(i.Parts, IterationPart{
 				Type:     IterationTypeResponse,
-				response: &ai.AIResponse{Text: text, OutputTokens: t.TokenUsage},
+				Response: &ai.AIResponse{Text: text, OutputTokens: t.TokenUsage},
 			})
 		}
 	case ai.TokenTypeErr:
@@ -166,11 +173,11 @@ func (i *Iteration) AppendToken(t ai.Token) {
 		})
 	case ai.TokenTypeThought:
 		if last != nil && last.Type == IterationTypeResponse {
-			last.response.AppendToken(t)
+			last.Response.AppendToken(t)
 		} else {
 			i.Parts = append(i.Parts, IterationPart{
 				Type:     IterationTypeResponse,
-				response: &ai.AIResponse{Text: text, OutputTokens: t.TokenUsage},
+				Response: &ai.AIResponse{Text: text, OutputTokens: t.TokenUsage},
 			})
 		}
 	case ai.TokenTypeToolCall:

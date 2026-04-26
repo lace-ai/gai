@@ -63,20 +63,23 @@ func New(model ai.Model, tools []Tool, initialPrompt string, sysPrompt string, c
 	return agent
 }
 
-func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan error) {
+func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, chan IterationInformation, <-chan error) {
 	errCh := make(chan error, 1)
 	tokenCh := make(chan ai.Token, 16)
+	statusCh := make(chan IterationInformation, 16)
 
 	if err := a.Validate(); err != nil {
 		errCh <- err
 		close(errCh)
 		close(tokenCh)
-		return tokenCh, errCh
+		close(statusCh)
+		return tokenCh, statusCh, errCh
 	}
 
 	go func() {
 		defer close(errCh)
 		defer close(tokenCh)
+		defer close(statusCh)
 
 		retryCount := 0
 
@@ -101,7 +104,7 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan error) {
 			request := ai.AIRequest{
 				Prompt: a.InitialPrompt,
 			}
-			iteration.request = &request
+			iteration.Request = &request
 
 			tokens := a.Model.GenerateStream(ctx, request)
 
@@ -162,11 +165,22 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan error) {
 			}
 
 			if retrying {
+				statusCh <- IterationInformation{
+					IterationCount: iteration.Count,
+					PartCount:      len(iteration.Parts),
+					RetryCount:     retryCount,
+				}
 				continue
 			}
 
 			retryCount = 0
 			a.Iterations = append(a.Iterations, iteration)
+			statusCh <- IterationInformation{
+				Iteration:      iteration,
+				IterationCount: iteration.Count,
+				PartCount:      len(iteration.Parts),
+				RetryCount:     retryCount,
+			}
 			if toolCalls == 0 && !retrying {
 				return
 			}
@@ -175,7 +189,7 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan error) {
 		errCh <- fmt.Errorf("%w: limit=%d", ErrMaxIterations, a.MaxLoopIterations)
 	}()
 
-	return tokenCh, errCh
+	return tokenCh, statusCh, errCh
 }
 
 func (a *Loop) Messages() []aicontext.Message {
