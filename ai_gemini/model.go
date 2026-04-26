@@ -42,6 +42,16 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 
 		client, err := m.getClient(ctx)
 		if err != nil {
+			if m.debug != nil {
+				m.debug.Emit(ctx, gai.DebugEvent{
+					Name:   "gemini_get_client_failed",
+					Source: "ai:gemini.Model.GenerateStream",
+					Fields: map[string]any{
+						"error": err.Error(),
+					},
+					Err: err,
+				})
+			}
 			out <- ai.Token{Err: err, Type: ai.TokenTypeErr, Text: err.Error()}
 			return
 		}
@@ -58,6 +68,16 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 		for resp, err := range client.Models.GenerateContentStream(ctx, m.name, contents, config) {
 			if err != nil {
 				streamErr := fmt.Errorf("error generating content stream: %w", err)
+				if m.debug != nil {
+					m.debug.Emit(ctx, gai.DebugEvent{
+						Name:   "gemini_stream_generation_failed",
+						Source: "ai:gemini.Model.GenerateStream",
+						Fields: map[string]any{
+							"error": err.Error(),
+						},
+						Err: err,
+					})
+				}
 				out <- ai.Token{Err: streamErr, Type: ai.TokenTypeErr, Text: streamErr.Error()}
 				return
 			}
@@ -78,15 +98,55 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 					rawPart, err := json.Marshal(part)
 					if err != nil {
 						encodeErr := fmt.Errorf("error encoding part: %w", err)
+						if m.debug != nil {
+							fields := map[string]any{
+								"error": err.Error(),
+							}
+							if m.debug.IncludeSencitiveData() {
+								fields["part"] = string(rawPart)
+							}
+							m.debug.Emit(ctx, gai.DebugEvent{
+								Name:   "gemini_stream_part_encoding_failed",
+								Source: "ai:gemini.Model.GenerateStream",
+								Fields: fields,
+								Err:    err,
+							})
+						}
 						out <- ai.Token{Err: encodeErr, Type: ai.TokenTypeErr, Text: encodeErr.Error()}
 						return
 					}
-
 					toolCall, err := mapFunctionCall(part.FunctionCall)
 					if err != nil {
 						mapErr := fmt.Errorf("error mapping function call: %w", err)
+						if m.debug != nil {
+							fields := map[string]any{
+								"error": err.Error(),
+							}
+							if m.debug.IncludeSencitiveData() {
+								fields["function_call_name"] = part.FunctionCall.Name
+								fields["function_call_args"] = fmt.Sprintf("%v", part.FunctionCall.Args)
+							}
+							m.debug.Emit(ctx, gai.DebugEvent{
+								Name:   "gemini_stream_function_call_mapping_failed",
+								Source: "ai:gemini.Model.GenerateStream",
+								Fields: fields,
+								Err:    err,
+							})
+						}
 						out <- ai.Token{Err: mapErr, Type: ai.TokenTypeErr, Text: mapErr.Error()}
 						return
+					}
+					if m.debug != nil {
+						fields := map[string]any{}
+						if m.debug.IncludeSencitiveData() {
+							fields["tool_call_id"] = toolCall.ID
+							fields["tool_call_args"] = string(toolCall.Args)
+						}
+						m.debug.Emit(ctx, gai.DebugEvent{
+							Name:   "gemini_stream_function_call_mapped",
+							Source: "ai:gemini.Model.GenerateStream",
+							Fields: fields,
+						})
 					}
 					out <- ai.Token{
 						Type:     ai.TokenTypeToolCall,
@@ -104,6 +164,16 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (*ai.AIResponse, error) {
 	client, err := m.getClient(ctx)
 	if err != nil {
+		if m.debug != nil {
+			m.debug.Emit(ctx, gai.DebugEvent{
+				Name:   "gemini_get_client_failed",
+				Source: "ai:gemini.Model.Generate",
+				Fields: map[string]any{
+					"error": err.Error(),
+				},
+				Err: err,
+			})
+		}
 		return nil, err
 	}
 
@@ -114,6 +184,16 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (*ai.AIResponse,
 		nil,
 	)
 	if err != nil {
+		if m.debug != nil {
+			m.debug.Emit(ctx, gai.DebugEvent{
+				Name:   "gemini_generate_content_failed",
+				Source: "ai:gemini.Model.Generate",
+				Fields: map[string]any{
+					"error": err.Error(),
+				},
+				Err: err,
+			})
+		}
 		return nil, err
 	}
 
@@ -122,6 +202,17 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (*ai.AIResponse,
 	if result.UsageMetadata != nil {
 		inputTokens = int(result.UsageMetadata.PromptTokenCount)
 		outputTokens = int(result.UsageMetadata.CandidatesTokenCount)
+	}
+
+	if m.debug != nil {
+		m.debug.Emit(ctx, gai.DebugEvent{
+			Name:   "gemini_generate_content_success",
+			Source: "ai:gemini.Model.Generate",
+			Fields: map[string]any{
+				"input_tokens":  inputTokens,
+				"output_tokens": outputTokens,
+			},
+		})
 	}
 
 	return &ai.AIResponse{
