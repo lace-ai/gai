@@ -137,13 +137,16 @@ func WrapStream(ctx context.Context, in <-chan Token, debug gai.DebugSink) <-cha
 			}
 			if inString || objDepth != 0 || arrDepth != 0 {
 				if debug != nil {
+					fields := map[string]any{
+						"reason": fmt.Sprintf("inString=%v objDepth=%d arrDepth=%d", inString, objDepth, arrDepth),
+					}
+					if debug.IncludeSencitiveData() {
+						fields["data"] = string(joinTokenData(pending))
+					}
 					debug.Emit(ctx, gai.DebugEvent{
 						Name:   "wrap_stream_non_tool_call",
 						Source: "ai:WrapStream.maybeToolCall",
-						Fields: map[string]any{
-							"reason": fmt.Sprintf("inString=%v objDepth=%d arrDepth=%d", inString, objDepth, arrDepth),
-							"data":   string(joinTokenData(pending)),
-						},
+						Fields: fields,
 					})
 				}
 				return false
@@ -152,14 +155,17 @@ func WrapStream(ctx context.Context, in <-chan Token, debug gai.DebugSink) <-cha
 			payload := append(joinTokenData(pending[:len(pending)-1]), []byte(last)...)
 			if tc, ok := parseToolCall(payload); ok {
 				if debug != nil {
+					fields := map[string]any{
+						"id":   tc.ID,
+						"name": tc.Name,
+					}
+					if debug.IncludeSencitiveData() {
+						fields["args"] = string(tc.Args)
+					}
 					debug.Emit(ctx, gai.DebugEvent{
 						Name:   "wrap_stream_tool_call_detected",
 						Source: "ai:WrapStream.maybeToolCall",
-						Fields: map[string]any{
-							"id":   tc.ID,
-							"name": tc.Name,
-							"args": string(tc.Args),
-						},
+						Fields: fields,
 					})
 				}
 				out <- Token{
@@ -169,13 +175,16 @@ func WrapStream(ctx context.Context, in <-chan Token, debug gai.DebugSink) <-cha
 				}
 			} else {
 				if debug != nil {
+					fields := map[string]any{
+						"reason": "parse failed",
+					}
+					if debug.IncludeSencitiveData() {
+						fields["data"] = string(payload)
+					}
 					debug.Emit(ctx, gai.DebugEvent{
 						Name:   "wrap_stream_tool_call_parse_failed",
 						Source: "ai:WrapStream.maybeToolCall",
-						Fields: map[string]any{
-							"reason": "parse failed",
-							"data":   string(payload),
-						},
+						Fields: fields,
 					})
 				}
 				flushPending()
@@ -206,12 +215,14 @@ func WrapStream(ctx context.Context, in <-chan Token, debug gai.DebugSink) <-cha
 					seenNonWS = true
 					if b == '{' {
 						if debug != nil {
+							fields := map[string]any{}
+							if debug.IncludeSencitiveData() {
+								fields["data"] = string(tokenStr.String())
+							}
 							debug.Emit(ctx, gai.DebugEvent{
 								Name:   "wrap_stream_json_candidate",
 								Source: "ai:WrapStream",
-								Fields: map[string]any{
-									"data": string(tokenStr.String()),
-								},
+								Fields: fields,
 							})
 						}
 						isJSONCandidate = true
@@ -226,12 +237,14 @@ func WrapStream(ctx context.Context, in <-chan Token, debug gai.DebugSink) <-cha
 					}
 					if newLines >= 2 && b == '{' {
 						if debug != nil {
+							fields := map[string]any{}
+							if debug.IncludeSencitiveData() {
+								fields["data"] = string(tokenStr.String())
+							}
 							debug.Emit(ctx, gai.DebugEvent{
 								Name:   "wrap_stream_json_candidate_after_newlines",
 								Source: "ai:WrapStream",
-								Fields: map[string]any{
-									"data": string(tokenStr.String()),
-								},
+								Fields: fields,
 							})
 						}
 						isJSONCandidate = true
@@ -276,12 +289,14 @@ func WrapStream(ctx context.Context, in <-chan Token, debug gai.DebugSink) <-cha
 		}
 
 		if debug != nil {
+			fields := map[string]any{}
+			if debug.IncludeSencitiveData() {
+				fields["pending_data"] = string(joinTokenData(pending))
+			}
 			debug.Emit(ctx, gai.DebugEvent{
 				Name:   "wrap_stream_end_of_stream",
 				Source: "ai:WrapStream",
-				Fields: map[string]any{
-					"pending_data": string(joinTokenData(pending)),
-				},
+				Fields: fields,
 			})
 		}
 

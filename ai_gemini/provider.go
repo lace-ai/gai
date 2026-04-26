@@ -3,17 +3,22 @@ package gemini
 import (
 	"strings"
 
+	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
 )
 
 type Provider struct {
 	apiKey string
+	debug  gai.DebugSink
 }
 
 var _ ai.Provider = (*Provider)(nil)
 
-func New(apiKey string) *Provider {
-	return &Provider{apiKey: apiKey}
+func New(apiKey string, debug gai.DebugSink) *Provider {
+	return &Provider{
+		apiKey: apiKey,
+		debug:  debug,
+	}
 }
 
 func (p *Provider) Validate() error {
@@ -43,6 +48,7 @@ func (p *Provider) Model(name string) (ai.Model, error) {
 	return &Model{
 		name:   modelName,
 		client: p,
+		debug:  p.debug,
 	}, nil
 }
 

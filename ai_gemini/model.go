@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
 	"google.golang.org/genai"
 )
@@ -14,6 +15,7 @@ import (
 type Model struct {
 	name   string
 	client *Provider
+	debug  gai.DebugSink
 	mu     sync.Mutex
 	api    *genai.Client
 }

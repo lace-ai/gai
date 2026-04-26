@@ -123,14 +123,17 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 		body, err := json.Marshal(payload)
 		if err != nil {
 			if m.debug != nil {
+				fields := map[string]any{
+					"error": err.Error(),
+				}
+				if m.debug.IncludeSencitiveData() {
+					fields["payload"] = payload
+				}
 				m.debug.Emit(ctx, gai.DebugEvent{
 					Name:   "mistral_stream_request_payload",
 					Source: "ai:mistral.Model.GenerateStream",
-					Fields: map[string]any{
-						"payload": payload,
-						"error":   err.Error(),
-					},
-					Err: err,
+					Fields: fields,
+					Err:    err,
 				})
 			}
 			raw <- ai.Token{Err: err, Type: ai.TokenTypeErr}
@@ -200,13 +203,16 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 				return
 			}
 			if m.debug != nil {
+				fields := map[string]any{
+					"status_code": res.StatusCode,
+				}
+				if m.debug.IncludeSencitiveData() {
+					fields["response"] = string(resBody)
+				}
 				m.debug.Emit(ctx, gai.DebugEvent{
 					Name:   "mistral_stream_request_failed",
 					Source: "ai:mistral.Model.GenerateStream",
-					Fields: map[string]any{
-						"status_code": res.StatusCode,
-						"response":    string(resBody),
-					},
+					Fields: fields,
 				})
 			}
 			raw <- ai.Token{
@@ -250,25 +256,30 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 				calls, mapErr := mapMistralToolCalls(chunk.Choices[0].Delta.ToolCalls)
 				if mapErr != nil {
 					if m.debug != nil {
+						fields := map[string]any{
+							"error": mapErr.Error(),
+						}
+						if m.debug.IncludeSencitiveData() {
+							fields["tool_calls"] = string(chunk.Choices[0].Delta.ToolCalls)
+						}
 						m.debug.Emit(ctx, gai.DebugEvent{
 							Name:   "mistral_stream_tool_calls_mapping_failed",
 							Source: "ai:mistral.Model.GenerateStream",
-							Fields: map[string]any{
-								"error":      mapErr.Error(),
-								"tool_calls": string(chunk.Choices[0].Delta.ToolCalls),
-							},
-							Err: mapErr,
+							Fields: fields,
+							Err:    mapErr,
 						})
 					}
 					return fmt.Errorf("map tool_calls: %w", mapErr)
 				}
 				if m.debug != nil {
+					fields := map[string]any{}
+					if m.debug.IncludeSencitiveData() {
+						fields["tool_calls"] = calls
+					}
 					m.debug.Emit(ctx, gai.DebugEvent{
 						Name:   "mistral_stream_tool_calls_mapped",
 						Source: "ai:mistral.Model.GenerateStream",
-						Fields: map[string]any{
-							"tool_calls": calls,
-						},
+						Fields: fields,
 					})
 				}
 				for _, tc := range calls {
