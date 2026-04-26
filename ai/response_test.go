@@ -150,6 +150,87 @@ func TestWrapStreamDefaultsMissingArgumentsToEmptyObject(t *testing.T) {
 	}
 }
 
+func TestWrapStreamDetectsToolCallFromProductionLikeChunkedJSON(t *testing.T) {
+	chunks := []string{
+		"\n",
+		"\n",
+		`{"id":"`,
+		`echo","`,
+		`name":"function","`,
+		`arguments":{"`,
+		`text":"try`,
+		` the echo tool"}}`,
+	}
+
+	in := make(chan ai.Token, len(chunks))
+	for _, c := range chunks {
+		in <- ai.Token{Type: ai.TokenTypeText, Data: []byte(c)}
+	}
+	close(in)
+
+	out := collectTokens(ai.WrapStream(in))
+	if len(out) != 1 {
+		t.Fatalf("expected exactly 1 output token, got %d", len(out))
+	}
+
+	if out[0].Type != ai.TokenTypeToolCall {
+		t.Fatalf("expected output type %q, got %q", ai.TokenTypeToolCall, out[0].Type)
+	}
+	if out[0].ToolCall == nil {
+		t.Fatal("expected tool call metadata, got nil")
+	}
+	if out[0].ToolCall.ID != "echo" {
+		t.Fatalf("unexpected tool call id: %q", out[0].ToolCall.ID)
+	}
+	if out[0].ToolCall.Name != "function" {
+		t.Fatalf("unexpected tool call name: %q", out[0].ToolCall.Name)
+	}
+	if normalizeJSON(out[0].ToolCall.Args) != `{"text":"try the echo tool"}` {
+		t.Fatalf("unexpected tool call arguments: %s", string(out[0].ToolCall.Args))
+	}
+}
+
+func TestWrapStreamDoesNotDetectToolCallWhenTextPrefixExists(t *testing.T) {
+	in := make(chan ai.Token, 3)
+	in <- ai.Token{Type: ai.TokenTypeText, Data: []byte("Sure, I can help. ")}
+	in <- ai.Token{Type: ai.TokenTypeText, Data: []byte(`{"id":"call-9","name":"function","arguments":{"x":1}}`)}
+	in <- ai.Token{Type: ai.TokenTypeText, Data: []byte(" done")}
+	close(in)
+
+	out := collectTokens(ai.WrapStream(in))
+	if len(out) != 3 {
+		t.Fatalf("expected 3 output tokens, got %d", len(out))
+	}
+
+	if out[0].Type != ai.TokenTypeText || string(out[0].Data) != "Sure, I can help. " {
+		t.Fatalf("unexpected first token: type=%q data=%q", out[0].Type, string(out[0].Data))
+	}
+	if out[1].Type != ai.TokenTypeText || string(out[1].Data) != `{"id":"call-9","name":"function","arguments":{"x":1}}` {
+		t.Fatalf("unexpected second token: type=%q data=%q", out[1].Type, string(out[1].Data))
+	}
+	if out[2].Type != ai.TokenTypeText || string(out[2].Data) != " done" {
+		t.Fatalf("unexpected third token: type=%q data=%q", out[2].Type, string(out[2].Data))
+	}
+}
+
+func TestWrapStreamPreservesNonToolJSONObject(t *testing.T) {
+	in := make(chan ai.Token, 2)
+	in <- ai.Token{Type: ai.TokenTypeText, Data: []byte(`{"kind":"event","value":123}`)}
+	in <- ai.Token{Type: ai.TokenTypeText, Data: []byte(" tail")}
+	close(in)
+
+	out := collectTokens(ai.WrapStream(in))
+	if len(out) != 2 {
+		t.Fatalf("expected 2 output tokens, got %d", len(out))
+	}
+	if out[0].Type != ai.TokenTypeText || string(out[0].Data) != `{"kind":"event","value":123}` {
+		t.Fatalf("unexpected first token: type=%q data=%q", out[0].Type, string(out[0].Data))
+	}
+	if out[1].Type != ai.TokenTypeText || string(out[1].Data) != " tail" {
+		t.Fatalf("unexpected second token: type=%q data=%q", out[1].Type, string(out[1].Data))
+	}
+}
+
 func collectTokens(in <-chan ai.Token) []ai.Token {
 	var out []ai.Token
 	for t := range in {

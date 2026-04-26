@@ -99,10 +99,10 @@ func mapMistralToolCalls(raw json.RawMessage) ([]ai.ToolCall, error) {
 }
 
 func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.Token {
-	out := make(chan ai.Token, 1)
+	raw := make(chan ai.Token, 1)
 
 	go func() {
-		defer close(out)
+		defer close(raw)
 
 		payload := chatCompletionRequest{
 			Model: m.name,
@@ -120,7 +120,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 
 		body, err := json.Marshal(payload)
 		if err != nil {
-			out <- ai.Token{Err: err, Type: ai.TokenTypeErr}
+			raw <- ai.Token{Err: err, Type: ai.TokenTypeErr}
 			return
 		}
 
@@ -131,7 +131,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			bytes.NewReader(body),
 		)
 		if err != nil {
-			out <- ai.Token{Err: err, Type: ai.TokenTypeErr}
+			raw <- ai.Token{Err: err, Type: ai.TokenTypeErr}
 			return
 		}
 		httpReq.Header.Set("Authorization", "Bearer "+m.client.apiKey)
@@ -140,7 +140,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 
 		res, err := m.client.httpClient.Do(httpReq)
 		if err != nil {
-			out <- ai.Token{Err: err, Type: ai.TokenTypeErr}
+			raw <- ai.Token{Err: err, Type: ai.TokenTypeErr}
 			return
 		}
 		defer res.Body.Close()
@@ -149,13 +149,13 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			const maxResponseBody = 1 << 20 // 1MB
 			resBody, readErr := io.ReadAll(io.LimitReader(res.Body, maxResponseBody))
 			if readErr != nil {
-				out <- ai.Token{
+				raw <- ai.Token{
 					Err:  fmt.Errorf("mistral chat stream failed (status %d): %w", res.StatusCode, readErr),
 					Type: ai.TokenTypeErr,
 				}
 				return
 			}
-			out <- ai.Token{
+			raw <- ai.Token{
 				Err:  fmt.Errorf("mistral chat stream failed (status %d): %s", res.StatusCode, string(resBody)),
 				Type: ai.TokenTypeErr,
 			}
@@ -166,17 +166,17 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 		var eventData strings.Builder
 
 		flushEvent := func() error {
-			raw := strings.TrimSpace(eventData.String())
+			event := strings.TrimSpace(eventData.String())
 			eventData.Reset()
-			if raw == "" {
+			if event == "" {
 				return nil
 			}
-			if raw == "[DONE]" {
+			if event == "[DONE]" {
 				return io.EOF
 			}
 
 			var chunk chatCompletionStreamResponse
-			if err := json.Unmarshal([]byte(raw), &chunk); err != nil {
+			if err := json.Unmarshal([]byte(event), &chunk); err != nil {
 				return fmt.Errorf("decode stream chunk: %w", err)
 			}
 			if len(chunk.Choices) == 0 {
@@ -188,7 +188,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 				return err
 			}
 			if text != "" {
-				out <- ai.Token{Type: ai.TokenTypeText, Text: text, Data: []byte(text)}
+				raw <- ai.Token{Type: ai.TokenTypeText, Text: text, Data: []byte(text)}
 			}
 
 			toolCalls := strings.TrimSpace(string(chunk.Choices[0].Delta.ToolCalls))
@@ -199,7 +199,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 				}
 				for _, tc := range calls {
 					tcCopy := tc
-					out <- ai.Token{
+					raw <- ai.Token{
 						Type:     ai.TokenTypeToolCall,
 						Data:     append([]byte(nil), chunk.Choices[0].Delta.ToolCalls...),
 						ToolCall: &tcCopy,
@@ -213,7 +213,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 		for {
 			line, err := reader.ReadString('\n')
 			if err != nil && !errors.Is(err, io.EOF) {
-				out <- ai.Token{Err: fmt.Errorf("read stream: %w", err), Type: ai.TokenTypeErr}
+				raw <- ai.Token{Err: fmt.Errorf("read stream: %w", err), Type: ai.TokenTypeErr}
 				return
 			}
 
@@ -223,7 +223,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 					if errors.Is(flushErr, io.EOF) {
 						return
 					}
-					out <- ai.Token{Err: flushErr, Type: ai.TokenTypeErr}
+					raw <- ai.Token{Err: flushErr, Type: ai.TokenTypeErr}
 					return
 				}
 			} else if strings.HasPrefix(line, "data:") {
@@ -235,14 +235,14 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 
 			if errors.Is(err, io.EOF) {
 				if flushErr := flushEvent(); flushErr != nil && !errors.Is(flushErr, io.EOF) {
-					out <- ai.Token{Err: flushErr, Type: ai.TokenTypeErr}
+					raw <- ai.Token{Err: flushErr, Type: ai.TokenTypeErr}
 				}
 				return
 			}
 		}
 	}()
 
-	return out
+	return ai.WrapStream(raw)
 }
 
 func extractStreamText(raw json.RawMessage) (string, error) {
