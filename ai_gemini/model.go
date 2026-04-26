@@ -69,17 +69,17 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 					continue
 				}
 
-				rawPart, err := json.Marshal(part)
-				if err != nil {
-					encodeErr := fmt.Errorf("error encoding part: %w", err)
-					out <- ai.Token{Err: encodeErr, Type: ai.TokenTypeErr, Text: encodeErr.Error()}
-					return
-				}
-
 				switch {
 				case part.Text != "":
 					out <- buildTextToken(part)
 				case part.FunctionCall != nil:
+					rawPart, err := json.Marshal(part)
+					if err != nil {
+						encodeErr := fmt.Errorf("error encoding part: %w", err)
+						out <- ai.Token{Err: encodeErr, Type: ai.TokenTypeErr, Text: encodeErr.Error()}
+						return
+					}
+
 					toolCall, err := mapFunctionCall(part.FunctionCall)
 					if err != nil {
 						mapErr := fmt.Errorf("error mapping function call: %w", err)
