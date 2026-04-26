@@ -1,6 +1,11 @@
 package ai
 
-import "strings"
+import (
+	"context"
+	"strings"
+
+	"github.com/lace-ai/gai"
+)
 
 type Prompt struct {
 	Prompt  string
@@ -27,4 +32,22 @@ func (p Prompt) CombinedPrompt() string {
 	}
 
 	return res.String()
+}
+
+// CombinedPromptWithDebug combines the prompt with debug logging
+func (p Prompt) CombinedPromptWithDebug(ctx context.Context, debug gai.DebugSink) string {
+	combined := p.CombinedPrompt()
+	if debug != nil && debug.IncludeSencitiveData() {
+		debug.Emit(ctx, gai.DebugEvent{
+			Name:   "prompt_combined",
+			Source: "ai:Prompt.CombinedPromptWithDebug",
+			Fields: map[string]any{
+				"combined_prompt": combined,
+				"system_length":   len(p.System),
+				"context_length":  len(p.Context),
+				"prompt_length":   len(p.Prompt),
+			},
+		})
+	}
+	return combined
 }
