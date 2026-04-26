@@ -65,7 +65,8 @@ func New(model ai.Model, tools []Tool, initialPrompt string, sysPrompt string, c
 
 func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan error) {
 	errCh := make(chan error, 1)
-	tokenCh := make(chan ai.Token)
+	tokenCh := make(chan ai.Token, 16)
+
 	if err := a.Validate(); err != nil {
 		errCh <- err
 		close(errCh)
