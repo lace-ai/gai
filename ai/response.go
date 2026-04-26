@@ -17,7 +17,7 @@ type TokenType string
 
 var (
 	TokenTypeText     TokenType = "text"
-	TokenTypeThought  TokenType = "tought"
+	TokenTypeThought  TokenType = "thought"
 	TokenTypeToolCall TokenType = "tool_call"
 	TokenTypeErr      TokenType = "error"
 )
