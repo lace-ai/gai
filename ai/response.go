@@ -199,7 +199,7 @@ func WrapStream(ctx context.Context, in <-chan Token, debug gai.DebugSink) <-cha
 			for _, b := range t.Data {
 				tokenStr.WriteByte(b)
 
-				if !seenNonWS {
+				if !seenNonWS && !isJSONCandidate {
 					if isWS(b) {
 						continue
 					}
