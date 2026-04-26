@@ -33,7 +33,7 @@ func TestModelGenerate(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	p := New("test-key")
+	p := New("test-key", nil)
 	p.baseURL = ts.URL
 
 	m, err := p.Model(MistralSmallLatest)
@@ -80,7 +80,7 @@ func TestModelGenerateNoChoices(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	p := New("test-key")
+	p := New("test-key", nil)
 	p.baseURL = ts.URL
 
 	m, err := p.Model(MistralSmallLatest)
@@ -127,7 +127,7 @@ func TestModelGenerateStream(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	p := New("test-key")
+	p := New("test-key", nil)
 	p.baseURL = ts.URL
 
 	m, err := p.Model(MistralSmallLatest)
@@ -183,7 +183,7 @@ func TestModelGenerateStreamToolCall(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	p := New("test-key")
+	p := New("test-key", nil)
 	p.baseURL = ts.URL
 
 	m, err := p.Model(MistralSmallLatest)
@@ -252,7 +252,7 @@ func TestModelGenerateStreamDetectsTextEncodedToolCall(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	p := New("test-key")
+	p := New("test-key", nil)
 	p.baseURL = ts.URL
 
 	m, err := p.Model(MistralSmallLatest)

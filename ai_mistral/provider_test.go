@@ -8,7 +8,7 @@ import (
 )
 
 func TestProviderModelValidation(t *testing.T) {
-	p := New("test-key")
+	p := New("test-key", nil)
 
 	model, err := p.Model("   ")
 	if !errors.Is(err, ai.ErrModelNotFound) {
@@ -28,7 +28,7 @@ func TestProviderModelValidation(t *testing.T) {
 }
 
 func TestProviderModelAndListModels(t *testing.T) {
-	p := New("test-key")
+	p := New("test-key", nil)
 
 	model, err := p.Model(MistralSmallLatest)
 	if err != nil {
@@ -55,11 +55,11 @@ func TestProviderValidate(t *testing.T) {
 		t.Fatalf("expected ErrNilProvider, got %v", err)
 	}
 
-	if err := New("   ").Validate(); !errors.Is(err, ErrInvalidAPIKey) {
+	if err := New("   ", nil).Validate(); !errors.Is(err, ErrInvalidAPIKey) {
 		t.Fatalf("expected ErrInvalidAPIKey, got %v", err)
 	}
 
-	if err := New("test-key").Validate(); err != nil {
+	if err := New("test-key", nil).Validate(); err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
 }

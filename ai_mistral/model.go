@@ -11,12 +11,14 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
 )
 
 type Model struct {
 	name   string
 	client *Provider
+	debug  gai.DebugSink
 }
 
 var _ ai.Model = (*Model)(nil)
@@ -120,6 +122,17 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 
 		body, err := json.Marshal(payload)
 		if err != nil {
+			if m.debug != nil {
+				m.debug.Emit(ctx, gai.DebugEvent{
+					Name:   "mistral_stream_request_payload",
+					Source: "ai:mistral.Model.GenerateStream",
+					Fields: map[string]any{
+						"payload": payload,
+						"error":   err.Error(),
+					},
+					Err: err,
+				})
+			}
 			raw <- ai.Token{Err: err, Type: ai.TokenTypeErr}
 			return
 		}
@@ -131,6 +144,16 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			bytes.NewReader(body),
 		)
 		if err != nil {
+			if m.debug != nil {
+				m.debug.Emit(ctx, gai.DebugEvent{
+					Name:   "mistral_stream_request_creation_failed",
+					Source: "ai:mistral.Model.GenerateStream",
+					Fields: map[string]any{
+						"error": err.Error(),
+					},
+					Err: err,
+				})
+			}
 			raw <- ai.Token{Err: err, Type: ai.TokenTypeErr}
 			return
 		}
@@ -140,6 +163,16 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 
 		res, err := m.client.httpClient.Do(httpReq)
 		if err != nil {
+			if m.debug != nil {
+				m.debug.Emit(ctx, gai.DebugEvent{
+					Name:   "mistral_stream_request_failed",
+					Source: "ai:mistral.Model.GenerateStream",
+					Fields: map[string]any{
+						"error": err.Error(),
+					},
+					Err: err,
+				})
+			}
 			raw <- ai.Token{Err: err, Type: ai.TokenTypeErr}
 			return
 		}
@@ -149,11 +182,32 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			const maxResponseBody = 1 << 20 // 1MB
 			resBody, readErr := io.ReadAll(io.LimitReader(res.Body, maxResponseBody))
 			if readErr != nil {
+				if m.debug != nil {
+					m.debug.Emit(ctx, gai.DebugEvent{
+						Name:   "mistral_stream_request_failed_with_unreadable_body",
+						Source: "ai:mistral.Model.GenerateStream",
+						Fields: map[string]any{
+							"status_code": res.StatusCode,
+							"error":       readErr.Error(),
+						},
+						Err: readErr,
+					})
+				}
 				raw <- ai.Token{
 					Err:  fmt.Errorf("mistral chat stream failed (status %d): %w", res.StatusCode, readErr),
 					Type: ai.TokenTypeErr,
 				}
 				return
+			}
+			if m.debug != nil {
+				m.debug.Emit(ctx, gai.DebugEvent{
+					Name:   "mistral_stream_request_failed",
+					Source: "ai:mistral.Model.GenerateStream",
+					Fields: map[string]any{
+						"status_code": res.StatusCode,
+						"response":    string(resBody),
+					},
+				})
 			}
 			raw <- ai.Token{
 				Err:  fmt.Errorf("mistral chat stream failed (status %d): %s", res.StatusCode, string(resBody)),
@@ -195,7 +249,27 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			if toolCalls != "" && toolCalls != "null" {
 				calls, mapErr := mapMistralToolCalls(chunk.Choices[0].Delta.ToolCalls)
 				if mapErr != nil {
+					if m.debug != nil {
+						m.debug.Emit(ctx, gai.DebugEvent{
+							Name:   "mistral_stream_tool_calls_mapping_failed",
+							Source: "ai:mistral.Model.GenerateStream",
+							Fields: map[string]any{
+								"error":      mapErr.Error(),
+								"tool_calls": string(chunk.Choices[0].Delta.ToolCalls),
+							},
+							Err: mapErr,
+						})
+					}
 					return fmt.Errorf("map tool_calls: %w", mapErr)
+				}
+				if m.debug != nil {
+					m.debug.Emit(ctx, gai.DebugEvent{
+						Name:   "mistral_stream_tool_calls_mapped",
+						Source: "ai:mistral.Model.GenerateStream",
+						Fields: map[string]any{
+							"tool_calls": calls,
+						},
+					})
 				}
 				for _, tc := range calls {
 					tcCopy := tc
@@ -213,6 +287,16 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 		for {
 			line, err := reader.ReadString('\n')
 			if err != nil && !errors.Is(err, io.EOF) {
+				if m.debug != nil {
+					m.debug.Emit(ctx, gai.DebugEvent{
+						Name:   "mistral_stream_read_failed",
+						Source: "ai:mistral.Model.GenerateStream",
+						Fields: map[string]any{
+							"error": err.Error(),
+						},
+						Err: err,
+					})
+				}
 				raw <- ai.Token{Err: fmt.Errorf("read stream: %w", err), Type: ai.TokenTypeErr}
 				return
 			}
@@ -221,7 +305,24 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			if line == "" {
 				if flushErr := flushEvent(); flushErr != nil {
 					if errors.Is(flushErr, io.EOF) {
+						if m.debug != nil {
+							m.debug.Emit(ctx, gai.DebugEvent{
+								Name:   "mistral_stream_read_eof",
+								Source: "ai:mistral.Model.GenerateStream",
+								Fields: map[string]any{},
+							})
+						}
 						return
+					}
+					if m.debug != nil {
+						m.debug.Emit(ctx, gai.DebugEvent{
+							Name:   "mistral_stream_chunk_processing_failed",
+							Source: "ai:mistral.Model.GenerateStream",
+							Fields: map[string]any{
+								"error": flushErr.Error(),
+							},
+							Err: flushErr,
+						})
 					}
 					raw <- ai.Token{Err: flushErr, Type: ai.TokenTypeErr}
 					return
@@ -234,7 +335,24 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			}
 
 			if errors.Is(err, io.EOF) {
+				if m.debug != nil {
+					m.debug.Emit(ctx, gai.DebugEvent{
+						Name:   "mistral_stream_read_eof",
+						Source: "ai:mistral.Model.GenerateStream",
+						Fields: map[string]any{},
+					})
+				}
 				if flushErr := flushEvent(); flushErr != nil && !errors.Is(flushErr, io.EOF) {
+					if m.debug != nil {
+						m.debug.Emit(ctx, gai.DebugEvent{
+							Name:   "mistral_stream_final_flush_failed",
+							Source: "ai:mistral.Model.GenerateStream",
+							Fields: map[string]any{
+								"error": flushErr.Error(),
+							},
+							Err: flushErr,
+						})
+					}
 					raw <- ai.Token{Err: flushErr, Type: ai.TokenTypeErr}
 				}
 				return
@@ -242,7 +360,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 		}
 	}()
 
-	return ai.WrapStream(raw)
+	return ai.WrapStream(ctx, raw, m.debug)
 }
 
 func extractStreamText(raw json.RawMessage) (string, error) {

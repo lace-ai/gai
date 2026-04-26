@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
 )
 
@@ -12,17 +13,19 @@ type Provider struct {
 	apiKey     string
 	baseURL    string
 	httpClient *http.Client
+	debug      gai.DebugSink
 }
 
 var _ ai.Provider = (*Provider)(nil)
 
-func New(apiKey string) *Provider {
+func New(apiKey string, debug gai.DebugSink) *Provider {
 	return &Provider{
 		apiKey:  apiKey,
 		baseURL: "https://api.mistral.ai",
 		httpClient: &http.Client{
 			Timeout: 60 * time.Second,
 		},
+		debug: debug,
 	}
 }
 
@@ -53,6 +56,7 @@ func (p *Provider) Model(name string) (ai.Model, error) {
 	return &Model{
 		name:   modelName,
 		client: p,
+		debug:  p.debug,
 	}, nil
 }
 

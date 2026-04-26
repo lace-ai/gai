@@ -15,7 +15,7 @@ type wrapStreamModel struct {
 }
 
 func (m wrapStreamModel) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.Token {
-	return ai.WrapStream(m.Model.GenerateStream(ctx, req))
+	return ai.WrapStream(ctx, m.Model.GenerateStream(ctx, req), nil)
 }
 
 func TestLoop(t *testing.T) {
