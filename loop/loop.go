@@ -88,10 +88,13 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, chan IterationInforma
 			iteration = Iteration{Count: i + 1}
 			toolCalls := 0
 
+			iterCtx, cancel := context.WithCancel(ctx)
+
 			if a.ContextBuilder != nil {
 				context, err := a.ContextBuilder.BuildContext(a)
 				if err != nil {
 					errCh <- err
+					cancel()
 					return
 				}
 				a.InitialPrompt.Context = context
@@ -106,7 +109,7 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, chan IterationInforma
 			}
 			iteration.Request = &request
 
-			tokens := a.Model.GenerateStream(ctx, request)
+			tokens := a.Model.GenerateStream(iterCtx, request)
 
 			wg := sync.WaitGroup{}
 			retrying := false
@@ -120,9 +123,11 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, chan IterationInforma
 					if retryCount < a.RetryCount {
 						retryCount++
 						retrying = true
+						cancel()
 						break
 					} else {
 						errCh <- fmt.Errorf("%w limit:%v error: %v", ErrMaxRetries, a.RetryCount, t.Err)
+						cancel()
 						return
 					}
 				}
@@ -170,6 +175,7 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, chan IterationInforma
 					PartCount:      len(iteration.Parts),
 					RetryCount:     retryCount,
 				}
+				cancel()
 				continue
 			}
 
@@ -182,8 +188,10 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, chan IterationInforma
 				RetryCount:     retryCount,
 			}
 			if toolCalls == 0 && !retrying {
+				cancel()
 				return
 			}
+			cancel()
 		}
 
 		errCh <- fmt.Errorf("%w: limit=%d", ErrMaxIterations, a.MaxLoopIterations)
