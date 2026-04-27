@@ -7,281 +7,203 @@ import (
 	"github.com/lace-ai/gai/ai"
 )
 
-func TestWrapStreamDetectsLeadingToolCallAndPassesThroughRemainder(t *testing.T) {
-	in := make(chan ai.Token, 4)
-	in <- ai.Token{Type: ai.TokenTypeText, Data: []byte(" \n\t{")}
-	in <- ai.Token{Type: ai.TokenTypeText, Data: []byte(`"id":"call-1","name":"function","arguments":{"x":1}}`)}
-	in <- ai.Token{Type: ai.TokenTypeText, Data: []byte(" trailing text")}
-	close(in)
-
-	out := collectTokens(ai.WrapStream(t.Context(), in, nil))
-	if len(out) != 2 {
-		t.Fatalf("expected 2 output tokens, got %d", len(out))
-	}
-
-	if out[0].Type != ai.TokenTypeToolCall {
-		t.Fatalf("expected first token type %q, got %q", ai.TokenTypeToolCall, out[0].Type)
-	}
-	if out[0].ToolCall == nil {
-		t.Fatalf("expected tool call metadata, got nil")
-	}
-	if out[0].ToolCall.ID != "call-1" {
-		t.Fatalf("unexpected tool call id: %q", out[0].ToolCall.ID)
-	}
-	if out[0].ToolCall.Name != "function" {
-		t.Fatalf("unexpected tool call name: %q", out[0].ToolCall.Name)
-	}
-	if normalizeJSON(out[0].ToolCall.Args) != `{"x":1}` {
-		t.Fatalf("unexpected tool call arguments: %s", string(out[0].ToolCall.Args))
-	}
-
-	if out[1].Type != ai.TokenTypeText || string(out[1].Data) != " trailing text" {
-		t.Fatalf("unexpected second token: type=%q data=%q", out[1].Type, string(out[1].Data))
-	}
+type expectedWrapToken struct {
+	typ          ai.TokenType
+	data         string
+	checkData    bool
+	toolID       string
+	toolName     string
+	toolArgsJSON string
 }
 
-func TestWrapStreamPassesThroughNonJSONLeadingText(t *testing.T) {
-	in := make(chan ai.Token, 2)
-	in <- ai.Token{Type: ai.TokenTypeText, Data: []byte("hello")}
-	in <- ai.Token{Type: ai.TokenTypeText, Data: []byte(" world")}
-	close(in)
+func TestWrapStream(t *testing.T) {
+	t.Parallel()
 
-	out := collectTokens(ai.WrapStream(t.Context(), in, nil))
-	if len(out) != 2 {
-		t.Fatalf("expected 2 output tokens, got %d", len(out))
-	}
-	if out[0].Type != ai.TokenTypeText || string(out[0].Data) != "hello" {
-		t.Fatalf("unexpected first token: type=%q data=%q", out[0].Type, string(out[0].Data))
-	}
-	if out[1].Type != ai.TokenTypeText || string(out[1].Data) != " world" {
-		t.Fatalf("unexpected second token: type=%q data=%q", out[1].Type, string(out[1].Data))
-	}
-}
-
-func TestWrapStreamReplaysPendingWhenNonTextArrivesBeforeDecision(t *testing.T) {
-	in := make(chan ai.Token, 3)
-	in <- ai.Token{Type: ai.TokenTypeText, Data: []byte("  ")}
-	in <- ai.Token{Type: ai.TokenTypeErr, Data: []byte("boom")}
-	in <- ai.Token{Type: ai.TokenTypeText, Data: []byte("after")}
-	close(in)
-
-	out := collectTokens(ai.WrapStream(t.Context(), in, nil))
-	if len(out) != 3 {
-		t.Fatalf("expected 3 output tokens, got %d", len(out))
-	}
-	if out[0].Type != ai.TokenTypeText || string(out[0].Data) != "  " {
-		t.Fatalf("unexpected first token: type=%q data=%q", out[0].Type, string(out[0].Data))
-	}
-	if out[1].Type != ai.TokenTypeErr || string(out[1].Data) != "boom" {
-		t.Fatalf("unexpected second token: type=%q data=%q", out[1].Type, string(out[1].Data))
-	}
-	if out[2].Type != ai.TokenTypeText || string(out[2].Data) != "after" {
-		t.Fatalf("unexpected third token: type=%q data=%q", out[2].Type, string(out[2].Data))
-	}
-}
-
-func TestWrapStreamReplaysWhenJSONIsNotValidToolCall(t *testing.T) {
-	in := make(chan ai.Token, 2)
-	in <- ai.Token{Type: ai.TokenTypeText, Data: []byte(`{"id":"call-1","name":"not-function"}`)}
-	in <- ai.Token{Type: ai.TokenTypeText, Data: []byte("tail")}
-	close(in)
-
-	out := collectTokens(ai.WrapStream(t.Context(), in, nil))
-	if len(out) != 2 {
-		t.Fatalf("expected 2 output tokens, got %d", len(out))
-	}
-	if out[0].Type != ai.TokenTypeText || string(out[0].Data) != `{"id":"call-1","name":"not-function"}` {
-		t.Fatalf("unexpected first token: type=%q data=%q", out[0].Type, string(out[0].Data))
-	}
-	if out[1].Type != ai.TokenTypeText || string(out[1].Data) != "tail" {
-		t.Fatalf("unexpected second token: type=%q data=%q", out[1].Type, string(out[1].Data))
-	}
-}
-
-func TestWrapStreamReplaysUnclosedJSONAtEndOfStream(t *testing.T) {
-	in := make(chan ai.Token, 1)
-	in <- ai.Token{Type: ai.TokenTypeText, Data: []byte(`{"id":"call-1","name":"function"`)}
-	close(in)
-
-	out := collectTokens(ai.WrapStream(t.Context(), in, nil))
-	if len(out) != 1 {
-		t.Fatalf("expected 1 output token, got %d", len(out))
-	}
-	if out[0].Type != ai.TokenTypeText || string(out[0].Data) != `{"id":"call-1","name":"function"` {
-		t.Fatalf("unexpected token: type=%q data=%q", out[0].Type, string(out[0].Data))
-	}
-}
-
-func TestWrapStreamHandlesBracesInsideStrings(t *testing.T) {
-	in := make(chan ai.Token, 2)
-	in <- ai.Token{Type: ai.TokenTypeText, Data: []byte(`{"id":"call-2","name":"function","arguments":{"msg":"{\\\"a\\\":1}"`)}
-	in <- ai.Token{Type: ai.TokenTypeText, Data: []byte(`,"items":[1,2,3]}}`)}
-	close(in)
-
-	out := collectTokens(ai.WrapStream(t.Context(), in, nil))
-	if len(out) != 1 {
-		t.Fatalf("expected 1 output token, got %d", len(out))
-	}
-	if out[0].Type != ai.TokenTypeToolCall || out[0].ToolCall == nil {
-		t.Fatalf("expected tool call token, got type=%q", out[0].Type)
-	}
-	if out[0].ToolCall.ID != "call-2" {
-		t.Fatalf("unexpected tool call id: %q", out[0].ToolCall.ID)
-	}
-	if normalizeJSON(out[0].ToolCall.Args) != `{"items":[1,2,3],"msg":"{\\\"a\\\":1}"}` {
-		t.Fatalf("unexpected tool call arguments: %s", string(out[0].ToolCall.Args))
-	}
-}
-
-func TestWrapStreamDefaultsMissingArgumentsToEmptyObject(t *testing.T) {
-	in := make(chan ai.Token, 1)
-	in <- ai.Token{Type: ai.TokenTypeText, Data: []byte(`{"id":"call-3","name":"function"}`)}
-	close(in)
-
-	out := collectTokens(ai.WrapStream(t.Context(), in, nil))
-	if len(out) != 1 {
-		t.Fatalf("expected 1 output token, got %d", len(out))
-	}
-	if out[0].Type != ai.TokenTypeToolCall || out[0].ToolCall == nil {
-		t.Fatalf("expected tool call token, got type=%q", out[0].Type)
-	}
-	if normalizeJSON(out[0].ToolCall.Args) != `{}` {
-		t.Fatalf("unexpected default arguments: %s", string(out[0].ToolCall.Args))
-	}
-}
-
-func TestWrapStreamDetectsToolCallAndPreservesTrailingTextInSameToken(t *testing.T) {
-	in := make(chan ai.Token, 1)
-	in <- ai.Token{Type: ai.TokenTypeText, Data: []byte(`{"id":"call-10","name":"function","arguments":{"x":1}} trailing`)}
-	close(in)
-
-	out := collectTokens(ai.WrapStream(t.Context(), in, nil))
-	if len(out) != 2 {
-		t.Fatalf("expected 2 output tokens, got %d", len(out))
-	}
-
-	if out[0].Type != ai.TokenTypeToolCall || out[0].ToolCall == nil {
-		t.Fatalf("expected first token to be tool call, got type=%q", out[0].Type)
-	}
-	if out[0].ToolCall.ID != "call-10" {
-		t.Fatalf("unexpected tool call id: %q", out[0].ToolCall.ID)
-	}
-	if normalizeJSON(out[0].ToolCall.Args) != `{"x":1}` {
-		t.Fatalf("unexpected tool call arguments: %s", string(out[0].ToolCall.Args))
-	}
-
-	if out[1].Type != ai.TokenTypeText || string(out[1].Data) != " trailing" {
-		t.Fatalf("unexpected trailing token: type=%q data=%q", out[1].Type, string(out[1].Data))
-	}
-}
-
-func TestWrapStreamDetectsAdjacentToolCallsInSameToken(t *testing.T) {
-	in := make(chan ai.Token, 1)
-	in <- ai.Token{Type: ai.TokenTypeText, Data: []byte(`{"id":"call-11","name":"function","arguments":{"x":1}}{"id":"call-12","name":"function","arguments":{"y":2}} tail`)}
-	close(in)
-
-	out := collectTokens(ai.WrapStream(t.Context(), in, nil))
-	if len(out) != 3 {
-		t.Fatalf("expected 3 output tokens, got %d", len(out))
-	}
-
-	if out[0].Type != ai.TokenTypeToolCall || out[0].ToolCall == nil || out[0].ToolCall.ID != "call-11" {
-		t.Fatalf("unexpected first token: type=%q id=%v", out[0].Type, out[0].ToolCall)
-	}
-	if normalizeJSON(out[0].ToolCall.Args) != `{"x":1}` {
-		t.Fatalf("unexpected first tool call arguments: %s", string(out[0].ToolCall.Args))
+	tests := []struct {
+		name   string
+		input  []ai.Token
+		output []expectedWrapToken
+	}{
+		{
+			name: "Detects leading tool call and passes through remainder",
+			input: []ai.Token{
+				{Type: ai.TokenTypeText, Data: []byte(" \n\t{")},
+				{Type: ai.TokenTypeText, Data: []byte(`"id":"call-1","name":"function","arguments":{"x":1}}`)},
+				{Type: ai.TokenTypeText, Data: []byte(" trailing text")},
+			},
+			output: []expectedWrapToken{
+				{typ: ai.TokenTypeToolCall, toolID: "call-1", toolName: "function", toolArgsJSON: `{"x":1}`},
+				{typ: ai.TokenTypeText, data: " trailing text", checkData: true},
+			},
+		},
+		{
+			name: "Passes through non-JSON leading text",
+			input: []ai.Token{
+				{Type: ai.TokenTypeText, Data: []byte("hello")},
+				{Type: ai.TokenTypeText, Data: []byte(" world")},
+			},
+			output: []expectedWrapToken{
+				{typ: ai.TokenTypeText, data: "hello", checkData: true},
+				{typ: ai.TokenTypeText, data: " world", checkData: true},
+			},
+		},
+		{
+			name: "Replays pending when non-text arrives before decision",
+			input: []ai.Token{
+				{Type: ai.TokenTypeText, Data: []byte("  ")},
+				{Type: ai.TokenTypeErr, Data: []byte("boom")},
+				{Type: ai.TokenTypeText, Data: []byte("after")},
+			},
+			output: []expectedWrapToken{
+				{typ: ai.TokenTypeText, data: "  ", checkData: true},
+				{typ: ai.TokenTypeErr, data: "boom", checkData: true},
+				{typ: ai.TokenTypeText, data: "after", checkData: true},
+			},
+		},
+		{
+			name: "Replays when JSON is not a valid tool call",
+			input: []ai.Token{
+				{Type: ai.TokenTypeText, Data: []byte(`{"id":"call-1","name":"not-function"}`)},
+				{Type: ai.TokenTypeText, Data: []byte("tail")},
+			},
+			output: []expectedWrapToken{
+				{typ: ai.TokenTypeText, data: `{"id":"call-1","name":"not-function"}`, checkData: true},
+				{typ: ai.TokenTypeText, data: "tail", checkData: true},
+			},
+		},
+		{
+			name: "Replays unclosed JSON at end of stream",
+			input: []ai.Token{
+				{Type: ai.TokenTypeText, Data: []byte(`{"id":"call-1","name":"function"`)},
+			},
+			output: []expectedWrapToken{
+				{typ: ai.TokenTypeText, data: `{"id":"call-1","name":"function"`, checkData: true},
+			},
+		},
+		{
+			name: "Handles braces inside strings",
+			input: []ai.Token{
+				{Type: ai.TokenTypeText, Data: []byte(`{"id":"call-2","name":"function","arguments":{"msg":"{\\\"a\\\":1}"`)},
+				{Type: ai.TokenTypeText, Data: []byte(`,"items":[1,2,3]}}`)},
+			},
+			output: []expectedWrapToken{
+				{typ: ai.TokenTypeToolCall, toolID: "call-2", toolName: "function", toolArgsJSON: `{"items":[1,2,3],"msg":"{\\\"a\\\":1}"}`},
+			},
+		},
+		{
+			name: "Defaults missing arguments to empty object",
+			input: []ai.Token{
+				{Type: ai.TokenTypeText, Data: []byte(`{"id":"call-3","name":"function"}`)},
+			},
+			output: []expectedWrapToken{
+				{typ: ai.TokenTypeToolCall, toolID: "call-3", toolName: "function", toolArgsJSON: `{}`},
+			},
+		},
+		{
+			name: "Detects tool call and preserves trailing text in same token",
+			input: []ai.Token{
+				{Type: ai.TokenTypeText, Data: []byte(`{"id":"call-10","name":"function","arguments":{"x":1}} trailing`)},
+			},
+			output: []expectedWrapToken{
+				{typ: ai.TokenTypeToolCall, toolID: "call-10", toolName: "function", toolArgsJSON: `{"x":1}`},
+				{typ: ai.TokenTypeText, data: " trailing", checkData: true},
+			},
+		},
+		{
+			name: "Detects adjacent tool calls in same token",
+			input: []ai.Token{
+				{Type: ai.TokenTypeText, Data: []byte(`{"id":"call-11","name":"function","arguments":{"x":1}}{"id":"call-12","name":"function","arguments":{"y":2}} tail`)},
+			},
+			output: []expectedWrapToken{
+				{typ: ai.TokenTypeToolCall, toolID: "call-11", toolName: "function", toolArgsJSON: `{"x":1}`},
+				{typ: ai.TokenTypeToolCall, toolID: "call-12", toolName: "function", toolArgsJSON: `{"y":2}`},
+				{typ: ai.TokenTypeText, data: " tail", checkData: true},
+			},
+		},
+		{
+			name: "Detects tool call from production-like chunked JSON",
+			input: []ai.Token{
+				{Type: ai.TokenTypeText, Data: []byte("\n")},
+				{Type: ai.TokenTypeText, Data: []byte("\n")},
+				{Type: ai.TokenTypeText, Data: []byte(`{"id":"`)},
+				{Type: ai.TokenTypeText, Data: []byte(`echo","`)},
+				{Type: ai.TokenTypeText, Data: []byte(`name":"function","`)},
+				{Type: ai.TokenTypeText, Data: []byte(`arguments":{"`)},
+				{Type: ai.TokenTypeText, Data: []byte(`text":"try`)},
+				{Type: ai.TokenTypeText, Data: []byte(` the echo tool"}}`)},
+			},
+			output: []expectedWrapToken{
+				{typ: ai.TokenTypeToolCall, toolID: "echo", toolName: "function", toolArgsJSON: `{"text":"try the echo tool"}`},
+			},
+		},
+		{
+			name: "Does not detect tool call when text prefix exists",
+			input: []ai.Token{
+				{Type: ai.TokenTypeText, Data: []byte("Sure, I can help. ")},
+				{Type: ai.TokenTypeText, Data: []byte(`{"id":"call-9","name":"function","arguments":{"x":1}}`)},
+				{Type: ai.TokenTypeText, Data: []byte(" done")},
+			},
+			output: []expectedWrapToken{
+				{typ: ai.TokenTypeText, data: "Sure, I can help. ", checkData: true},
+				{typ: ai.TokenTypeText, data: `{"id":"call-9","name":"function","arguments":{"x":1}}`, checkData: true},
+				{typ: ai.TokenTypeText, data: " done", checkData: true},
+			},
+		},
+		{
+			name: "Preserves non-tool JSON object",
+			input: []ai.Token{
+				{Type: ai.TokenTypeText, Data: []byte(`{"kind":"event","value":123}`)},
+				{Type: ai.TokenTypeText, Data: []byte(" tail")},
+			},
+			output: []expectedWrapToken{
+				{typ: ai.TokenTypeText, data: `{"kind":"event","value":123}`, checkData: true},
+				{typ: ai.TokenTypeText, data: " tail", checkData: true},
+			},
+		},
 	}
 
-	if out[1].Type != ai.TokenTypeToolCall || out[1].ToolCall == nil || out[1].ToolCall.ID != "call-12" {
-		t.Fatalf("unexpected second token: type=%q id=%v", out[1].Type, out[1].ToolCall)
-	}
-	if normalizeJSON(out[1].ToolCall.Args) != `{"y":2}` {
-		t.Fatalf("unexpected second tool call arguments: %s", string(out[1].ToolCall.Args))
-	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	if out[2].Type != ai.TokenTypeText || string(out[2].Data) != " tail" {
-		t.Fatalf("unexpected trailing token: type=%q data=%q", out[2].Type, string(out[2].Data))
-	}
-}
+			in := make(chan ai.Token, len(tt.input))
+			for _, tok := range tt.input {
+				in <- tok
+			}
+			close(in)
 
-func TestWrapStreamDetectsToolCallFromProductionLikeChunkedJSON(t *testing.T) {
-	chunks := []string{
-		"\n",
-		"\n",
-		`{"id":"`,
-		`echo","`,
-		`name":"function","`,
-		`arguments":{"`,
-		`text":"try`,
-		` the echo tool"}}`,
-	}
+			out := collectTokens(ai.WrapStream(t.Context(), in, nil))
+			if len(out) != len(tt.output) {
+				t.Fatalf("expected %d output tokens, got %d", len(tt.output), len(out))
+			}
 
-	in := make(chan ai.Token, len(chunks))
-	for _, c := range chunks {
-		in <- ai.Token{Type: ai.TokenTypeText, Data: []byte(c)}
-	}
-	close(in)
+			for i, expected := range tt.output {
+				got := out[i]
+				if got.Type != expected.typ {
+					t.Fatalf("token %d unexpected type: got=%q want=%q", i, got.Type, expected.typ)
+				}
 
-	out := collectTokens(ai.WrapStream(t.Context(), in, nil))
-	if len(out) != 1 {
-		t.Fatalf("expected exactly 1 output token, got %d", len(out))
-	}
+				if expected.checkData && string(got.Data) != expected.data {
+					t.Fatalf("token %d unexpected data: got=%q want=%q", i, string(got.Data), expected.data)
+				}
 
-	if out[0].Type != ai.TokenTypeToolCall {
-		t.Fatalf("expected output type %q, got %q", ai.TokenTypeToolCall, out[0].Type)
-	}
-	if out[0].ToolCall == nil {
-		t.Fatal("expected tool call metadata, got nil")
-	}
-	if out[0].ToolCall.ID != "echo" {
-		t.Fatalf("unexpected tool call id: %q", out[0].ToolCall.ID)
-	}
-	if out[0].ToolCall.Name != "function" {
-		t.Fatalf("unexpected tool call name: %q", out[0].ToolCall.Name)
-	}
-	if normalizeJSON(out[0].ToolCall.Args) != `{"text":"try the echo tool"}` {
-		t.Fatalf("unexpected tool call arguments: %s", string(out[0].ToolCall.Args))
-	}
-}
-
-func TestWrapStreamDoesNotDetectToolCallWhenTextPrefixExists(t *testing.T) {
-	in := make(chan ai.Token, 3)
-	in <- ai.Token{Type: ai.TokenTypeText, Data: []byte("Sure, I can help. ")}
-	in <- ai.Token{Type: ai.TokenTypeText, Data: []byte(`{"id":"call-9","name":"function","arguments":{"x":1}}`)}
-	in <- ai.Token{Type: ai.TokenTypeText, Data: []byte(" done")}
-	close(in)
-
-	out := collectTokens(ai.WrapStream(t.Context(), in, nil))
-	if len(out) != 3 {
-		t.Fatalf("expected 3 output tokens, got %d", len(out))
-	}
-
-	if out[0].Type != ai.TokenTypeText || string(out[0].Data) != "Sure, I can help. " {
-		t.Fatalf("unexpected first token: type=%q data=%q", out[0].Type, string(out[0].Data))
-	}
-	if out[1].Type != ai.TokenTypeText || string(out[1].Data) != `{"id":"call-9","name":"function","arguments":{"x":1}}` {
-		t.Fatalf("unexpected second token: type=%q data=%q", out[1].Type, string(out[1].Data))
-	}
-	if out[2].Type != ai.TokenTypeText || string(out[2].Data) != " done" {
-		t.Fatalf("unexpected third token: type=%q data=%q", out[2].Type, string(out[2].Data))
-	}
-}
-
-func TestWrapStreamPreservesNonToolJSONObject(t *testing.T) {
-	in := make(chan ai.Token, 2)
-	in <- ai.Token{Type: ai.TokenTypeText, Data: []byte(`{"kind":"event","value":123}`)}
-	in <- ai.Token{Type: ai.TokenTypeText, Data: []byte(" tail")}
-	close(in)
-
-	out := collectTokens(ai.WrapStream(t.Context(), in, nil))
-	if len(out) != 2 {
-		t.Fatalf("expected 2 output tokens, got %d", len(out))
-	}
-	if out[0].Type != ai.TokenTypeText || string(out[0].Data) != `{"kind":"event","value":123}` {
-		t.Fatalf("unexpected first token: type=%q data=%q", out[0].Type, string(out[0].Data))
-	}
-	if out[1].Type != ai.TokenTypeText || string(out[1].Data) != " tail" {
-		t.Fatalf("unexpected second token: type=%q data=%q", out[1].Type, string(out[1].Data))
+				if expected.typ == ai.TokenTypeToolCall {
+					if got.ToolCall == nil {
+						t.Fatalf("token %d expected tool call metadata, got nil", i)
+					}
+					if got.ToolCall.ID != expected.toolID {
+						t.Fatalf("token %d unexpected tool call id: got=%q want=%q", i, got.ToolCall.ID, expected.toolID)
+					}
+					if got.ToolCall.Name != expected.toolName {
+						t.Fatalf("token %d unexpected tool call name: got=%q want=%q", i, got.ToolCall.Name, expected.toolName)
+					}
+					if normalizeJSON(got.ToolCall.Args) != expected.toolArgsJSON {
+						t.Fatalf("token %d unexpected tool call arguments: got=%s want=%s", i, string(got.ToolCall.Args), expected.toolArgsJSON)
+					}
+				}
+			}
+		})
 	}
 }
 
