@@ -8,7 +8,7 @@ import (
 )
 
 func TestModelRepository(t *testing.T) {
-	repo := ai.NewModelRepository()
+	repo := ai.NewModelRepository(nil)
 
 	// Test registering a provider
 	provider := &mocks.MockProvider{ProviderName: "mock"}
