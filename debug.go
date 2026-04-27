@@ -23,5 +23,17 @@ func (f DebugSinkFunc) Emit(ctx context.Context, e DebugEvent) {
 }
 
 func (f DebugSinkFunc) IncludeSencitiveData() bool {
+	return false
+}
+
+type SensitiveDebugSinkFunc func(ctx context.Context, e DebugEvent)
+
+func (f SensitiveDebugSinkFunc) Emit(ctx context.Context, e DebugEvent) {
+	if f != nil {
+		f(ctx, e)
+	}
+}
+
+func (f SensitiveDebugSinkFunc) IncludeSencitiveData() bool {
 	return true
 }
