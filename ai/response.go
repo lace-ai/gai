@@ -118,16 +118,20 @@ func WrapStream(ctx context.Context, in <-chan Token, debug gai.DebugSink) <-cha
 		inString := false
 		escape := false
 
-		flushPending := func() {
-			for _, t := range pending {
-				out <- t
-			}
+		resetTracking := func() {
 			newLines = 0
 			isJSONCandidate = false
 			objDepth = 0
 			arrDepth = 0
 			inString = false
 			escape = false
+		}
+
+		flushPending := func() {
+			for _, t := range pending {
+				out <- t
+			}
+			resetTracking()
 			pending = nil
 		}
 
@@ -152,7 +156,10 @@ func WrapStream(ctx context.Context, in <-chan Token, debug gai.DebugSink) <-cha
 				return false
 			}
 
-			payload := append(joinTokenData(pending[:len(pending)-1]), []byte(last)...)
+			payload := []byte(last)
+			if len(pending) > 0 {
+				payload = append(joinTokenData(pending[:len(pending)-1]), payload...)
+			}
 			if tc, ok := parseToolCall(payload); ok {
 				if debug != nil {
 					fields := map[string]any{
@@ -173,6 +180,7 @@ func WrapStream(ctx context.Context, in <-chan Token, debug gai.DebugSink) <-cha
 					Data:     payload,
 					ToolCall: tc,
 				}
+				resetTracking()
 			} else {
 				if debug != nil {
 					fields := map[string]any{
@@ -202,93 +210,107 @@ func WrapStream(ctx context.Context, in <-chan Token, debug gai.DebugSink) <-cha
 				continue
 			}
 
-			pending = append(pending, t)
+			remaining := t.Data
+			for len(remaining) > 0 {
+				pending = append(pending, Token{Type: TokenTypeText, Data: remaining})
 
-			var tokenStr strings.Builder
-			for _, b := range t.Data {
-				tokenStr.WriteByte(b)
+				var tokenStr strings.Builder
+				handledCandidate := false
+				for idx, b := range remaining {
+					tokenStr.WriteByte(b)
 
-				if !seenNonWS && !isJSONCandidate {
-					if isWS(b) {
-						continue
-					}
-					seenNonWS = true
-					if b == '{' {
-						if debug != nil {
-							fields := map[string]any{}
-							if debug.IncludeSencitiveData() {
-								fields["data"] = string(tokenStr.String())
-							}
-							debug.Emit(ctx, gai.DebugEvent{
-								Name:   "wrap_stream_json_candidate",
-								Source: "ai:WrapStream",
-								Fields: fields,
-							})
+					if !seenNonWS && !isJSONCandidate {
+						if isWS(b) {
+							continue
 						}
-						isJSONCandidate = true
-						objDepth = 1
-					}
-					continue
-				}
-
-				if !isJSONCandidate {
-					if b == '\n' {
-						newLines++
-					}
-					if newLines >= 2 && b == '{' {
-						if debug != nil {
-							fields := map[string]any{}
-							if debug.IncludeSencitiveData() {
-								fields["data"] = string(tokenStr.String())
+						seenNonWS = true
+						if b == '{' {
+							if debug != nil {
+								fields := map[string]any{}
+								if debug.IncludeSencitiveData() {
+									fields["data"] = string(tokenStr.String())
+								}
+								debug.Emit(ctx, gai.DebugEvent{
+									Name:   "wrap_stream_json_candidate",
+									Source: "ai:WrapStream",
+									Fields: fields,
+								})
 							}
-							debug.Emit(ctx, gai.DebugEvent{
-								Name:   "wrap_stream_json_candidate_after_newlines",
-								Source: "ai:WrapStream",
-								Fields: fields,
-							})
+							isJSONCandidate = true
+							objDepth = 1
 						}
-						isJSONCandidate = true
-						objDepth = 1
-						newLines = 0
-					}
-					continue
-				}
-
-				if inString {
-					if escape {
-						escape = false
 						continue
 					}
-					if b == '\\' {
-						escape = true
+
+					if !isJSONCandidate {
+						if b == '\n' {
+							newLines++
+						}
+						if newLines >= 2 && b == '{' {
+							if debug != nil {
+								fields := map[string]any{}
+								if debug.IncludeSencitiveData() {
+									fields["data"] = string(tokenStr.String())
+								}
+								debug.Emit(ctx, gai.DebugEvent{
+									Name:   "wrap_stream_json_candidate_after_newlines",
+									Source: "ai:WrapStream",
+									Fields: fields,
+								})
+							}
+							isJSONCandidate = true
+							objDepth = 1
+							newLines = 0
+						}
 						continue
 					}
-					if b == '"' {
-						inString = false
+
+					if inString {
+						if escape {
+							escape = false
+							continue
+						}
+						if b == '\\' {
+							escape = true
+							continue
+						}
+						if b == '"' {
+							inString = false
+						}
+						continue
 					}
-					continue
+
+					switch b {
+					case '"':
+						inString = true
+					case '{':
+						objDepth++
+					case '}':
+						objDepth--
+					case '[':
+						arrDepth++
+					case ']':
+						arrDepth--
+					}
+
+					// If JSON candidate is balanced at this byte, decide now.
+					if isJSONCandidate && !inString && objDepth == 0 && arrDepth == 0 {
+						if maybeToolCall(tokenStr.String()) {
+							handledCandidate = true
+							if idx+1 < len(remaining) {
+								remaining = append([]byte(nil), remaining[idx+1:]...)
+								seenNonWS = false
+							} else {
+								remaining = nil
+							}
+							break
+						}
+					}
 				}
 
-				switch b {
-				case '"':
-					inString = true
-				case '{':
-					objDepth++
-				case '}':
-					objDepth--
-				case '[':
-					arrDepth++
-				case ']':
-					arrDepth--
+				if !handledCandidate {
+					break
 				}
-				if maybeToolCall(tokenStr.String()) {
-					continue
-				}
-			}
-
-			if maybeToolCall(tokenStr.String()) {
-				tokenStr.Reset()
-				continue
 			}
 		}
 

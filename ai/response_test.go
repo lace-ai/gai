@@ -150,6 +150,60 @@ func TestWrapStreamDefaultsMissingArgumentsToEmptyObject(t *testing.T) {
 	}
 }
 
+func TestWrapStreamDetectsToolCallAndPreservesTrailingTextInSameToken(t *testing.T) {
+	in := make(chan ai.Token, 1)
+	in <- ai.Token{Type: ai.TokenTypeText, Data: []byte(`{"id":"call-10","name":"function","arguments":{"x":1}} trailing`)}
+	close(in)
+
+	out := collectTokens(ai.WrapStream(t.Context(), in, nil))
+	if len(out) != 2 {
+		t.Fatalf("expected 2 output tokens, got %d", len(out))
+	}
+
+	if out[0].Type != ai.TokenTypeToolCall || out[0].ToolCall == nil {
+		t.Fatalf("expected first token to be tool call, got type=%q", out[0].Type)
+	}
+	if out[0].ToolCall.ID != "call-10" {
+		t.Fatalf("unexpected tool call id: %q", out[0].ToolCall.ID)
+	}
+	if normalizeJSON(out[0].ToolCall.Args) != `{"x":1}` {
+		t.Fatalf("unexpected tool call arguments: %s", string(out[0].ToolCall.Args))
+	}
+
+	if out[1].Type != ai.TokenTypeText || string(out[1].Data) != " trailing" {
+		t.Fatalf("unexpected trailing token: type=%q data=%q", out[1].Type, string(out[1].Data))
+	}
+}
+
+func TestWrapStreamDetectsAdjacentToolCallsInSameToken(t *testing.T) {
+	in := make(chan ai.Token, 1)
+	in <- ai.Token{Type: ai.TokenTypeText, Data: []byte(`{"id":"call-11","name":"function","arguments":{"x":1}}{"id":"call-12","name":"function","arguments":{"y":2}} tail`)}
+	close(in)
+
+	out := collectTokens(ai.WrapStream(t.Context(), in, nil))
+	if len(out) != 3 {
+		t.Fatalf("expected 3 output tokens, got %d", len(out))
+	}
+
+	if out[0].Type != ai.TokenTypeToolCall || out[0].ToolCall == nil || out[0].ToolCall.ID != "call-11" {
+		t.Fatalf("unexpected first token: type=%q id=%v", out[0].Type, out[0].ToolCall)
+	}
+	if normalizeJSON(out[0].ToolCall.Args) != `{"x":1}` {
+		t.Fatalf("unexpected first tool call arguments: %s", string(out[0].ToolCall.Args))
+	}
+
+	if out[1].Type != ai.TokenTypeToolCall || out[1].ToolCall == nil || out[1].ToolCall.ID != "call-12" {
+		t.Fatalf("unexpected second token: type=%q id=%v", out[1].Type, out[1].ToolCall)
+	}
+	if normalizeJSON(out[1].ToolCall.Args) != `{"y":2}` {
+		t.Fatalf("unexpected second tool call arguments: %s", string(out[1].ToolCall.Args))
+	}
+
+	if out[2].Type != ai.TokenTypeText || string(out[2].Data) != " tail" {
+		t.Fatalf("unexpected trailing token: type=%q data=%q", out[2].Type, string(out[2].Data))
+	}
+}
+
 func TestWrapStreamDetectsToolCallFromProductionLikeChunkedJSON(t *testing.T) {
 	chunks := []string{
 		"\n",
