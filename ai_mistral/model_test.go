@@ -3,8 +3,10 @@ package mistral
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/lace-ai/gai/ai"
@@ -32,7 +34,7 @@ func TestModelGenerate(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	p := New("test-key")
+	p := New("test-key", nil)
 	p.baseURL = ts.URL
 
 	m, err := p.Model(MistralSmallLatest)
@@ -79,7 +81,7 @@ func TestModelGenerateNoChoices(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	p := New("test-key")
+	p := New("test-key", nil)
 	p.baseURL = ts.URL
 
 	m, err := p.Model(MistralSmallLatest)
@@ -90,5 +92,221 @@ func TestModelGenerateNoChoices(t *testing.T) {
 	_, err = m.Generate(context.Background(), ai.AIRequest{Prompt: ai.Prompt{Prompt: "hello"}})
 	if err != ErrNoChoices {
 		t.Fatalf("expected ErrNoChoices, got %v", err)
+	}
+}
+
+func TestModelGenerateStream(t *testing.T) {
+	var gotReq chatCompletionRequest
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("expected POST, got %s", r.Method)
+		}
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotReq); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("response writer is not a flusher")
+		}
+
+		for _, chunk := range []string{
+			`data: {"choices":[{"delta":{"content":"hel"}}]}` + "\n\n",
+			`data: {"choices":[{"delta":{"content":"lo"}}]}` + "\n\n",
+			"data: [DONE]\n\n",
+		} {
+			if _, err := fmt.Fprint(w, chunk); err != nil {
+				t.Fatalf("write stream chunk: %v", err)
+			}
+			flusher.Flush()
+		}
+	}))
+	defer ts.Close()
+
+	p := New("test-key", nil)
+	p.baseURL = ts.URL
+
+	m, err := p.Model(MistralSmallLatest)
+	if err != nil {
+		t.Fatalf("Model error: %v", err)
+	}
+
+	stream := m.GenerateStream(context.Background(), ai.AIRequest{
+		Prompt:    ai.Prompt{Prompt: "hello"},
+		MaxTokens: 55,
+	})
+
+	var gotText string
+	for tok := range stream {
+		if tok.Err != nil {
+			t.Fatalf("unexpected stream error: %v", tok.Err)
+		}
+		if tok.Type != ai.TokenTypeText {
+			t.Fatalf("unexpected token type: %s", tok.Type)
+		}
+		gotText += tok.String()
+	}
+
+	if !gotReq.Stream {
+		t.Fatalf("expected stream=true in payload")
+	}
+	if gotReq.MaxTokens == nil || *gotReq.MaxTokens != 55 {
+		t.Fatalf("expected max_tokens=55, got %+v", gotReq.MaxTokens)
+	}
+	if gotText != "hello" {
+		t.Fatalf("unexpected streamed text: %q", gotText)
+	}
+}
+
+func TestModelGenerateStreamToolCall(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("response writer is not a flusher")
+		}
+
+		toolCallJSON := `[{"id":"call_abc","type":"function","function":{"name":"my_tool","arguments":"{\"param\":\"value\"}"}}]`
+		for _, chunk := range []string{
+			`data: {"choices":[{"delta":{"tool_calls":` + toolCallJSON + `}}]}` + "\n\n",
+			"data: [DONE]\n\n",
+		} {
+			if _, err := fmt.Fprint(w, chunk); err != nil {
+				t.Fatalf("write stream chunk: %v", err)
+			}
+			flusher.Flush()
+		}
+	}))
+	defer ts.Close()
+
+	p := New("test-key", nil)
+	p.baseURL = ts.URL
+
+	m, err := p.Model(MistralSmallLatest)
+	if err != nil {
+		t.Fatalf("Model error: %v", err)
+	}
+
+	stream := m.GenerateStream(context.Background(), ai.AIRequest{
+		Prompt: ai.Prompt{Prompt: "call a tool"},
+	})
+
+	var tokens []ai.Token
+	for tok := range stream {
+		if tok.Err != nil {
+			t.Fatalf("unexpected stream error: %v", tok.Err)
+		}
+		tokens = append(tokens, tok)
+	}
+
+	if len(tokens) != 1 {
+		t.Fatalf("expected 1 token, got %d", len(tokens))
+	}
+	tok := tokens[0]
+	if tok.Type != ai.TokenTypeToolCall {
+		t.Fatalf("expected TokenTypeToolCall, got %s", tok.Type)
+	}
+	if tok.ToolCall == nil {
+		t.Fatal("expected ToolCall to be populated, got nil")
+	}
+	if !strings.HasPrefix(tok.ToolCall.ID, "call_my_tool_") {
+		t.Fatalf("expected generated ToolCall.ID for my_tool, got %q", tok.ToolCall.ID)
+	}
+	if tok.ToolCall.Type != "function" {
+		t.Fatalf("expected ToolCall.Type=function, got %q", tok.ToolCall.Type)
+	}
+	if tok.ToolCall.Name != "my_tool" {
+		t.Fatalf("expected ToolCall.Name=my_tool, got %q", tok.ToolCall.Name)
+	}
+	wantArgs := `{"param":"value"}`
+	if string(tok.ToolCall.Args) != wantArgs {
+		t.Fatalf("expected ToolCall.Args=%s, got %s", wantArgs, string(tok.ToolCall.Args))
+	}
+}
+
+func TestModelGenerateStreamDetectsTextEncodedToolCall(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("response writer is not a flusher")
+		}
+
+		for _, chunk := range []string{
+			`data: {"choices":[{"delta":{"content":"\n"}}]}` + "\n\n",
+			`data: {"choices":[{"delta":{"content":"\n"}}]}` + "\n\n",
+			`data: {"choices":[{"delta":{"content":"{\"id\":\""}}]}` + "\n\n",
+			`data: {"choices":[{"delta":{"content":"echo\",\""}}]}` + "\n\n",
+			`data: {"choices":[{"delta":{"content":"type\":\"function\",\""}}]}` + "\n\n",
+			`data: {"choices":[{"delta":{"content":"name\":\"echo\",\""}}]}` + "\n\n",
+			`data: {"choices":[{"delta":{"content":"arguments\":{\""}}]}` + "\n\n",
+			`data: {"choices":[{"delta":{"content":"text\":\"try"}}]}` + "\n\n",
+			`data: {"choices":[{"delta":{"content":" the echo tool\"}}"}}]}` + "\n\n",
+			"data: [DONE]\n\n",
+		} {
+			if _, err := fmt.Fprint(w, chunk); err != nil {
+				t.Fatalf("write stream chunk: %v", err)
+			}
+			flusher.Flush()
+		}
+	}))
+	defer ts.Close()
+
+	p := New("test-key", nil)
+	p.baseURL = ts.URL
+
+	m, err := p.Model(MistralSmallLatest)
+	if err != nil {
+		t.Fatalf("Model error: %v", err)
+	}
+
+	stream := m.GenerateStream(context.Background(), ai.AIRequest{
+		Prompt: ai.Prompt{Prompt: "call a tool"},
+	})
+
+	var (
+		gotToolCall bool
+		gotText     string
+	)
+	for tok := range stream {
+		if tok.Err != nil {
+			t.Fatalf("unexpected stream error: %v", tok.Err)
+		}
+
+		if tok.Type == ai.TokenTypeToolCall {
+			if tok.ToolCall == nil {
+				t.Fatal("expected ToolCall to be populated, got nil")
+			}
+			if !strings.HasPrefix(tok.ToolCall.ID, "call_echo_") {
+				t.Fatalf("expected generated ToolCall.ID for echo, got %q", tok.ToolCall.ID)
+			}
+			if tok.ToolCall.Type != "function" {
+				t.Fatalf("expected ToolCall.Type=function, got %q", tok.ToolCall.Type)
+			}
+			if tok.ToolCall.Name != "echo" {
+				t.Fatalf("expected ToolCall.Name=echo, got %q", tok.ToolCall.Name)
+			}
+			if string(tok.ToolCall.Args) != `{"text":"try the echo tool"}` {
+				t.Fatalf("unexpected ToolCall.Args: %s", string(tok.ToolCall.Args))
+			}
+			gotToolCall = true
+			continue
+		}
+
+		if tok.Type == ai.TokenTypeText {
+			gotText += tok.String()
+		}
+	}
+
+	if !gotToolCall {
+		t.Fatal("expected to detect a tool call from text stream, got none")
+	}
+	if gotText != "" {
+		t.Fatalf("expected no text tokens after tool-call detection, got %q", gotText)
 	}
 }

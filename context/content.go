@@ -68,3 +68,24 @@ func NewToolResultContent(toolName, result string, precomputed bool, precomputed
 		PrecomputedResult: precomputedResult,
 	}
 }
+
+// ToolResultErrContent represents a tool error result
+type ToolResultErrContent struct {
+	ToolName string
+	Err      string
+}
+
+func (c ToolResultErrContent) String() string {
+	return c.ToolName + " error: " + c.Err
+}
+
+func (c ToolResultErrContent) Type() string {
+	return "tool_result_err"
+}
+
+func NewToolResultErrContent(toolName, err string) ToolResultErrContent {
+	return ToolResultErrContent{
+		ToolName: toolName,
+		Err:      err,
+	}
+}

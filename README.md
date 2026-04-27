@@ -448,20 +448,19 @@ Tool calls are expected to arrive as JSON with this shape:
 
 ```json
 {
-  "id": "tool_name",
   "type": "function",
+  "name": "tool_name",
   "arguments": {
     "some": "value"
   }
 }
 ```
 
-> [!TIP]
-> Keep tool `Params()` aligned with the JSON fields your `Function(...)` decodes through `DecodeToolArgs`.
+Tool call IDs are generated internally by the runtime and are not model-controlled.
 
 ### 🧪 Helper Functions
 
-- `DetectToolCall` checks whether a model response looks like a tool call.
+- `DetectToolCallsInStream` detects tool-call JSON objects in streamed text tokens.
 - `CallTool` runs a tool by name.
 - `DecodeToolArgs` unmarshals tool arguments into a typed struct.
 - `RenderToolSignatures` formats tool metadata for prompting.
