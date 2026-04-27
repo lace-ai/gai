@@ -377,7 +377,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 		}
 	}()
 
-	return ai.WrapStream(ctx, raw, m.debug)
+	return ai.DetectToolCallsInStream(ctx, raw, m.debug)
 }
 
 func extractStreamText(raw json.RawMessage) (string, error) {

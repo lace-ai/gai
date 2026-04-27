@@ -18,7 +18,7 @@ type wrapStreamModel struct {
 }
 
 func (m wrapStreamModel) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.Token {
-	return ai.WrapStream(ctx, m.Model.GenerateStream(ctx, req), nil)
+	return ai.DetectToolCallsInStream(ctx, m.Model.GenerateStream(ctx, req), nil)
 }
 
 type scriptedStreamModel struct {

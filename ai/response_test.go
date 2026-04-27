@@ -16,7 +16,7 @@ type expectedWrapToken struct {
 	toolArgsJSON string
 }
 
-func TestWrapStream(t *testing.T) {
+func TestDetectToolCallsInStream(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -174,7 +174,7 @@ func TestWrapStream(t *testing.T) {
 			}
 			close(in)
 
-			out := collectTokens(ai.WrapStream(t.Context(), in, nil))
+			out := collectTokens(ai.DetectToolCallsInStream(t.Context(), in, nil))
 			if len(out) != len(tt.output) {
 				t.Fatalf("expected %d output tokens, got %d", len(tt.output), len(out))
 			}
