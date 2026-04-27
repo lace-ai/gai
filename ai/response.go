@@ -281,9 +281,13 @@ func WrapStream(ctx context.Context, in <-chan Token, debug gai.DebugSink) <-cha
 				case ']':
 					arrDepth--
 				}
+				if maybeToolCall(tokenStr.String()) {
+					continue
+				}
 			}
 
 			if maybeToolCall(tokenStr.String()) {
+				tokenStr.Reset()
 				continue
 			}
 		}
