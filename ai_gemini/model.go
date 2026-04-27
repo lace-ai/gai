@@ -102,7 +102,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 							fields := map[string]any{
 								"error": err.Error(),
 							}
-							if m.debug.IncludeSencitiveData() {
+							if m.debug.IncludeSensitiveData() {
 								fields["part"] = string(rawPart)
 							}
 							m.debug.Emit(ctx, gai.DebugEvent{
@@ -122,7 +122,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 							fields := map[string]any{
 								"error": err.Error(),
 							}
-							if m.debug.IncludeSencitiveData() {
+							if m.debug.IncludeSensitiveData() {
 								fields["function_call_name"] = part.FunctionCall.Name
 								fields["function_call_args"] = fmt.Sprintf("%v", part.FunctionCall.Args)
 							}
@@ -138,7 +138,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 					}
 					if m.debug != nil {
 						fields := map[string]any{}
-						if m.debug.IncludeSencitiveData() {
+						if m.debug.IncludeSensitiveData() {
 							fields["tool_call_id"] = toolCall.ID
 							fields["tool_call_args"] = string(toolCall.Args)
 						}

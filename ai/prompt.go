@@ -37,7 +37,7 @@ func (p Prompt) CombinedPrompt() string {
 // CombinedPromptWithDebug combines the prompt with debug logging
 func (p Prompt) CombinedPromptWithDebug(ctx context.Context, debug gai.DebugSink) string {
 	combined := p.CombinedPrompt()
-	if debug != nil && debug.IncludeSencitiveData() {
+	if debug != nil && debug.IncludeSensitiveData() {
 		debug.Emit(ctx, gai.DebugEvent{
 			Name:   "prompt_combined",
 			Source: "ai:Prompt.CombinedPromptWithDebug",

@@ -126,7 +126,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 				fields := map[string]any{
 					"error": err.Error(),
 				}
-				if m.debug.IncludeSencitiveData() {
+				if m.debug.IncludeSensitiveData() {
 					fields["payload"] = payload
 				}
 				m.debug.Emit(ctx, gai.DebugEvent{
@@ -206,7 +206,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 				fields := map[string]any{
 					"status_code": res.StatusCode,
 				}
-				if m.debug.IncludeSencitiveData() {
+				if m.debug.IncludeSensitiveData() {
 					fields["response"] = string(resBody)
 				}
 				m.debug.Emit(ctx, gai.DebugEvent{
@@ -259,7 +259,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 						fields := map[string]any{
 							"error": mapErr.Error(),
 						}
-						if m.debug.IncludeSencitiveData() {
+						if m.debug.IncludeSensitiveData() {
 							fields["tool_calls"] = string(chunk.Choices[0].Delta.ToolCalls)
 						}
 						m.debug.Emit(ctx, gai.DebugEvent{
@@ -273,7 +273,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 				}
 				if m.debug != nil {
 					fields := map[string]any{}
-					if m.debug.IncludeSencitiveData() {
+					if m.debug.IncludeSensitiveData() {
 						fields["tool_calls"] = calls
 					}
 					m.debug.Emit(ctx, gai.DebugEvent{

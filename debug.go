@@ -11,7 +11,7 @@ type DebugEvent struct {
 
 type DebugSink interface {
 	Emit(ctx context.Context, e DebugEvent)
-	IncludeSencitiveData() bool
+	IncludeSensitiveData() bool
 }
 
 type DebugSinkFunc func(ctx context.Context, e DebugEvent)
@@ -22,7 +22,7 @@ func (f DebugSinkFunc) Emit(ctx context.Context, e DebugEvent) {
 	}
 }
 
-func (f DebugSinkFunc) IncludeSencitiveData() bool {
+func (f DebugSinkFunc) IncludeSensitiveData() bool {
 	return false
 }
 
@@ -34,6 +34,6 @@ func (f SensitiveDebugSinkFunc) Emit(ctx context.Context, e DebugEvent) {
 	}
 }
 
-func (f SensitiveDebugSinkFunc) IncludeSencitiveData() bool {
+func (f SensitiveDebugSinkFunc) IncludeSensitiveData() bool {
 	return true
 }

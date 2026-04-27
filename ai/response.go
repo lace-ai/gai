@@ -144,7 +144,7 @@ func WrapStream(ctx context.Context, in <-chan Token, debug gai.DebugSink) <-cha
 					fields := map[string]any{
 						"reason": fmt.Sprintf("inString=%v objDepth=%d arrDepth=%d", inString, objDepth, arrDepth),
 					}
-					if debug.IncludeSencitiveData() {
+					if debug.IncludeSensitiveData() {
 						fields["data"] = string(joinTokenData(pending))
 					}
 					debug.Emit(ctx, gai.DebugEvent{
@@ -166,7 +166,7 @@ func WrapStream(ctx context.Context, in <-chan Token, debug gai.DebugSink) <-cha
 						"id":   tc.ID,
 						"name": tc.Name,
 					}
-					if debug.IncludeSencitiveData() {
+					if debug.IncludeSensitiveData() {
 						fields["args"] = string(tc.Args)
 					}
 					debug.Emit(ctx, gai.DebugEvent{
@@ -186,7 +186,7 @@ func WrapStream(ctx context.Context, in <-chan Token, debug gai.DebugSink) <-cha
 					fields := map[string]any{
 						"reason": "parse failed",
 					}
-					if debug.IncludeSencitiveData() {
+					if debug.IncludeSensitiveData() {
 						fields["data"] = string(payload)
 					}
 					debug.Emit(ctx, gai.DebugEvent{
@@ -227,7 +227,7 @@ func WrapStream(ctx context.Context, in <-chan Token, debug gai.DebugSink) <-cha
 						if b == '{' {
 							if debug != nil {
 								fields := map[string]any{}
-								if debug.IncludeSencitiveData() {
+								if debug.IncludeSensitiveData() {
 									fields["data"] = string(tokenStr.String())
 								}
 								debug.Emit(ctx, gai.DebugEvent{
@@ -249,7 +249,7 @@ func WrapStream(ctx context.Context, in <-chan Token, debug gai.DebugSink) <-cha
 						if newLines >= 2 && b == '{' {
 							if debug != nil {
 								fields := map[string]any{}
-								if debug.IncludeSencitiveData() {
+								if debug.IncludeSensitiveData() {
 									fields["data"] = string(tokenStr.String())
 								}
 								debug.Emit(ctx, gai.DebugEvent{
@@ -316,7 +316,7 @@ func WrapStream(ctx context.Context, in <-chan Token, debug gai.DebugSink) <-cha
 
 		if debug != nil {
 			fields := map[string]any{}
-			if debug.IncludeSencitiveData() {
+			if debug.IncludeSensitiveData() {
 				fields["pending_data"] = string(joinTokenData(pending))
 			}
 			debug.Emit(ctx, gai.DebugEvent{
