@@ -33,7 +33,11 @@ func CallTool(req *ai.ToolCall, tools []Tool) *ToolResponse {
 
 	for _, tool := range tools {
 		if tool.Name() == req.ID {
-			return tool.Function(req)
+			res := tool.Function(req)
+			if res == nil {
+				return &ToolResponse{Err: fmt.Errorf("tool %s returned nil response", req.ID)}
+			}
+			return res
 		}
 	}
 
