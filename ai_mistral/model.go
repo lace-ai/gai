@@ -87,13 +87,19 @@ func mapMistralToolCalls(raw json.RawMessage) ([]ai.ToolCall, error) {
 
 	result := make([]ai.ToolCall, 0, len(calls))
 	for _, c := range calls {
+		toolName := strings.TrimSpace(c.Function.Name)
 		args := json.RawMessage(c.Function.Arguments)
 		if len(args) == 0 {
 			args = json.RawMessage("{}")
 		}
+		callType := strings.TrimSpace(c.Type)
+		if callType == "" {
+			callType = "function"
+		}
 		result = append(result, ai.ToolCall{
-			ID:   c.Function.Name,
-			Name: "function",
+			ID:   ai.GenerateToolCallID(toolName),
+			Type: callType,
+			Name: toolName,
 			Args: args,
 		})
 	}

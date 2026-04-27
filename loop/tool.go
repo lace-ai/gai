@@ -32,16 +32,16 @@ func CallTool(req *ai.ToolCall, tools []Tool) *ToolResponse {
 	}
 
 	for _, tool := range tools {
-		if tool.Name() == req.ID {
+		if tool.Name() == req.Name {
 			res := tool.Function(req)
 			if res == nil {
-				return &ToolResponse{Err: fmt.Errorf("tool %s returned nil response", req.ID)}
+				return &ToolResponse{Err: fmt.Errorf("tool %s returned nil response", req.Name)}
 			}
 			return res
 		}
 	}
 
-	return &ToolResponse{Err: fmt.Errorf("%w: %s", ErrToolNotFound, req.ID)}
+	return &ToolResponse{Err: fmt.Errorf("%w: %s", ErrToolNotFound, req.Name)}
 }
 
 func DecodeToolArgs[T any](req *ai.ToolCall, target *T) error {
@@ -93,6 +93,8 @@ func ToolCallToString(tc ai.ToolCall) string {
 	builder.WriteString("id: ")
 	builder.WriteString(tc.ID)
 	builder.WriteString(",type: ")
+	builder.WriteString(tc.Type)
+	builder.WriteString(",name: ")
 	builder.WriteString(tc.Name)
 	builder.WriteString(",arguments: ")
 	builder.Write(tc.Args)

@@ -28,8 +28,9 @@ func TestDecodeToolArgs(t *testing.T) {
 	}
 
 	req := ai.ToolCall{
-		ID:   "test_tool",
-		Name: "function",
+		ID:   "call_1",
+		Type: "function",
+		Name: "test_tool",
 	}
 
 	tests := []struct {

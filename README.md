@@ -448,16 +448,15 @@ Tool calls are expected to arrive as JSON with this shape:
 
 ```json
 {
-  "id": "tool_name",
   "type": "function",
+  "name": "tool_name",
   "arguments": {
     "some": "value"
   }
 }
 ```
 
-> [!TIP]
-> Keep tool `Params()` aligned with the JSON fields your `Function(...)` decodes through `DecodeToolArgs`.
+Tool call IDs are generated internally by the runtime and are not model-controlled.
 
 ### 🧪 Helper Functions
 

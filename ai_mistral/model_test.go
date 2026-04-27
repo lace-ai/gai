@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/lace-ai/gai/ai"
@@ -213,11 +214,14 @@ func TestModelGenerateStreamToolCall(t *testing.T) {
 	if tok.ToolCall == nil {
 		t.Fatal("expected ToolCall to be populated, got nil")
 	}
-	if tok.ToolCall.ID != "my_tool" {
-		t.Fatalf("expected ToolCall.ID=my_tool, got %q", tok.ToolCall.ID)
+	if !strings.HasPrefix(tok.ToolCall.ID, "call_my_tool_") {
+		t.Fatalf("expected generated ToolCall.ID for my_tool, got %q", tok.ToolCall.ID)
 	}
-	if tok.ToolCall.Name != "function" {
-		t.Fatalf("expected ToolCall.Name=function, got %q", tok.ToolCall.Name)
+	if tok.ToolCall.Type != "function" {
+		t.Fatalf("expected ToolCall.Type=function, got %q", tok.ToolCall.Type)
+	}
+	if tok.ToolCall.Name != "my_tool" {
+		t.Fatalf("expected ToolCall.Name=my_tool, got %q", tok.ToolCall.Name)
 	}
 	wantArgs := `{"param":"value"}`
 	if string(tok.ToolCall.Args) != wantArgs {
@@ -238,7 +242,8 @@ func TestModelGenerateStreamDetectsTextEncodedToolCall(t *testing.T) {
 			`data: {"choices":[{"delta":{"content":"\n"}}]}` + "\n\n",
 			`data: {"choices":[{"delta":{"content":"{\"id\":\""}}]}` + "\n\n",
 			`data: {"choices":[{"delta":{"content":"echo\",\""}}]}` + "\n\n",
-			`data: {"choices":[{"delta":{"content":"name\":\"function\",\""}}]}` + "\n\n",
+			`data: {"choices":[{"delta":{"content":"type\":\"function\",\""}}]}` + "\n\n",
+			`data: {"choices":[{"delta":{"content":"name\":\"echo\",\""}}]}` + "\n\n",
 			`data: {"choices":[{"delta":{"content":"arguments\":{\""}}]}` + "\n\n",
 			`data: {"choices":[{"delta":{"content":"text\":\"try"}}]}` + "\n\n",
 			`data: {"choices":[{"delta":{"content":" the echo tool\"}}"}}]}` + "\n\n",
@@ -277,11 +282,14 @@ func TestModelGenerateStreamDetectsTextEncodedToolCall(t *testing.T) {
 			if tok.ToolCall == nil {
 				t.Fatal("expected ToolCall to be populated, got nil")
 			}
-			if tok.ToolCall.ID != "echo" {
-				t.Fatalf("expected ToolCall.ID=echo, got %q", tok.ToolCall.ID)
+			if !strings.HasPrefix(tok.ToolCall.ID, "call_echo_") {
+				t.Fatalf("expected generated ToolCall.ID for echo, got %q", tok.ToolCall.ID)
 			}
-			if tok.ToolCall.Name != "function" {
-				t.Fatalf("expected ToolCall.Name=function, got %q", tok.ToolCall.Name)
+			if tok.ToolCall.Type != "function" {
+				t.Fatalf("expected ToolCall.Type=function, got %q", tok.ToolCall.Type)
+			}
+			if tok.ToolCall.Name != "echo" {
+				t.Fatalf("expected ToolCall.Name=echo, got %q", tok.ToolCall.Name)
 			}
 			if string(tok.ToolCall.Args) != `{"text":"try the echo tool"}` {
 				t.Fatalf("unexpected ToolCall.Args: %s", string(tok.ToolCall.Args))

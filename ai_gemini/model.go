@@ -232,10 +232,10 @@ func mapFunctionCall(functionCall *genai.FunctionCall) (*ai.ToolCall, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	return &ai.ToolCall{
-		ID:   toolName,
-		Name: "function",
+		ID:   ai.GenerateToolCallID(toolName),
+		Type: "function",
+		Name: toolName,
 		Args: args,
 	}, nil
 }

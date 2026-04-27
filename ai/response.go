@@ -35,27 +35,8 @@ type Token struct {
 	Err      error
 }
 
-type ToolCall struct {
-	ID   string
-	Name string
-	Args json.RawMessage
-}
-
 func (t Token) String() string {
 	return string(t.Data)
-}
-
-func (tc *ToolCall) Validate() error {
-	if tc == nil {
-		return fmt.Errorf("%w: tool call nil", ErrInvalidToolCall)
-	}
-	if strings.TrimSpace(tc.ID) == "" {
-		return fmt.Errorf("%w: id empty", ErrInvalidToolCall)
-	}
-	if tc.Name != "function" {
-		return fmt.Errorf("%w: name not function", ErrInvalidToolCall)
-	}
-	return nil
 }
 
 func (r *AIResponse) AppendToken(t Token) {
@@ -83,18 +64,6 @@ func (r *AIResponse) AppendToken(t Token) {
 	}
 
 	r.OutputTokens += t.TokenUsage
-}
-
-func (tc *ToolCall) String() string {
-	var builder strings.Builder
-	builder.WriteString("id: ")
-	builder.WriteString(tc.ID)
-	builder.WriteString(",type: ")
-	builder.WriteString(tc.Name)
-	builder.WriteString(",arguments: ")
-	builder.Write(tc.Args)
-
-	return builder.String()
 }
 
 // WrapStream detects a leading JSON object in the text stream.
@@ -164,6 +133,7 @@ func WrapStream(ctx context.Context, in <-chan Token, debug gai.DebugSink) <-cha
 				if debug != nil {
 					fields := map[string]any{
 						"id":   tc.ID,
+						"type": tc.Type,
 						"name": tc.Name,
 					}
 					if debug.IncludeSensitiveData() {
@@ -346,16 +316,16 @@ func parseToolCall(payload []byte) (*ToolCall, bool) {
 		return nil, false
 	}
 
-	var id, typ string
+	var typ, name string
 	var args json.RawMessage
 
-	if v, ok := raw["id"]; ok {
-		if err := json.Unmarshal(v, &id); err != nil {
+	if v, ok := raw["type"]; ok {
+		if err := json.Unmarshal(v, &typ); err != nil {
 			return nil, false
 		}
 	}
 	if v, ok := raw["name"]; ok {
-		if err := json.Unmarshal(v, &typ); err != nil {
+		if err := json.Unmarshal(v, &name); err != nil {
 			return nil, false
 		}
 	}
@@ -363,10 +333,10 @@ func parseToolCall(payload []byte) (*ToolCall, bool) {
 		args = v
 	}
 
-	if strings.TrimSpace(id) == "" {
+	if typ != "function" {
 		return nil, false
 	}
-	if typ != "function" {
+	if strings.TrimSpace(name) == "" {
 		return nil, false
 	}
 	if len(args) == 0 {
@@ -374,8 +344,9 @@ func parseToolCall(payload []byte) (*ToolCall, bool) {
 	}
 
 	return &ToolCall{
-		ID:   id,
-		Name: typ,
+		ID:   GenerateToolCallID(name),
+		Type: typ,
+		Name: name,
 		Args: args,
 	}, true
 }

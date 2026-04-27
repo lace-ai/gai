@@ -2,6 +2,7 @@ package gemini
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/lace-ai/gai/ai"
@@ -20,11 +21,14 @@ func TestMapFunctionCall(t *testing.T) {
 		t.Fatalf("mapFunctionCall error: %v", err)
 	}
 
-	if got.ID != "echo_tool" {
-		t.Fatalf("expected tool id to be function name, got %q", got.ID)
+	if !strings.HasPrefix(got.ID, "call_echo_tool_") {
+		t.Fatalf("expected generated tool id for echo_tool, got %q", got.ID)
 	}
-	if got.Name != "function" {
-		t.Fatalf("expected tool call type=function, got %q", got.Name)
+	if got.Type != "function" {
+		t.Fatalf("expected tool call type=function, got %q", got.Type)
+	}
+	if got.Name != "echo_tool" {
+		t.Fatalf("expected tool name to be function name, got %q", got.Name)
 	}
 
 	var args map[string]any

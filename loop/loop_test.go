@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -81,7 +82,7 @@ func TestLoop(t *testing.T) {
 		{
 			name: "single Tool call",
 			iterations: []mocks.MockModelResponse{
-				{Res: ai.AIResponse{Text: `{"id":"echo","name":"function","arguments":{"text":"test"}}`}, Err: nil},
+				{Res: ai.AIResponse{Text: `{"id":"call-1","type":"function","name":"echo","arguments":{"text":"test"}}`}, Err: nil},
 				{Res: ai.AIResponse{Text: "How are you?"}, Err: nil},
 			},
 			wantIterations: 2,
@@ -90,8 +91,8 @@ func TestLoop(t *testing.T) {
 		{
 			name: "Multiple iterations with tool calls",
 			iterations: []mocks.MockModelResponse{
-				{Res: ai.AIResponse{Text: `{"id":"echo","name":"function","arguments":{"text":"test"}}`}, Err: nil},
-				{Res: ai.AIResponse{Text: `{"id":"echo","name":"function","arguments":{"text":"test"}}`}, Err: nil},
+				{Res: ai.AIResponse{Text: `{"id":"call-1","type":"function","name":"echo","arguments":{"text":"test"}}`}, Err: nil},
+				{Res: ai.AIResponse{Text: `{"id":"call-2","type":"function","name":"echo","arguments":{"text":"test"}}`}, Err: nil},
 				{Res: ai.AIResponse{Text: "How are you?"}, Err: nil},
 			},
 			wantIterations: 3,
@@ -100,10 +101,10 @@ func TestLoop(t *testing.T) {
 		{
 			name: "Exceeding max iterations",
 			iterations: []mocks.MockModelResponse{
-				{Res: ai.AIResponse{Text: `{"id":"echo","name":"function","arguments":{"text":"test"}}`}, Err: nil},
-				{Res: ai.AIResponse{Text: `{"id":"echo","name":"function","arguments":{"text":"test"}}`}, Err: nil},
-				{Res: ai.AIResponse{Text: `{"id":"echo","name":"function","arguments":{"text":"test"}}`}, Err: nil},
-				{Res: ai.AIResponse{Text: `{"id":"echo","name":"function","arguments":{"text":"test"}}`}, Err: nil},
+				{Res: ai.AIResponse{Text: `{"id":"call-1","type":"function","name":"echo","arguments":{"text":"test"}}`}, Err: nil},
+				{Res: ai.AIResponse{Text: `{"id":"call-2","type":"function","name":"echo","arguments":{"text":"test"}}`}, Err: nil},
+				{Res: ai.AIResponse{Text: `{"id":"call-3","type":"function","name":"echo","arguments":{"text":"test"}}`}, Err: nil},
+				{Res: ai.AIResponse{Text: `{"id":"call-4","type":"function","name":"echo","arguments":{"text":"test"}}`}, Err: nil},
 			},
 			wantIterations: 2,
 			maxIterations:  2,
@@ -112,7 +113,7 @@ func TestLoop(t *testing.T) {
 		{
 			name: "Call wrong tool",
 			iterations: []mocks.MockModelResponse{
-				{Res: ai.AIResponse{Text: `{"id":"nonexistent_tool","name":"function","arguments":{"text":"test"}}`}, Err: nil},
+				{Res: ai.AIResponse{Text: `{"id":"call-1","type":"function","name":"nonexistent_tool","arguments":{"text":"test"}}`}, Err: nil},
 				{Res: ai.AIResponse{Text: "Tool failed, stopping here."}, Err: nil},
 			},
 			wantIterations: 2,
@@ -122,8 +123,8 @@ func TestLoop(t *testing.T) {
 			name: "No tool calls after response",
 			iterations: []mocks.MockModelResponse{
 				{Res: ai.AIResponse{Text: "Just a normal response."}, Err: nil},
-				{Res: ai.AIResponse{Text: `{"id":"nonexistent_tool","name":"function","arguments":{"text":"test"}}`}, Err: nil},
-				{Res: ai.AIResponse{Text: `{"id":"nonexistent_tool","name":"function","arguments":{"text":"test"}}`}, Err: nil},
+				{Res: ai.AIResponse{Text: `{"id":"call-1","type":"function","name":"nonexistent_tool","arguments":{"text":"test"}}`}, Err: nil},
+				{Res: ai.AIResponse{Text: `{"id":"call-2","type":"function","name":"nonexistent_tool","arguments":{"text":"test"}}`}, Err: nil},
 			},
 			wantIterations: 1,
 			maxIterations:  8,
@@ -131,9 +132,9 @@ func TestLoop(t *testing.T) {
 		{
 			name: "Tool call with error",
 			iterations: []mocks.MockModelResponse{
-				{Res: ai.AIResponse{Text: `{"id":"echo","name":"function","arguments":{"text":"test"}}`}, Err: nil},
-				{Res: ai.AIResponse{Text: `{"id":"echo","name":"function","arguments":{"text":"test"}}`}, Err: errors.New("tool execution failed")},
-				{Res: ai.AIResponse{Text: `{"id":"echo","name":"function","arguments":{"text":"test"}}`}, Err: nil},
+				{Res: ai.AIResponse{Text: `{"id":"call-1","type":"function","name":"echo","arguments":{"text":"test"}}`}, Err: nil},
+				{Res: ai.AIResponse{Text: `{"id":"call-2","type":"function","name":"echo","arguments":{"text":"test"}}`}, Err: errors.New("tool execution failed")},
+				{Res: ai.AIResponse{Text: `{"id":"call-3","type":"function","name":"echo","arguments":{"text":"test"}}`}, Err: nil},
 				{Res: ai.AIResponse{Text: "How are you?"}, Err: nil},
 			},
 			wantIterations: 3,
@@ -175,7 +176,7 @@ func TestLoop(t *testing.T) {
 func TestLoopHandlesManyToolCallsInOneIteration(t *testing.T) {
 	t.Parallel()
 
-	makeToolCalls := func(t *testing.T, n int, id string) []ai.Token {
+	makeToolCalls := func(t *testing.T, n int, name string) []ai.Token {
 		t.Helper()
 		calls := make([]ai.Token, 0, n)
 		for i := 0; i < n; i++ {
@@ -187,8 +188,9 @@ func TestLoopHandlesManyToolCallsInOneIteration(t *testing.T) {
 			calls = append(calls, ai.Token{
 				Type: ai.TokenTypeToolCall,
 				ToolCall: &ai.ToolCall{
-					ID:   id,
-					Name: "function",
+					ID:   fmt.Sprintf("call-%d", i+1),
+					Type: "function",
+					Name: name,
 					Args: args,
 				},
 			})
