@@ -49,7 +49,7 @@ go get github.com/lace-ai/gai
 To start, first create a provider. For example, for Gemini:
 
 ```go
-geminiProvider := gemini.New("your_api_key")
+geminiProvider := gemini.New("your_api_key", nil)
 ```
 
 <details>
@@ -59,8 +59,8 @@ geminiProvider := gemini.New("your_api_key")
 You can use a `ModelRepository` to register multiple providers and look up models by name across providers.
 
 ```go
-modelRepo := ai.NewModelRepository()
-err := modelRepo.RegisterProvider(geminiProvider)
+modelRepo := ai.NewModelRepository(nil)
+err := modelRepo.RegisterProvider(context.Background(), geminiProvider)
 if err != nil {
     // handle error
 }
@@ -69,7 +69,7 @@ if err != nil {
 To get a model from the repo just use the provider name and the model name:
 
 ```go
-model, err := modelRepo.GetModel("gemini", "gemini-3-flash-preview")
+model, err := modelRepo.GetModel(context.Background(), "gemini", "gemini-3-flash-preview")
 if err != nil {
     // handle error
 }
@@ -145,6 +145,10 @@ func (m *MyModel) Generate(ctx context.Context, req ai.AIRequest) (*ai.AIRespons
     // implement the logic to call your model API and return the response
 }
 
+func (m *MyModel) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.Token {
+    // implement streaming token generation
+}
+
 func (m *MyModel) Close() error {
     // clean up any resources if needed
 }
@@ -159,27 +163,32 @@ Now you can use your custom provider just like the built-in ones
 To build an agent with tools, use the `loop` package:
 
 > [!TIP]
-> User a alias for the `context` package to avoid conflicts with `context` package from the standard library. For example:
+> Use an alias for the `context` package to avoid conflicts with `context` package from the standard library. For example:
 >
 > ```go
 > import aicontext "github.com/lace-ai/gai/context"
 > ```
 
 ```go
-agentLoop := loop.New(
+l := loop.New(
     model, // the model you want to use
-    []loop.Tool{myTool}, // any tools you want to provide, one echo too is included for testing
+    []loop.Tool{myTool}, // any tools you want to provide, one echo tool is included for testing
     "What is the weather in New York?", // initial (user) prompt
     "You are a helpful assistant that can call tools to get information.", // system prompt
     nil, // optional context builder, if nil the loop will render prior messages itself
     nil, // optional tool response preprocessor, if nil the loop will append tool results as-is
 )
 
-err := agentLoop.Loop(context.Background())
-if err != nil {
-    // handle error
+tokenCh, _, errCh := l.Loop(context.Background())
+for range tokenCh {
+    // handle streamed tokens
 }
-messages := agentLoop.Messages() // get final conversation messages, including tool calls and responses
+for err := range errCh {
+    if err != nil {
+        // handle error
+    }
+}
+messages := l.Messages() // get final conversation messages, including tool calls and responses
 
 var builder strings.Builder
 aicontext.RenderMessages(messages, &builder)
@@ -212,14 +221,14 @@ func (t *MyTool) Params() string {
     return `{"type":"object","required":["query"],"properties":{"query":{"type":"string","description":"Search query"}}}`
 }
 
-func (t *MyTool) Function(req *loop.ToolRequest) (*loop.ToolResponse, error) {
+func (t *MyTool) Function(req *ai.ToolCall) *loop.ToolResponse {
     var args myToolArgs
     if err := loop.DecodeToolArgs(req, &args); err != nil {
-        return nil, err
+        return &loop.ToolResponse{Err: err}
     }
 
     // implement your tool logic here using args.Query
-    return &loop.ToolResponse{Text: "result for: " + args.Query}, nil
+    return &loop.ToolResponse{Text: "result for: " + args.Query}
 }
 ```
 
@@ -235,7 +244,7 @@ To manage conversation history and build prompts from it, use the `context` pack
 store := mySessionStore // your implementation of SessionStore (e.g. in-memory, database, etc.)
 sessionManager := aicontext.NewSessionManager(store, 1) // the second argument is the session ID
 
-agentLoop := loop.New(
+l := loop.New(
     model, // the model you want to use
     []loop.Tool{myTool}, // any tools you want to provide
     "What is the weather in New York?", // initial (user) prompt
@@ -243,9 +252,14 @@ agentLoop := loop.New(
     sessionManager, // session manager implements loop.ContextBuilder
     nil, // optional tool response preprocessor
 )
-err := agentLoop.Loop(context.Background())
-if err != nil {
-    // handle error
+tokenCh, _, errCh := l.Loop(context.Background())
+for range tokenCh {
+    // handle streamed tokens
+}
+for err := range errCh {
+    if err != nil {
+        // handle error
+    }
 }
 ```
 
@@ -288,12 +302,13 @@ Use `ModelRepository` when you want to register multiple providers and look up m
 
 ### 🧠 Model
 
-A model generates text from an `AIRequest` and returns an `AIResponse`.
+A model generates text from an `AIRequest` and can return either a complete `AIResponse` or a stream of tokens.
 
 ```go
 type Model interface {
     Name() string
     Generate(ctx context.Context, req AIRequest) (*AIResponse, error)
+    GenerateStream(ctx context.Context, req AIRequest) <-chan Token
     Close() error
 }
 ```
@@ -306,12 +321,12 @@ type Model interface {
 - `Context`: prior conversation or external context
 - `Prompt`: the current (user) request
 
-`Prompt.CombinedPrompt()` concatenates those parts onto one string in that order.
+`Prompt.CombinedPrompt()` concatenates those parts onto one string in this order: system, context, prompt.
 
 `AIRequest` currently contains:
 
 - `Prompt`
-- `MaxTokens` maxtokens are ignored by some providers, and might be removed in future versions.
+- `MaxTokens` is ignored by some providers, and might be removed in future versions.
 
 `AIResponse` returns:
 
@@ -328,7 +343,7 @@ Package: `ai_gemini`
 Constructor:
 
 ```go
-gemini.New(apiKey string) *gemini.Provider
+gemini.New(apiKey string, debug gai.DebugSink) *gemini.Provider
 ```
 
 Known model names:
@@ -345,7 +360,7 @@ Package: `ai_mistral`
 Constructor:
 
 ```go
-mistral.New(apiKey string) *mistral.Provider
+mistral.New(apiKey string, debug gai.DebugSink) *mistral.Provider
 ```
 
 Known model names:
@@ -353,7 +368,6 @@ Known model names:
 - `mistral-small-latest`
 - `mistral-medium-latest`
 - `mistral-large-latest`
-- `codestral-latest`
 
 ### ⚙️ Configuration Note
 
@@ -440,7 +454,7 @@ type Tool interface {
     Name() string
     Description() string
     Params() string
-    Function(req *ToolRequest) (*ToolResponse, error)
+    Function(req *ai.ToolCall) *ToolResponse
 }
 ```
 
