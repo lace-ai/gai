@@ -124,6 +124,9 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, chan IterationInforma
 						retryCount++
 						retrying = true
 						cancel()
+						for t := range tokens {
+							tokenCh <- t
+						}
 						break
 					} else {
 						errCh <- fmt.Errorf("%w limit:%v error: %v", ErrMaxRetries, a.RetryCount, t.Err)
