@@ -78,3 +78,10 @@ func TestBuildThoughtToken(t *testing.T) {
 		t.Fatalf("expected token data to be plain text, got %q", string(tok.Data))
 	}
 }
+
+func TestModelTokenizer(t *testing.T) {
+	m := &Model{name: "gemini-2.5-flash"}
+	if m.Tokenizer() == nil {
+		t.Fatal("expected tokenizer")
+	}
+}

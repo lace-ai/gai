@@ -27,6 +27,14 @@ func (m *Model) Name() string {
 	return m.name
 }
 
+func (m *Model) Tokenizer() ai.Tokenizer {
+	return &Tokenizer{
+		modelName: m.name,
+		client:    m.client,
+		debug:     m.debug,
+	}
+}
+
 func (m *Model) Close() error {
 	return nil
 }
@@ -53,6 +61,99 @@ type chatCompletionResponse struct {
 		PromptTokens     int `json:"prompt_tokens"`
 		CompletionTokens int `json:"completion_tokens"`
 	} `json:"usage"`
+}
+
+type Tokenizer struct {
+	modelName string
+	client    *Provider
+	debug     gai.DebugSink
+}
+
+func (t *Tokenizer) CountTokens(text string) int {
+	count, err := t.countTokens(context.Background(), text)
+	if err != nil {
+		return 0
+	}
+	return count
+}
+
+func (t *Tokenizer) Tokenize(text string) []string {
+	return nil
+}
+
+func (t *Tokenizer) countTokens(ctx context.Context, text string) (int, error) {
+	payload := chatCompletionRequest{
+		Model: t.modelName,
+		Messages: []chatMessageRequest{
+			{
+				Role:    "user",
+				Content: text,
+			},
+		},
+		MaxTokens: intPtr(0),
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return 0, err
+	}
+
+	httpReq, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		t.client.baseURL+"/v1/chat/completions",
+		bytes.NewReader(body),
+	)
+	if err != nil {
+		return 0, err
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+t.client.apiKey)
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	res, err := t.client.httpClient.Do(httpReq)
+	if err != nil {
+		if t.debug != nil {
+			t.debug.Emit(ctx, gai.DebugEvent{
+				Name:   "mistral_token_count_request_failed",
+				Source: "ai:mistral.Tokenizer.CountTokens",
+				Fields: map[string]any{
+					"error": err.Error(),
+				},
+				Err: err,
+			})
+		}
+		return 0, err
+	}
+	defer res.Body.Close()
+
+	const maxResponseBody = 1 << 20 // 1MB
+	resBody, err := io.ReadAll(io.LimitReader(res.Body, maxResponseBody))
+	if err != nil {
+		return 0, err
+	}
+
+	if res.StatusCode >= http.StatusMultipleChoices {
+		if t.debug != nil {
+			fields := map[string]any{
+				"status_code": res.StatusCode,
+			}
+			if t.debug.IncludeSensitiveData() {
+				fields["response"] = string(resBody)
+			}
+			t.debug.Emit(ctx, gai.DebugEvent{
+				Name:   "mistral_token_count_request_failed",
+				Source: "ai:mistral.Tokenizer.CountTokens",
+				Fields: fields,
+			})
+		}
+		return 0, fmt.Errorf("mistral token count failed (status %d): %s", res.StatusCode, string(resBody))
+	}
+
+	var parsed chatCompletionResponse
+	if err := json.Unmarshal(resBody, &parsed); err != nil {
+		return 0, err
+	}
+	return parsed.Usage.PromptTokens, nil
 }
 
 type chatCompletionStreamResponse struct {
@@ -481,6 +582,10 @@ func extractStreamText(raw json.RawMessage) (string, error) {
 	}
 
 	return "", fmt.Errorf("unsupported stream content payload: %s", string(raw))
+}
+
+func intPtr(v int) *int {
+	return &v
 }
 
 func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (*ai.AIResponse, error) {

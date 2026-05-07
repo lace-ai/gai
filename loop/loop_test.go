@@ -61,6 +61,10 @@ func (m *scriptedStreamModel) Close() error {
 	return nil
 }
 
+func (m *scriptedStreamModel) Tokenizer() ai.Tokenizer {
+	return mocks.MockTokenizer{}
+}
+
 func TestLoop(t *testing.T) {
 	t.Parallel()
 
