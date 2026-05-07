@@ -7,4 +7,5 @@ type Model interface {
 	Generate(ctx context.Context, req AIRequest) (*AIResponse, error)
 	GenerateStream(ctx context.Context, req AIRequest) <-chan Token
 	Close() error
+	Tokenizer() Tokenizer
 }
