@@ -19,7 +19,7 @@
 <p></p>
 
 GAI is a flexible Go library / framework for building agent-style applications on top of LLMs.
-It provides a generic interface for providers and models, prompt and context implementation, and a loop for agentic-calling workflows.
+It provides a generic interface for providers and models, prompt and context implementations, and a loop for agentic-calling workflows.
 
 ## ✨ Overview
 
