@@ -274,9 +274,7 @@ To implement your own session store, please visit the [SessionStore interface](.
 ## 🧱 Package Layout
 
 ```text
-ai/          Core abstractions: Provider, Model, AIRequest, AIResponse, ModelRepository
-ai_gemini/   Gemini provider and model implementation
-ai_mistral/  Mistral provider and model implementation
+ai/          Core abstractions: Provider, Model, AIRequest, AIResponse, ModelRepository. With implementations for Gemini and Mistral.
 context/     Context management: Conversation/session types, prompt loading, message rendering
 loop/        Agent loop, tool parsing, tool execution helpers
 testutil/    Mocks used by tests
@@ -338,7 +336,7 @@ type Model interface {
 
 ### ♊ Gemini
 
-Package: `ai_gemini`
+Package: `ai/gemini`
 
 Constructor:
 
@@ -355,7 +353,7 @@ Known model names:
 
 ### 🌀 Mistral
 
-Package: `ai_mistral`
+Package: `ai/mistral`
 
 Constructor:
 
