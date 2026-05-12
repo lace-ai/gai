@@ -11,7 +11,7 @@ import (
 func (b *Builder) SystemPrompt(path string) (*Builder, error) {
 	sysPrompt, err := loadPromptFromFile(path)
 	if err != nil {
-		return "", err
+		return b, err
 	}
 
 	return b.System(aicontext.StaticPart(
@@ -23,7 +23,7 @@ func (b *Builder) SystemPrompt(path string) (*Builder, error) {
 func (b *Builder) ToolSysPrompt(path string) (*Builder, error) {
 	sysPrompt, err := loadPromptFromFile(path)
 	if err != nil {
-		return "", err
+		return b, err
 	}
 
 	return b.System(aicontext.StaticPart(
@@ -34,7 +34,7 @@ func (b *Builder) ToolSysPrompt(path string) (*Builder, error) {
 
 func (b *Builder) UserPrompt(text string) (*Builder, error) {
 	if strings.TrimSpace(text) == "" {
-		return nil, ErrUserPromptEmpty
+		return b, ErrUserPromptEmpty
 	}
 
 	return b.User(aicontext.StaticPart(
