@@ -18,7 +18,7 @@
 </p>
 <p></p>
 
-GAI is a flexible Go library / framework for building agent-style applications on top of LLMs.
+GAI is a flexible Go framework for building agent-style applications on top of LLMs.
 It provides a generic interface for providers and models, prompt and context implementations, and a loop for agentic-calling workflows.
 
 ## ✨ Overview
@@ -458,9 +458,6 @@ The default renderer is XML-like and can be replaced with a custom renderer.
 ### 🧭 History Sources
 
 `History(store, sessionID, limit)` returns a prompt source that loads stored messages, renders them as a `history` part, and appends current loop messages as a `current-loop` part.
-
-> [!NOTE]
-> `NewSessionManager(store, id)` is still available as a history source with the default 5-message window. Use `History(store, id, limit)` when you want to configure the limit directly.
 
 ### 📄 Prompt Files
 
