@@ -5,10 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/lace-ai/gai/ai"
+	aicontext "github.com/lace-ai/gai/context"
 	"github.com/lace-ai/gai/loop"
 	"github.com/lace-ai/gai/testutil/mocks"
 )
@@ -24,6 +28,8 @@ func (m wrapStreamModel) GenerateStream(ctx context.Context, req ai.AIRequest) <
 type scriptedStreamModel struct {
 	sequences [][]ai.Token
 	idx       int
+	mu        sync.Mutex
+	requests  []ai.AIRequest
 }
 
 func (m *scriptedStreamModel) Name() string {
@@ -39,6 +45,10 @@ func (m *scriptedStreamModel) GenerateStream(ctx context.Context, req ai.AIReque
 
 	go func() {
 		defer close(out)
+		m.mu.Lock()
+		m.requests = append(m.requests, req)
+		m.mu.Unlock()
+
 		if m.idx >= len(m.sequences) {
 			return
 		}
@@ -63,6 +73,21 @@ func (m *scriptedStreamModel) Close() error {
 
 func (m *scriptedStreamModel) Tokenizer() ai.Tokenizer {
 	return mocks.MockTokenizer{}
+}
+
+func (m *scriptedStreamModel) Requests() []ai.AIRequest {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	requests := make([]ai.AIRequest, len(m.requests))
+	copy(requests, m.requests)
+	return requests
+}
+
+func testPromptBuilder() aicontext.PromptBuilder {
+	return aicontext.NewPromptBuilder().
+		System(aicontext.StaticPart("system", "System prompt").RequiredPart()).
+		User(aicontext.StaticPart("request", "Initial prompt").RequiredPart())
 }
 
 func TestLoop(t *testing.T) {
@@ -154,7 +179,7 @@ func TestLoop(t *testing.T) {
 			model := &mocks.MockModel{}
 			model.Responses = tt.iterations
 			tools := []loop.Tool{loop.NewEchoTool()}
-			l := loop.New(wrapStreamModel{Model: model}, tools, "Initial prompt", "System prompt", nil, nil)
+			l := loop.New(wrapStreamModel{Model: model}, tools, testPromptBuilder(), nil)
 			l.MaxLoopIterations = tt.maxIterations
 
 			tokenCh, _, errCh := l.Loop(context.Background())
@@ -256,7 +281,7 @@ func TestLoopHandlesManyToolCallsInOneIteration(t *testing.T) {
 				},
 			}
 
-			l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, "Initial prompt", "System prompt", nil, nil)
+			l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
 			l.MaxLoopIterations = 3
 
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -296,5 +321,66 @@ func TestLoopHandlesManyToolCallsInOneIteration(t *testing.T) {
 				t.Fatalf("expected %d tool errors, got %d", tt.wantToolErrors, toolErrs)
 			}
 		})
+	}
+}
+
+func TestLoopBuildsStructuredPromptEveryIteration(t *testing.T) {
+	t.Parallel()
+
+	var buildCount atomic.Int32
+	promptBuilder := aicontext.NewPromptBuilder().
+		System(aicontext.StaticPart("system", "System prompt").RequiredPart()).
+		ContextSource("dynamic-context", aicontext.SourceFunc(func(ctx context.Context, conv aicontext.Conversation) ([]aicontext.Part, error) {
+			count := buildCount.Add(1)
+			return []aicontext.Part{aicontext.StaticPart("iteration", fmt.Sprintf("build-%d", count))}, nil
+		}), true).
+		User(aicontext.StaticPart("request", "Initial prompt").RequiredPart())
+
+	model := &scriptedStreamModel{
+		sequences: [][]ai.Token{
+			{
+				{
+					Type: ai.TokenTypeToolCall,
+					ToolCall: &ai.ToolCall{
+						ID:   "call-1",
+						Type: "function",
+						Name: "echo",
+						Args: json.RawMessage(`{"text":"payload"}`),
+					},
+				},
+			},
+			{
+				{Type: ai.TokenTypeText, Data: []byte("done")},
+			},
+		},
+	}
+
+	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, promptBuilder, nil)
+	l.MaxLoopIterations = 3
+
+	tokenCh, _, errCh := l.Loop(context.Background())
+	for range tokenCh {
+	}
+	for err := range errCh {
+		if err != nil {
+			t.Fatalf("unexpected loop error: %v", err)
+		}
+	}
+
+	if got := buildCount.Load(); got != 2 {
+		t.Fatalf("expected prompt builder to run twice, got %d", got)
+	}
+	requests := model.Requests()
+	if len(requests) != 2 {
+		t.Fatalf("expected 2 model requests, got %d", len(requests))
+	}
+	if !strings.Contains(requests[0].Prompt.System, "System prompt") {
+		t.Fatalf("expected structured system prompt in first request: %+v", requests[0].Prompt)
+	}
+	if !strings.Contains(requests[0].Prompt.Context, "build-1") || !strings.Contains(requests[1].Prompt.Context, "build-2") {
+		t.Fatalf("expected dynamic context to be rebuilt per iteration: first=%q second=%q", requests[0].Prompt.Context, requests[1].Prompt.Context)
+	}
+	if !strings.Contains(requests[0].Prompt.Prompt, "Initial prompt") {
+		t.Fatalf("expected structured user prompt in first request: %+v", requests[0].Prompt)
 	}
 }

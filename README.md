@@ -18,7 +18,7 @@
 </p>
 <p></p>
 
-GAI is a flexible Go library / framework for building agent-style applications on top of LLMs.
+GAI is a flexible Go framework for building agent-style applications on top of LLMs.
 It provides a generic interface for providers and models, prompt and context implementations, and a loop for agentic-calling workflows.
 
 ## ✨ Overview
@@ -170,12 +170,20 @@ To build an agent with tools, use the `loop` package:
 > ```
 
 ```go
+prompt := aicontext.NewPromptBuilder().
+    System(aicontext.StaticPart(
+        "base-system",
+        "You are a helpful assistant that can call tools to get information.",
+    ).RequiredPart()).
+    User(aicontext.StaticPart(
+        "request",
+        "What is the weather in New York?",
+    ).RequiredPart())
+
 l := loop.New(
     model, // the model you want to use
     []loop.Tool{myTool}, // any tools you want to provide, one echo tool is included for testing
-    "What is the weather in New York?", // initial (user) prompt
-    "You are a helpful assistant that can call tools to get information.", // system prompt
-    nil, // optional context builder, if nil the loop will render prior messages itself
+    prompt, // structured prompt builder from the context package
     nil, // optional tool response preprocessor, if nil the loop will append tool results as-is
 )
 
@@ -242,16 +250,22 @@ To manage conversation history and build prompts from it, use the `context` pack
 
 ```go
 store := mySessionStore // your implementation of SessionStore (e.g. in-memory, database, etc.)
-sessionManager := aicontext.NewSessionManager(store, 1) // the second argument is the session ID
-// or use a tokenizer-backed history budget:
-// sessionManager := aicontext.NewSessionManagerWithHistoryLimit(store, 1, model.Tokenizer(), 8000)
+sessionID := 1
+prompt := aicontext.NewPromptBuilder().
+    System(aicontext.StaticPart(
+        "base-system",
+        "You are a helpful assistant that can call tools to get information.",
+    ).RequiredPart()).
+    ContextSource("history", aicontext.History(store, sessionID, 5), true).
+    User(aicontext.StaticPart(
+        "request",
+        "What is the weather in New York?",
+    ).RequiredPart())
 
 l := loop.New(
     model, // the model you want to use
     []loop.Tool{myTool}, // any tools you want to provide
-    "What is the weather in New York?", // initial (user) prompt
-    "You are a helpful assistant that can call tools to get information.", // system prompt
-    sessionManager, // session manager implements loop.ContextBuilder
+    prompt, // prompt builder owns system, history, and user prompt parts
     nil, // optional tool response preprocessor
 )
 tokenCh, _, errCh := l.Loop(context.Background())
@@ -316,13 +330,14 @@ type Model interface {
 
 ### 📝 Prompt and Request
 
-`ai.Prompt` combines three pieces of input:
+`ai.Prompt` combines three flat strings that providers send upstream:
 
 - `System`: system instructions
 - `Context`: prior conversation or external context
 - `Prompt`: the current (user) request
 
 `Prompt.CombinedPrompt()` concatenates those parts onto one string in this order: system, context, prompt.
+For agent loops, prefer building this value through `context.NewPromptBuilder()` so system, context, and user prompt content can be composed from structured parts and dynamic sources.
 
 `AIRequest` currently contains:
 
@@ -394,11 +409,11 @@ Messages have one of four roles:
 - `tool`
 
 Each message wraps a `Content` implementation such as text, tool calls, or tool results, (you can also implement your own).
-The renderer formats history as tagged blocks, which is what the loop uses when it builds context automatically.
+`RenderMessages` formats history as tagged blocks for prompt sources such as `History`.
 
 ### 💬 Conversation
 
-`Conversation` is a minimal interface used by the `SessionManager` to load and render message history:
+`Conversation` is a minimal interface passed to dynamic prompt sources so they can inspect the current loop messages:
 
 ```go
 type Conversation interface {
@@ -415,14 +430,35 @@ You provide your own store that can:
 - fetch sessions and messages
 - add one or many messages
 
-### 🧭 SessionManager (WIP)
+### 🧱 PromptBuilder
 
-`SessionManager` builds prompt context from stored history.
-By default it loads 5 stored messages, renders them, and appends the current loop messages.
-`NewSessionManagerWithHistoryLimit(store, id, tokenCounter, maxTokens)` enables dynamic recency trimming so the final rendered context stays within a token budget.
+`PromptBuilder` composes the full `ai.Prompt` from structured parts:
 
-> [!NOTE]
-> `NewSessionManager(store, id)` expects an integer session ID. If you want to start a new session, create one first.
+```go
+prompt := aicontext.NewPromptBuilder().
+    System(aicontext.StaticPart("base-system", "Follow the system policy.").RequiredPart()).
+    ContextSource("history", aicontext.History(store, sessionID, 5), true).
+    ContextSource("rag", ragSource, false).
+    User(aicontext.StaticPart("request", "Summarize the project status.").RequiredPart())
+```
+
+Parts are rendered in fixed section order (`system`, `context`, `user`) and append order inside each section. Each part has a `Tokens` field for future token accounting, but the builder does not count, trim, or enforce token budgets yet.
+
+Dynamic sources implement:
+
+```go
+type Source interface {
+    BuildParts(ctx context.Context, conv Conversation) ([]Part, error)
+}
+```
+
+Required source failures stop prompt building. Optional source failures are skipped.
+
+The default renderer is XML-like and can be replaced with a custom renderer.
+
+### 🧭 History Sources
+
+`History(store, sessionID, limit)` returns a prompt source that loads stored messages, renders them as a `history` part, and appends current loop messages as a `current-loop` part.
 
 ### 📄 Prompt Files
 
@@ -438,12 +474,10 @@ The `loop` package is for agent-style execution where the model can request tool
 
 - a model
 - optional tools
-- an initial user prompt
-- an optional system prompt
-- an optional context builder
+- a structured prompt builder
 - an optional tool-response preprocessor
 
-If no context builder is provided, the loop renders prior messages itself.
+The prompt builder is called on every loop iteration, so dynamic sources can include current loop messages, session history, summaries, RAG results, or other runtime context.
 
 The loop stops when the model returns a normal response or when the maximum iteration count is reached.
 
@@ -519,7 +553,6 @@ go test ./context/...
 ## 📝 Notes
 
 - The `context` package name intentionally mirrors the domain it manages, but it is easy to confuse with `context.Context` from the standard library. Use an alias in imports. The context package is likely to be renamed before official `1.0` release.
-- `SessionManager` defaults to a fixed history window of 5 messages unless you use `NewSessionManagerWithHistoryLimit`.
 
 ## 🤝 Contributing
 

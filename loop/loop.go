@@ -3,7 +3,6 @@ package loop
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 
 	"github.com/lace-ai/gai/ai"
@@ -15,21 +14,17 @@ const (
 	defaultRetryCount        = 3
 )
 
-type ContextBuilder interface {
-	BuildContext(conv aicontext.Conversation) (string, error)
-}
 type ToolResPreProcessor interface {
 	Process(req ai.ToolCall, res *ToolResponse) error
 }
 
 type Loop struct {
-	InitialPrompt     ai.Prompt
 	Iterations        []Iteration
 	Model             ai.Model
 	Tools             []Tool
 	MaxLoopIterations int
 	RetryCount        int
-	ContextBuilder    ContextBuilder
+	PromptBuilder     aicontext.PromptBuilder
 	PreProcessToolRes ToolResPreProcessor
 }
 
@@ -43,21 +38,19 @@ func (a *Loop) Validate() error {
 	if a.Model == nil {
 		return ErrModelNotConfigured
 	}
+	if a.PromptBuilder == nil {
+		return ErrPromptNotConfigured
+	}
 	return nil
 }
 
-func New(model ai.Model, tools []Tool, initialPrompt string, sysPrompt string, contextBuilder ContextBuilder, toolResPreProcessor ToolResPreProcessor) *Loop {
-	prompt := ai.Prompt{
-		Prompt: initialPrompt,
-		System: sysPrompt,
-	}
+func New(model ai.Model, tools []Tool, promptBuilder aicontext.PromptBuilder, toolResPreProcessor ToolResPreProcessor) *Loop {
 	agent := &Loop{
-		InitialPrompt:     prompt,
 		Model:             model,
 		Tools:             tools,
 		MaxLoopIterations: defaultMaxLoopIterations,
 		RetryCount:        defaultRetryCount,
-		ContextBuilder:    contextBuilder,
+		PromptBuilder:     promptBuilder,
 		PreProcessToolRes: toolResPreProcessor,
 	}
 	return agent
@@ -95,22 +88,15 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInfor
 
 			iterCtx, cancel := context.WithCancel(ctx)
 
-			if a.ContextBuilder != nil {
-				context, err := a.ContextBuilder.BuildContext(a)
-				if err != nil {
-					errCh <- err
-					cancel()
-					return
-				}
-				a.InitialPrompt.Context = context
-			} else {
-				var builder strings.Builder
-				aicontext.RenderMessages(a.Messages(), &builder)
-				a.InitialPrompt.Context = builder.String()
+			prompt, err := a.PromptBuilder.BuildPrompt(iterCtx, a)
+			if err != nil {
+				errCh <- fmt.Errorf("%w: %w", ErrBuildPrompt, err)
+				cancel()
+				return
 			}
 
 			request := ai.AIRequest{
-				Prompt: a.InitialPrompt,
+				Prompt: prompt,
 			}
 			iteration.Request = &request
 
