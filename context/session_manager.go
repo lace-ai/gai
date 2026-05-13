@@ -1,31 +1,46 @@
 package context
 
 import (
+	stdcontext "context"
 	"strings"
 )
 
-type SessionManager struct {
+type HistorySource struct {
 	store SessionStore
 	id    int
+	limit int
 }
 
-func NewSessionManager(store SessionStore, id int) *SessionManager {
-	return &SessionManager{
+func History(store SessionStore, id int, limit int) Source {
+	return &HistorySource{
 		store: store,
 		id:    id,
+		limit: limit,
 	}
 }
 
-func (s *SessionManager) BuildContext(conv Conversation) (string, error) {
-	var builder strings.Builder
-
-	messages, err := s.store.GetMessages(s.id, 5, 0)
-	if err != nil {
-		return "", err
+func (s *HistorySource) BuildParts(ctx stdcontext.Context, conv Conversation) ([]Part, error) {
+	if s == nil || s.store == nil {
+		return nil, ErrSessionStoreNotFound
 	}
-	RenderMessages(messages, &builder)
-	builder.WriteString("\nCurrent Loop:\n")
-	RenderMessages(conv.Messages(), &builder)
 
-	return builder.String(), nil
+	messages, err := s.store.GetMessages(s.id, s.limit, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	parts := []Part{
+		StaticPart("history", renderMessages(messages)),
+	}
+	if conv != nil {
+		parts = append(parts, StaticPart("current-loop", renderMessages(conv.Messages())))
+	}
+
+	return parts, nil
+}
+
+func renderMessages(messages []Message) string {
+	var builder strings.Builder
+	RenderMessages(messages, &builder)
+	return builder.String()
 }
