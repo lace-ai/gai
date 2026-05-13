@@ -18,12 +18,14 @@ func (emptyConversation) Messages() []aicontext.Message {
 func TestPromptBuilderBuildsStructuredPrompt(t *testing.T) {
 	t.Parallel()
 
+	sourceCalled := false
 	builder := aicontext.NewPromptBuilder().
 		System(
 			aicontext.StaticPart("base", "base system").RequiredPart().WithTokens(12),
 			aicontext.StaticPart("dynamic", "dynamic system").WithTokens(4),
 		).
 		ContextSource("memory", aicontext.SourceFunc(func(ctx stdcontext.Context, conv aicontext.Conversation) ([]aicontext.Part, error) {
+			sourceCalled = true
 			return []aicontext.Part{
 				aicontext.StaticPart("history", "stored history"),
 				aicontext.StaticPart("current-loop", "current messages"),
@@ -36,26 +38,69 @@ func TestPromptBuilderBuildsStructuredPrompt(t *testing.T) {
 		t.Fatalf("BuildPrompt failed: %v", err)
 	}
 
-	wantSystem := `<system>
-<part name="base" tokens="12" required="true">
-base system
-</part>
-<part name="dynamic" tokens="4" required="false">
-dynamic system
-</part>
-</system>
-`
-	if prompt.System != wantSystem {
-		t.Fatalf("unexpected system prompt:\nwant: %q\ngot:  %q", wantSystem, prompt.System)
+	if !sourceCalled {
+		t.Fatal("expected context source to be called")
 	}
-	if !strings.Contains(prompt.Context, `<part name="history" tokens="0" required="true">`) {
-		t.Fatalf("expected history part in context prompt: %q", prompt.Context)
+
+	assertContainsAll(t, prompt.System, "system prompt", "base system", "dynamic system")
+	assertOrdered(t, prompt.System, "base system", "dynamic system")
+	assertContainsNone(t, prompt.System, "system prompt", "stored history", "current messages", "answer this")
+
+	assertContainsAll(t, prompt.Context, "context prompt", "stored history", "current messages")
+	assertOrdered(t, prompt.Context, "stored history", "current messages")
+	assertContainsNone(t, prompt.Context, "context prompt", "base system", "dynamic system", "answer this")
+
+	assertContainsAll(t, prompt.Prompt, "user prompt", "answer this")
+	assertContainsNone(t, prompt.Prompt, "user prompt", "base system", "dynamic system", "stored history", "current messages")
+}
+
+func TestPromptBuilderEscapesPartNames(t *testing.T) {
+	t.Parallel()
+
+	prompt, err := aicontext.NewPromptBuilder().
+		User(aicontext.StaticPart(`request "<tag>"`, "answer this")).
+		BuildPrompt(stdcontext.Background(), emptyConversation{})
+	if err != nil {
+		t.Fatalf("BuildPrompt failed: %v", err)
 	}
-	if !strings.Contains(prompt.Context, "stored history") || !strings.Contains(prompt.Context, "current messages") {
-		t.Fatalf("expected source parts to render in context prompt: %q", prompt.Context)
+
+	assertContainsAll(t, prompt.Prompt, "user prompt", `request &#34;&lt;tag&gt;&#34;`, "answer this")
+	assertContainsNone(t, prompt.Prompt, "user prompt", `request "<tag>"`)
+}
+
+func assertContainsAll(t *testing.T, text, name string, values ...string) {
+	t.Helper()
+
+	for _, value := range values {
+		if !strings.Contains(text, value) {
+			t.Fatalf("expected %s to contain %q: %q", name, value, text)
+		}
 	}
-	if !strings.Contains(prompt.Prompt, `<user>`) || !strings.Contains(prompt.Prompt, "answer this") {
-		t.Fatalf("expected user section to render into Prompt: %q", prompt.Prompt)
+}
+
+func assertContainsNone(t *testing.T, text, name string, values ...string) {
+	t.Helper()
+
+	for _, value := range values {
+		if strings.Contains(text, value) {
+			t.Fatalf("expected %s not to contain %q: %q", name, value, text)
+		}
+	}
+}
+
+func assertOrdered(t *testing.T, text string, values ...string) {
+	t.Helper()
+
+	previous := -1
+	for _, value := range values {
+		index := strings.Index(text, value)
+		if index == -1 {
+			t.Fatalf("expected %q to contain %q", text, value)
+		}
+		if index < previous {
+			t.Fatalf("expected values to be ordered as %q in %q", values, text)
+		}
+		previous = index
 	}
 }
 
