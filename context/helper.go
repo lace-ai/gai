@@ -14,7 +14,7 @@ func (b *Builder) SystemPrompt(path string) (*Builder, error) {
 		return b, err
 	}
 
-	return b.System(aicontext.StaticPart(
+	return b.System(StaticPart(
 		"base",
 		sysPrompt,
 	).RequiredPart()), nil
@@ -26,7 +26,7 @@ func (b *Builder) ToolSysPrompt(path string) (*Builder, error) {
 		return b, err
 	}
 
-	return b.System(aicontext.StaticPart(
+	return b.System(StaticPart(
 		"tool",
 		sysPrompt,
 	).RequiredPart()), nil
@@ -37,7 +37,7 @@ func (b *Builder) UserPrompt(text string) (*Builder, error) {
 		return b, ErrUserPromptEmpty
 	}
 
-	return b.User(aicontext.StaticPart(
+	return b.User(StaticPart(
 		"request",
 		text,
 	).RequiredPart()), nil

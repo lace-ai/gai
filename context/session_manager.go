@@ -24,12 +24,7 @@ func (s *HistorySource) BuildParts(ctx stdcontext.Context, conv Conversation) ([
 		return nil, ErrSessionStoreNotFound
 	}
 
-	limit := s.limit
-	if limit <= 0 {
-		limit = defaultHistoryLimit
-	}
-
-	messages, err := s.store.GetMessages(s.id, limit, 0)
+	messages, err := s.store.GetMessages(s.id, s.limit, 0)
 	if err != nil {
 		return nil, err
 	}

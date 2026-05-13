@@ -13,4 +13,5 @@ var (
 
 	ErrPromptBuilderNil = errors.New("prompt builder is nil")
 	ErrPromptSource     = errors.New("prompt source error")
+	ErrUserPromptEmpty  = errors.New("user prompt is empty")
 )

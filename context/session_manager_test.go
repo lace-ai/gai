@@ -38,7 +38,7 @@ func TestHistorySourceBuildsStoredAndCurrentLoopParts(t *testing.T) {
 		},
 	}
 
-	parts, err := aicontext.NewSessionManager(store, 7, 3).BuildParts(stdcontext.Background(), conv)
+	parts, err := aicontext.History(store, 7, 3).BuildParts(stdcontext.Background(), conv)
 	if err != nil {
 		t.Fatalf("BuildParts failed: %v", err)
 	}
