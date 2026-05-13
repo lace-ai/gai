@@ -552,7 +552,7 @@ go test ./context/...
 ## 📝 Notes
 
 - The `context` package name intentionally mirrors the domain it manages, but it is easy to confuse with `context.Context` from the standard library. Use an alias in imports. The context package is likely to be renamed before official `1.0` release.
-- `SessionManager` uses a default history window of 5 messages. Use `History(store, id, limit)` for an explicit limit.
+- History limits are caller-provided via `History(store, id, limit)`; there is no default history window in the current API.
 
 ## 🤝 Contributing
 
