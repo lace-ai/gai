@@ -101,7 +101,7 @@ response, err := model.Generate(context.Background(), ai.AIRequest{
 
 Currently, the library includes Gemini and Mistral implementations. Gemini uses the official `go-genai` library, and Mistral uses direct HTTP calls to the Mistral API.
 
-But you can implement your own provider by implementing the `Provider` and `Model` and a `Tokenizer` interfaces defined in the `ai` package.
+But you can implement your own provider by implementing the `Provider`, `Model`, and `Tokenizer` interfaces defined in the `ai` package.
 
 ### Example:
 
