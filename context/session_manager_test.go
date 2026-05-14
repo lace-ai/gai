@@ -130,15 +130,15 @@ type whitespaceTokenizer struct {
 	err error
 }
 
-func (whitespaceTokenizer) Tokenize(text string) []string {
+func (whitespaceTokenizer) Tokenize(ctx stdcontext.Context, text string) []string {
 	return strings.Fields(text)
 }
 
-func (t whitespaceTokenizer) CountTokens(text string) (int, error) {
+func (t whitespaceTokenizer) CountTokens(ctx stdcontext.Context, text string) (int, error) {
 	if t.err != nil {
 		return 0, t.err
 	}
-	return len(t.Tokenize(text)), nil
+	return len(t.Tokenize(ctx, text)), nil
 }
 
 type fakeConversation struct {
@@ -246,7 +246,7 @@ func assertHistoryStoreQueries(t *testing.T, calls []getMessagesCall, sessionID 
 
 func mustCountTokens(t *testing.T, tokenizer whitespaceTokenizer, text string) int {
 	t.Helper()
-	tokens, err := tokenizer.CountTokens(text)
+	tokens, err := tokenizer.CountTokens(stdcontext.Background(), text)
 	if err != nil {
 		t.Fatalf("CountTokens failed: %v", err)
 	}

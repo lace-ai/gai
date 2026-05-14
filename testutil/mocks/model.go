@@ -71,11 +71,11 @@ type MockTokenizer struct {
 	Err   error
 }
 
-func (t MockTokenizer) Tokenize(text string) []string {
+func (t MockTokenizer) Tokenize(ctx context.Context, text string) []string {
 	return nil
 }
 
-func (t MockTokenizer) CountTokens(text string) (int, error) {
+func (t MockTokenizer) CountTokens(ctx context.Context, text string) (int, error) {
 	if t.Err != nil {
 		return 0, t.Err
 	}

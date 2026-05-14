@@ -125,7 +125,7 @@ func TestModelTokenizerCountTokens(t *testing.T) {
 		t.Fatalf("Model error: %v", err)
 	}
 
-	got, err := m.Tokenizer().(*Tokenizer).countTokens(context.Background(), "hello")
+	got, err := m.Tokenizer().(*Tokenizer).CountTokens(context.Background(), "hello")
 	if err != nil {
 		t.Fatalf("CountTokens error: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestModelTokenizerCountTokensHTTPError(t *testing.T) {
 		t.Fatalf("Model error: %v", err)
 	}
 
-	_, err = m.Tokenizer().(*Tokenizer).countTokens(context.Background(), "hello")
+	_, err = m.Tokenizer().(*Tokenizer).CountTokens(context.Background(), "hello")
 	if err == nil {
 		t.Fatal("expected error")
 	}

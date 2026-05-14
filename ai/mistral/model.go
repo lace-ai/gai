@@ -69,19 +69,11 @@ type Tokenizer struct {
 	debug     gai.DebugSink
 }
 
-func (t *Tokenizer) CountTokens(text string) (int, error) {
-	count, err := t.countTokens(context.Background(), text)
-	if err != nil {
-		return 0, err
-	}
-	return count, nil
-}
-
-func (t *Tokenizer) Tokenize(text string) []string {
+func (t *Tokenizer) Tokenize(ctx context.Context, text string) []string {
 	return nil
 }
 
-func (t *Tokenizer) countTokens(ctx context.Context, text string) (int, error) {
+func (t *Tokenizer) CountTokens(ctx context.Context, text string) (int, error) {
 	payload := chatCompletionRequest{
 		Model: t.modelName,
 		Messages: []chatMessageRequest{

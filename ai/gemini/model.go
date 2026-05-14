@@ -297,7 +297,7 @@ type Tokenizer struct {
 	local     *genaitokenizer.LocalTokenizer
 }
 
-func (t *Tokenizer) CountTokens(text string) (int, error) {
+func (t *Tokenizer) CountTokens(ctx context.Context, text string) (int, error) {
 	local, err := t.getLocal()
 	if err != nil {
 		return 0, err
@@ -310,7 +310,7 @@ func (t *Tokenizer) CountTokens(text string) (int, error) {
 	return int(result.TotalTokens), nil
 }
 
-func (t *Tokenizer) Tokenize(text string) []string {
+func (t *Tokenizer) Tokenize(ctx context.Context, text string) []string {
 	local, err := t.getLocal()
 	if err != nil {
 		return nil

@@ -37,7 +37,7 @@ func (s *HistorySource) BuildParts(ctx stdcontext.Context, conv Conversation) ([
 	convParts := []Part{}
 	if conv != nil {
 		renderedConv := renderMessages(conv.Messages())
-		convTokens, err := s.tokenizer.CountTokens(renderedConv)
+		convTokens, err := s.tokenizer.CountTokens(ctx, renderedConv)
 		if err != nil {
 			return nil, err
 		}
@@ -58,7 +58,7 @@ func (s *HistorySource) BuildParts(ctx stdcontext.Context, conv Conversation) ([
 		historyOffset += len(messages)
 
 		rendered := renderMessages(messages)
-		messageTokens, err := s.tokenizer.CountTokens(rendered)
+		messageTokens, err := s.tokenizer.CountTokens(ctx, rendered)
 		if err != nil {
 			return nil, err
 		}
