@@ -11,7 +11,8 @@ var (
 	ErrPromptFileType  = errors.New("prompt file must be .md or .txt")
 	ErrPromptMissing   = errors.New("prompt file is missing")
 
-	ErrPromptBuilderNil = errors.New("prompt builder is nil")
-	ErrPromptSource     = errors.New("prompt source error")
-	ErrUserPromptEmpty  = errors.New("user prompt is empty")
+	ErrPromptBuilderNil  = errors.New("prompt builder is nil")
+	ErrPromptSource      = errors.New("prompt source error")
+	ErrUserPromptEmpty   = errors.New("user prompt is empty")
+	ErrTokenizerNotFound = errors.New("tokenizer not found")
 )

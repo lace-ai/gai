@@ -140,10 +140,7 @@ func (s *fakeSessionStore) GetMessages(sessionID int, limit int, offset int) ([]
 	if offset >= len(s.messages) {
 		return nil, nil
 	}
-	end := offset + limit
-	if end > len(s.messages) {
-		end = len(s.messages)
-	}
+	end := min(offset+limit, len(s.messages))
 	return s.messages[offset:end], nil
 }
 

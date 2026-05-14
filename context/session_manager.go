@@ -28,6 +28,9 @@ func (s *HistorySource) BuildParts(ctx stdcontext.Context, conv Conversation) ([
 	if s == nil || s.store == nil {
 		return nil, ErrSessionStoreNotFound
 	}
+	if s.tokenizer == nil {
+		return nil, ErrTokenizerNotFound
+	}
 
 	tokens := 0
 
