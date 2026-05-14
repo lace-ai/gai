@@ -2,20 +2,25 @@ package context
 
 import (
 	stdcontext "context"
+	"strconv"
 	"strings"
+
+	"github.com/lace-ai/gai/ai"
 )
 
 type HistorySource struct {
-	store SessionStore
-	id    int
-	limit int
+	store      SessionStore
+	id         int
+	tokenLimit int
+	tokenizer  ai.Tokenizer
 }
 
-func History(store SessionStore, id int, limit int) Source {
+func History(store SessionStore, id, tokenLimit int, tokenizer ai.Tokenizer) Source {
 	return &HistorySource{
-		store: store,
-		id:    id,
-		limit: limit,
+		store:      store,
+		id:         id,
+		tokenLimit: tokenLimit,
+		tokenizer:  tokenizer,
 	}
 }
 
@@ -24,16 +29,36 @@ func (s *HistorySource) BuildParts(ctx stdcontext.Context, conv Conversation) ([
 		return nil, ErrSessionStoreNotFound
 	}
 
-	messages, err := s.store.GetMessages(s.id, s.limit, 0)
-	if err != nil {
-		return nil, err
+	tokens := 0
+
+	parts := []Part{}
+	if conv != nil {
+		renderedConv := renderMessages(conv.Messages())
+		convTokens := s.tokenizer.CountTokens(renderedConv)
+		tokens += convTokens
+		parts = append(parts, StaticPart("current-loop", renderedConv).RequiredPart().WithTokens(convTokens))
 	}
 
-	parts := []Part{
-		StaticPart("history", renderMessages(messages)),
-	}
-	if conv != nil {
-		parts = append(parts, StaticPart("current-loop", renderMessages(conv.Messages())))
+	historyOffset := 0
+	for tokens < s.tokenLimit {
+		messages, err := s.store.GetMessages(s.id, 1, historyOffset)
+		if err != nil {
+			return nil, err
+		}
+		if len(messages) == 0 {
+			break
+		}
+		historyOffset += len(messages)
+
+		rendered := renderMessages(messages)
+		messageTokens := s.tokenizer.CountTokens(rendered)
+		if tokens+messageTokens > s.tokenLimit {
+			break
+		}
+
+		tokens += messageTokens
+		part := StaticPart("history-"+strconv.Itoa(len(parts)), rendered).RequiredPart().WithTokens(messageTokens)
+		parts = append(parts, part)
 	}
 
 	return parts, nil

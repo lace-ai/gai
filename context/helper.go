@@ -32,15 +32,11 @@ func (b *Builder) ToolSysPrompt(path string) (*Builder, error) {
 	).RequiredPart()), nil
 }
 
-func (b *Builder) UserPrompt(text string) (*Builder, error) {
-	if strings.TrimSpace(text) == "" {
-		return b, ErrUserPromptEmpty
-	}
-
+func (b *Builder) UserPrompt(text string) *Builder {
 	return b.User(StaticPart(
 		"request",
 		text,
-	).RequiredPart()), nil
+	).RequiredPart())
 }
 
 func loadPromptFromFile(path string) (string, error) {
