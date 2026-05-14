@@ -37,12 +37,14 @@ func (s *HistorySource) BuildParts(ctx stdcontext.Context, conv Conversation) ([
 	convParts := []Part{}
 	if conv != nil {
 		renderedConv := renderMessages(conv.Messages())
-		convTokens, err := s.tokenizer.CountTokens(ctx, renderedConv)
-		if err != nil {
-			return nil, err
+		if renderedConv != "" {
+			convTokens, err := s.tokenizer.CountTokens(ctx, renderedConv)
+			if err != nil {
+				return nil, err
+			}
+			tokens += convTokens
+			convParts = append(convParts, StaticPart("current-loop", renderedConv).RequiredPart().WithTokens(convTokens))
 		}
-		tokens += convTokens
-		convParts = append(convParts, StaticPart("current-loop", renderedConv).RequiredPart().WithTokens(convTokens))
 	}
 
 	parts := []Part{}

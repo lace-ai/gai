@@ -78,6 +78,28 @@ func TestHistorySourceDoesNotLoadStoredMessagesWhenCurrentLoopUsesBudget(t *test
 	}
 }
 
+func TestHistorySourceSkipsEmptyCurrentLoop(t *testing.T) {
+	t.Parallel()
+
+	store := &fakeSessionStore{
+		messages: []aicontext.Message{
+			sessionMessage(1, aicontext.RoleUser, "stored one"),
+		},
+	}
+
+	parts, err := aicontext.History(store, 7, 100, rejectingEmptyTokenizer{}).BuildParts(stdcontext.Background(), fakeConversation{})
+	if err != nil {
+		t.Fatalf("BuildParts failed: %v", err)
+	}
+
+	if len(parts) != 1 {
+		t.Fatalf("expected only stored history, got %d parts: %+v", len(parts), parts)
+	}
+	if parts[0].Name != "history-0" {
+		t.Fatalf("expected stored history part, got %q", parts[0].Name)
+	}
+}
+
 func TestHistorySourcePropagatesStoreErrors(t *testing.T) {
 	t.Parallel()
 
@@ -128,6 +150,19 @@ func TestHistorySourceRequiresTokenizer(t *testing.T) {
 
 type whitespaceTokenizer struct {
 	err error
+}
+
+type rejectingEmptyTokenizer struct{}
+
+func (t rejectingEmptyTokenizer) Tokenize(ctx stdcontext.Context, text string) ([]string, error) {
+	return whitespaceTokenizer{}.Tokenize(ctx, text)
+}
+
+func (t rejectingEmptyTokenizer) CountTokens(ctx stdcontext.Context, text string) (int, error) {
+	if text == "" {
+		return 0, errors.New("empty text")
+	}
+	return whitespaceTokenizer{}.CountTokens(ctx, text)
 }
 
 func (t whitespaceTokenizer) Tokenize(ctx stdcontext.Context, text string) ([]string, error) {
