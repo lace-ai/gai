@@ -20,21 +20,21 @@ func TestNewContentFromType(t *testing.T) {
 	}{
 		{
 			name:        "Text content",
-			contentType: "text",
+			contentType: aicontext.ContentTypeText,
 			input:       aicontext.TextContent{Text: "hello"},
 			want:        aicontext.TextContent{Text: "hello"},
 			wantString:  "hello",
 		},
 		{
 			name:        "Tool call content",
-			contentType: "tool_call",
+			contentType: aicontext.ContentTypeToolCall,
 			input:       aicontext.ToolCallContent{ToolName: "search", Args: `{"query":"docs"}`},
 			want:        aicontext.ToolCallContent{ToolName: "search", Args: `{"query":"docs"}`},
 			wantString:  `search({"query":"docs"})`,
 		},
 		{
 			name:        "Tool result content",
-			contentType: "tool_result",
+			contentType: aicontext.ContentTypeToolResult,
 			input: aicontext.ToolResultContent{
 				ToolName:          "search",
 				Result:            "found",
@@ -51,7 +51,7 @@ func TestNewContentFromType(t *testing.T) {
 		},
 		{
 			name:        "Tool result error content",
-			contentType: "tool_result_err",
+			contentType: aicontext.ContentTypeToolResultErr,
 			input:       aicontext.ToolResultErrContent{ToolName: "search", Err: "failed"},
 			want:        aicontext.ToolResultErrContent{ToolName: "search", Err: "failed"},
 			wantString:  "search error: failed",
@@ -88,7 +88,7 @@ func TestNewContentFromType(t *testing.T) {
 func TestNewContentFromTypeRejectsInvalidJSON(t *testing.T) {
 	t.Parallel()
 
-	_, err := aicontext.NewContentFromType("text", []byte(`{`))
+	_, err := aicontext.NewContentFromType(aicontext.ContentTypeText, []byte(`{`))
 	if err == nil {
 		t.Fatal("expected invalid JSON error")
 	}

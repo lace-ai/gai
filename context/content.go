@@ -11,6 +11,13 @@ type Content interface {
 	Type() string
 }
 
+const (
+	ContentTypeText          = "text"
+	ContentTypeToolCall      = "tool_call"
+	ContentTypeToolResult    = "tool_result"
+	ContentTypeToolResultErr = "tool_result_err"
+)
+
 // TextContent is a generic content type
 type TextContent struct {
 	Text string
@@ -21,7 +28,7 @@ func (c TextContent) String() string {
 }
 
 func (c TextContent) Type() string {
-	return "text"
+	return ContentTypeText
 }
 
 func NewTextContent(text string) TextContent {
@@ -39,7 +46,7 @@ func (c ToolCallContent) String() string {
 }
 
 func (c ToolCallContent) Type() string {
-	return "tool_call"
+	return ContentTypeToolCall
 }
 
 func NewToolCallContent(toolName, args string) ToolCallContent {
@@ -62,7 +69,7 @@ func (c ToolResultContent) String() string {
 }
 
 func (c ToolResultContent) Type() string {
-	return "tool_result"
+	return ContentTypeToolResult
 }
 
 func NewToolResultContent(toolName, result string, precomputed bool, precomputedResult string) ToolResultContent {
@@ -85,7 +92,7 @@ func (c ToolResultErrContent) String() string {
 }
 
 func (c ToolResultErrContent) Type() string {
-	return "tool_result_err"
+	return ContentTypeToolResultErr
 }
 
 func NewToolResultErrContent(toolName, err string) ToolResultErrContent {
@@ -97,28 +104,28 @@ func NewToolResultErrContent(toolName, err string) ToolResultErrContent {
 
 func NewContentFromType(contentType string, data []byte) (Content, error) {
 	switch contentType {
-	case "text":
+	case ContentTypeText:
 		var textContent TextContent
 		err := json.Unmarshal(data, &textContent)
 		if err != nil {
 			return nil, fmt.Errorf("failed to unmarshal content type %q: %w", contentType, err)
 		}
 		return textContent, nil
-	case "tool_call":
+	case ContentTypeToolCall:
 		var toolCallContent ToolCallContent
 		err := json.Unmarshal(data, &toolCallContent)
 		if err != nil {
 			return nil, fmt.Errorf("failed to unmarshal content type %q: %w", contentType, err)
 		}
 		return toolCallContent, nil
-	case "tool_result":
+	case ContentTypeToolResult:
 		var toolResultContent ToolResultContent
 		err := json.Unmarshal(data, &toolResultContent)
 		if err != nil {
 			return nil, fmt.Errorf("failed to unmarshal content type %q: %w", contentType, err)
 		}
 		return toolResultContent, nil
-	case "tool_result_err":
+	case ContentTypeToolResultErr:
 		var toolResultErrContent ToolResultErrContent
 		err := json.Unmarshal(data, &toolResultErrContent)
 		if err != nil {
