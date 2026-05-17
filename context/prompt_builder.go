@@ -160,6 +160,7 @@ func Required() EntryOption {
 	}
 }
 
+// Optional is the default a no-op, but can be used to override a Required option.
 func Optional() EntryOption {
 	return func(entry *builderEntry) {
 		entry.required = false
