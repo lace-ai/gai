@@ -85,6 +85,67 @@ func TestNewContentFromType(t *testing.T) {
 	}
 }
 
+func TestContentMarshalRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		content aicontext.Content
+		want    aicontext.Content
+	}{
+		{
+			name:    "Text content",
+			content: aicontext.TextContent{Text: "hello"},
+			want:    aicontext.TextContent{Text: "hello"},
+		},
+		{
+			name:    "Tool call content",
+			content: aicontext.ToolCallContent{ToolName: "search", Args: `{"query":"docs"}`},
+			want:    aicontext.ToolCallContent{ToolName: "search", Args: `{"query":"docs"}`},
+		},
+		{
+			name: "Tool result content",
+			content: aicontext.ToolResultContent{
+				ToolName:          "search",
+				Result:            "found",
+				Precomputed:       true,
+				PrecomputedResult: "cached",
+			},
+			want: aicontext.ToolResultContent{
+				ToolName:          "search",
+				Result:            "found",
+				Precomputed:       true,
+				PrecomputedResult: "cached",
+			},
+		},
+		{
+			name:    "Tool result error content",
+			content: aicontext.ToolResultErrContent{ToolName: "search", Err: "failed"},
+			want:    aicontext.ToolResultErrContent{ToolName: "search", Err: "failed"},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			data, err := tt.content.Marshal()
+			if err != nil {
+				t.Fatalf("Marshal failed: %v", err)
+			}
+
+			got, err := aicontext.NewContentFromType(tt.content.Type(), data)
+			if err != nil {
+				t.Fatalf("NewContentFromType failed: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("content = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestNewContentFromTypeRejectsInvalidJSON(t *testing.T) {
 	t.Parallel()
 

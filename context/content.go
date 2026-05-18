@@ -9,6 +9,7 @@ import (
 type Content interface {
 	String() string
 	Type() string
+	Marshal() ([]byte, error)
 }
 
 const (
@@ -31,6 +32,10 @@ func (c TextContent) Type() string {
 	return ContentTypeText
 }
 
+func (c TextContent) Marshal() ([]byte, error) {
+	return json.Marshal(c)
+}
+
 func NewTextContent(text string) TextContent {
 	return TextContent{Text: text}
 }
@@ -47,6 +52,10 @@ func (c ToolCallContent) String() string {
 
 func (c ToolCallContent) Type() string {
 	return ContentTypeToolCall
+}
+
+func (c ToolCallContent) Marshal() ([]byte, error) {
+	return json.Marshal(c)
 }
 
 func NewToolCallContent(toolName, args string) ToolCallContent {
@@ -72,6 +81,10 @@ func (c ToolResultContent) Type() string {
 	return ContentTypeToolResult
 }
 
+func (c ToolResultContent) Marshal() ([]byte, error) {
+	return json.Marshal(c)
+}
+
 func NewToolResultContent(toolName, result string, precomputed bool, precomputedResult string) ToolResultContent {
 	return ToolResultContent{
 		ToolName:          toolName,
@@ -93,6 +106,10 @@ func (c ToolResultErrContent) String() string {
 
 func (c ToolResultErrContent) Type() string {
 	return ContentTypeToolResultErr
+}
+
+func (c ToolResultErrContent) Marshal() ([]byte, error) {
+	return json.Marshal(c)
 }
 
 func NewToolResultErrContent(toolName, err string) ToolResultErrContent {
