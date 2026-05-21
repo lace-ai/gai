@@ -371,6 +371,61 @@ func TestPromptBuilderRendersRequiredPartsBeforeOptionalParts(t *testing.T) {
 	assertOrdered(t, prompt.Context, "required", "optional")
 }
 
+func TestPromptBuilderDropsOptionalStaticSystemPartOverBudget(t *testing.T) {
+	t.Parallel()
+
+	builder := aicontext.NewPromptBuilder().
+		Budget(aicontext.PromptBudget{
+			Tokenizer:           whitespaceTokenizer{},
+			ContextWindowTokens: 8,
+		}).
+		System("optional-system", "optional system prompt with too many words", aicontext.Optional()).
+		User("request", "question", aicontext.Required())
+
+	prompt, err := builder.BuildPrompt(stdcontext.Background(), emptyConversation{})
+	if err != nil {
+		t.Fatalf("BuildPrompt failed: %v", err)
+	}
+	if strings.Contains(prompt.System, "optional system prompt") {
+		t.Fatalf("expected optional system prompt to be dropped: %q", prompt.System)
+	}
+	if !strings.Contains(prompt.Prompt, "question") {
+		t.Fatalf("expected required user prompt to remain: %q", prompt.Prompt)
+	}
+	if got := traceEntryStatus(t, builder.LastTrace(), "optional-system"); got != "dropped" {
+		t.Fatalf("expected optional static system part to be dropped, got %q", got)
+	}
+}
+
+func TestPromptBuilderSummarizesOptionalStaticUserPartBeforeDropping(t *testing.T) {
+	t.Parallel()
+
+	summarizer := fakeSummarizer{summary: "tiny"}
+	builder := aicontext.NewPromptBuilder().
+		Budget(aicontext.PromptBudget{
+			Tokenizer:           whitespaceTokenizer{},
+			ContextWindowTokens: 17,
+			Summarizer:          summarizer,
+		}).
+		System("system", "system", aicontext.Required()).
+		User("request", "question", aicontext.Required()).
+		User("optional-user", "optional user prompt with too many words", aicontext.Optional())
+
+	prompt, err := builder.BuildPrompt(stdcontext.Background(), emptyConversation{})
+	if err != nil {
+		t.Fatalf("BuildPrompt failed: %v", err)
+	}
+	if strings.Contains(prompt.Prompt, "optional user prompt") {
+		t.Fatalf("expected original optional user prompt to be summarized: %q", prompt.Prompt)
+	}
+	if !strings.Contains(prompt.Prompt, "tiny") {
+		t.Fatalf("expected summarized optional user prompt: %q", prompt.Prompt)
+	}
+	if got := traceEntryStatus(t, builder.LastTrace(), "optional-user"); got != "summarized" {
+		t.Fatalf("expected optional static user part to be summarized, got %q", got)
+	}
+}
+
 func assertContainsAll(t *testing.T, text, name string, values ...string) {
 	t.Helper()
 
@@ -426,4 +481,16 @@ func (sectionNameRenderer) Render(section aicontext.Section, parts []aicontext.P
 		ids = append(ids, part.ID)
 	}
 	return string(section) + ":" + strings.Join(ids, ",")
+}
+
+type fakeSummarizer struct {
+	summary string
+	err     error
+}
+
+func (s fakeSummarizer) Summarize(ctx stdcontext.Context, req aicontext.SummaryRequest) (string, error) {
+	if s.err != nil {
+		return "", s.err
+	}
+	return s.summary, nil
 }
