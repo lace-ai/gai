@@ -133,7 +133,7 @@ func TestPromptBuilderSourceFailurePolicy(t *testing.T) {
 	if !strings.Contains(prompt.Context, "kept context") {
 		t.Fatalf("expected static context to remain: %q", prompt.Context)
 	}
-	if got := builder.LastTrace().Entries[1].Status; got != "skipped" {
+	if got := traceEntryStatus(t, builder.LastTrace(), "optional-rag"); got != "skipped" {
 		t.Fatalf("expected optional source to be traced as skipped, got %q", got)
 	}
 
@@ -245,7 +245,7 @@ func TestPromptBuilderDropsOptionalSourceOverBudget(t *testing.T) {
 		t.Fatalf("expected optional context to be dropped: %q", prompt.Context)
 	}
 	trace := builder.LastTrace()
-	if got := trace.Entries[1].Status; got != "dropped" {
+	if got := traceEntryStatus(t, trace, "optional"); got != "dropped" {
 		t.Fatalf("expected optional source to be dropped, got %q", got)
 	}
 }
@@ -315,9 +315,60 @@ func TestPromptBuilderDropsEarlierOptionalContextForLaterUserPrompt(t *testing.T
 	if !strings.Contains(prompt.Prompt, "question") {
 		t.Fatalf("expected user prompt to remain: %q", prompt.Prompt)
 	}
-	if got := builder.LastTrace().Entries[1].Status; got != "dropped" {
+	if got := traceEntryStatus(t, builder.LastTrace(), "optional"); got != "dropped" {
 		t.Fatalf("expected earlier optional trace to be dropped, got %q", got)
 	}
+}
+
+func TestPromptBuilderBudgetsRequiredSourceBeforeEarlierOptionalContext(t *testing.T) {
+	t.Parallel()
+
+	requiredSourceCalled := false
+	builder := aicontext.NewPromptBuilder().
+		Budget(aicontext.PromptBudget{
+			Tokenizer:           whitespaceTokenizer{},
+			ContextWindowTokens: 19,
+		}).
+		System("system", "system", aicontext.Required()).
+		Source(aicontext.SectionContext, "optional", aicontext.SourceFunc(func(ctx stdcontext.Context, view aicontext.PromptView, budget aicontext.SourceBudget) ([]aicontext.Part, error) {
+			return []aicontext.Part{aicontext.NewPart("optional-part", "optional content with many extra words")}, nil
+		}), aicontext.Optional()).
+		Source(aicontext.SectionContext, "required", aicontext.SourceFunc(func(ctx stdcontext.Context, view aicontext.PromptView, budget aicontext.SourceBudget) ([]aicontext.Part, error) {
+			requiredSourceCalled = true
+			if budget.MaxTokens == 0 {
+				t.Fatal("required source should receive budget before optional context consumes it")
+			}
+			return []aicontext.Part{aicontext.NewPart("required-part", "required", aicontext.Required())}, nil
+		}), aicontext.Required()).
+		User("request", "question", aicontext.Required())
+
+	prompt, err := builder.BuildPrompt(stdcontext.Background(), emptyConversation{})
+	if err != nil {
+		t.Fatalf("BuildPrompt failed: %v", err)
+	}
+	if !requiredSourceCalled {
+		t.Fatal("expected required source to be called")
+	}
+	if !strings.Contains(prompt.Context, "required") {
+		t.Fatalf("expected required source in context: %q", prompt.Context)
+	}
+	if strings.Contains(prompt.Context, "optional content") {
+		t.Fatalf("expected optional context to be dropped: %q", prompt.Context)
+	}
+}
+
+func TestPromptBuilderRendersRequiredPartsBeforeOptionalParts(t *testing.T) {
+	t.Parallel()
+
+	prompt, err := aicontext.NewPromptBuilder().
+		Context("optional", "optional").
+		Context("required", "required", aicontext.Required()).
+		User("request", "question", aicontext.Required()).
+		BuildPrompt(stdcontext.Background(), emptyConversation{})
+	if err != nil {
+		t.Fatalf("BuildPrompt failed: %v", err)
+	}
+	assertOrdered(t, prompt.Context, "required", "optional")
 }
 
 func assertContainsAll(t *testing.T, text, name string, values ...string) {
@@ -328,6 +379,17 @@ func assertContainsAll(t *testing.T, text, name string, values ...string) {
 			t.Fatalf("expected %s to contain %q: %q", name, value, text)
 		}
 	}
+}
+
+func traceEntryStatus(t *testing.T, trace aicontext.BuildTrace, id string) string {
+	t.Helper()
+	for _, entry := range trace.Entries {
+		if entry.ID == id {
+			return entry.Status
+		}
+	}
+	t.Fatalf("trace entry %q not found: %+v", id, trace.Entries)
+	return ""
 }
 
 func assertContainsNone(t *testing.T, text, name string, values ...string) {

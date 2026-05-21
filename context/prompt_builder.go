@@ -368,7 +368,7 @@ func (b *Builder) BuildPrompt(ctx stdcontext.Context, conv Conversation) (ai.Pro
 	partIDs := map[string]Section{}
 
 	b.emit(ctx, "prompt_build_started", map[string]any{"entries": len(b.entries)}, nil)
-	for _, entry := range b.entries {
+	for _, entry := range orderedEntries(b.entries) {
 		traceEntry := BuildTraceEntry{
 			ID:       entry.id,
 			Section:  entry.section,
@@ -400,7 +400,7 @@ func (b *Builder) BuildPrompt(ctx stdcontext.Context, conv Conversation) (ai.Pro
 				}
 				traceEntry.TokenCount = count
 				traceEntry.AvailableTokens = available
-				if entry.required || entry.section == SectionSystem || entry.section == SectionUser {
+				if entry.required {
 					cleanedParts, ok, retryCount, retryAvailable, err := b.partsFitAfterDroppingOptionalContext(ctx, renderer, parts, entry.section, next)
 					if err != nil {
 						traceEntry.Err = err
@@ -623,6 +623,21 @@ func (b *Builder) validate() error {
 		}
 	}
 	return nil
+}
+
+func orderedEntries(entries []builderEntry) []builderEntry {
+	ordered := make([]builderEntry, 0, len(entries))
+	for _, entry := range entries {
+		if entry.required {
+			ordered = append(ordered, entry)
+		}
+	}
+	for _, entry := range entries {
+		if !entry.required {
+			ordered = append(ordered, entry)
+		}
+	}
+	return ordered
 }
 
 func validatePartIDs(seen map[string]Section, section Section, parts []Part) error {
