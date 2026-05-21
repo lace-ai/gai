@@ -384,7 +384,7 @@ func TestLoopBuildsStructuredPromptEveryIteration(t *testing.T) {
 	var buildCount atomic.Int32
 	promptBuilder := aicontext.NewPromptBuilder().
 		System("system", "System prompt", aicontext.Required()).
-		Source(aicontext.SectionContext, "dynamic-context", aicontext.SourceFunc(func(ctx context.Context, view aicontext.PromptView) ([]aicontext.Part, error) {
+		Source(aicontext.SectionContext, "dynamic-context", aicontext.SourceFunc(func(ctx context.Context, view aicontext.PromptView, budget aicontext.SourceBudget) ([]aicontext.Part, error) {
 			count := buildCount.Add(1)
 			return []aicontext.Part{aicontext.NewPart("iteration", fmt.Sprintf("build-%d", count))}, nil
 		}), aicontext.Required()).

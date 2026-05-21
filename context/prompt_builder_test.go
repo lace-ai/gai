@@ -23,7 +23,7 @@ func TestPromptBuilderBuildsStructuredPrompt(t *testing.T) {
 	builder := aicontext.NewPromptBuilder().
 		System("base", "base system", aicontext.Required(), aicontext.Tokens(12)).
 		System("dynamic", "dynamic system", aicontext.Tokens(4)).
-		Source(aicontext.SectionContext, "memory", aicontext.SourceFunc(func(ctx stdcontext.Context, view aicontext.PromptView) ([]aicontext.Part, error) {
+		Source(aicontext.SectionContext, "memory", aicontext.SourceFunc(func(ctx stdcontext.Context, view aicontext.PromptView, budget aicontext.SourceBudget) ([]aicontext.Part, error) {
 			sourceCalled = true
 			if _, ok := view.Entry("base"); !ok {
 				t.Fatal("expected source view to expose full configured plan")
@@ -98,7 +98,7 @@ func TestPromptBuilderRejectsDuplicateEmittedPartIDs(t *testing.T) {
 
 	_, err := aicontext.NewPromptBuilder().
 		System("base", "system").
-		Source(aicontext.SectionContext, "dup-source", aicontext.SourceFunc(func(ctx stdcontext.Context, view aicontext.PromptView) ([]aicontext.Part, error) {
+		Source(aicontext.SectionContext, "dup-source", aicontext.SourceFunc(func(ctx stdcontext.Context, view aicontext.PromptView, budget aicontext.SourceBudget) ([]aicontext.Part, error) {
 			return []aicontext.Part{aicontext.NewPart("base", "duplicate")}, nil
 		}), aicontext.Required()).
 		BuildPrompt(stdcontext.Background(), emptyConversation{})
@@ -114,7 +114,7 @@ func TestPromptBuilderSourceFailurePolicy(t *testing.T) {
 	t.Parallel()
 
 	sourceErr := errors.New("source unavailable")
-	failingSource := aicontext.SourceFunc(func(ctx stdcontext.Context, view aicontext.PromptView) ([]aicontext.Part, error) {
+	failingSource := aicontext.SourceFunc(func(ctx stdcontext.Context, view aicontext.PromptView, budget aicontext.SourceBudget) ([]aicontext.Part, error) {
 		return nil, sourceErr
 	})
 
@@ -133,7 +133,7 @@ func TestPromptBuilderSourceFailurePolicy(t *testing.T) {
 	if !strings.Contains(prompt.Context, "kept context") {
 		t.Fatalf("expected static context to remain: %q", prompt.Context)
 	}
-	if got := builder.LastTrace().Entries[1].Status; got != "skipped" {
+	if got := traceEntryStatus(t, builder.LastTrace(), "optional-rag"); got != "skipped" {
 		t.Fatalf("expected optional source to be traced as skipped, got %q", got)
 	}
 
@@ -154,7 +154,7 @@ func TestPromptBuilderSourceCanInspectWholePlan(t *testing.T) {
 
 	prompt, err := aicontext.NewPromptBuilder().
 		System("base", "base system", aicontext.Required(), aicontext.Meta("role", "base")).
-		Source(aicontext.SectionContext, "conditional", aicontext.SourceFunc(func(ctx stdcontext.Context, view aicontext.PromptView) ([]aicontext.Part, error) {
+		Source(aicontext.SectionContext, "conditional", aicontext.SourceFunc(func(ctx stdcontext.Context, view aicontext.PromptView, budget aicontext.SourceBudget) ([]aicontext.Part, error) {
 			entry, ok := view.Entry("base")
 			if !ok || entry.Meta["role"] != "base" {
 				return nil, nil
@@ -223,6 +223,263 @@ func TestPromptBuilderEmitsDebugEvents(t *testing.T) {
 	}
 }
 
+func TestPromptBuilderDropsOptionalSourceOverBudget(t *testing.T) {
+	t.Parallel()
+
+	builder := aicontext.NewPromptBuilder().
+		Budget(aicontext.PromptBudget{
+			Tokenizer:           whitespaceTokenizer{},
+			ContextWindowTokens: 14,
+		}).
+		System("system", "system", aicontext.Required()).
+		Source(aicontext.SectionContext, "optional", aicontext.SourceFunc(func(ctx stdcontext.Context, view aicontext.PromptView, budget aicontext.SourceBudget) ([]aicontext.Part, error) {
+			return []aicontext.Part{aicontext.NewPart("optional-part", "optional content that does not fit")}, nil
+		}), aicontext.Optional()).
+		User("request", "question", aicontext.Required())
+
+	prompt, err := builder.BuildPrompt(stdcontext.Background(), emptyConversation{})
+	if err != nil {
+		t.Fatalf("BuildPrompt failed: %v", err)
+	}
+	if strings.Contains(prompt.Context, "optional content") {
+		t.Fatalf("expected optional context to be dropped: %q", prompt.Context)
+	}
+	trace := builder.LastTrace()
+	if got := traceEntryStatus(t, trace, "optional"); got != "dropped" {
+		t.Fatalf("expected optional source to be dropped, got %q", got)
+	}
+}
+
+func TestPromptBuilderFailsRequiredOverBudget(t *testing.T) {
+	t.Parallel()
+
+	_, err := aicontext.NewPromptBuilder().
+		Budget(aicontext.PromptBudget{
+			Tokenizer:           whitespaceTokenizer{},
+			ContextWindowTokens: 5,
+		}).
+		System("system", "system prompt", aicontext.Required()).
+		User("request", "question", aicontext.Required()).
+		BuildPrompt(stdcontext.Background(), emptyConversation{})
+	if !errors.Is(err, aicontext.ErrPromptBudget) {
+		t.Fatalf("expected ErrPromptBudget, got %v", err)
+	}
+	if !strings.Contains(err.Error(), `prompt with "`) || !strings.Contains(err.Error(), "would use") {
+		t.Fatalf("expected prompt-wide budget error wording, got %v", err)
+	}
+}
+
+func TestPromptBuilderTraceSplitsEntryAndPromptTokens(t *testing.T) {
+	t.Parallel()
+
+	builder := aicontext.NewPromptBuilder().
+		Budget(aicontext.PromptBudget{
+			Tokenizer:           whitespaceTokenizer{},
+			ContextWindowTokens: 100,
+		}).
+		System("system", "system", aicontext.Required()).
+		User("request", "question", aicontext.Required())
+	_, err := builder.BuildPrompt(stdcontext.Background(), emptyConversation{})
+	if err != nil {
+		t.Fatalf("BuildPrompt failed: %v", err)
+	}
+
+	trace := builder.LastTrace()
+	request := traceEntry(t, trace, "request")
+	if request.EntryTokens == 0 {
+		t.Fatalf("expected entry tokens: %+v", request)
+	}
+	if request.PromptTokens <= request.EntryTokens {
+		t.Fatalf("expected prompt tokens to include prior rendered prompt: %+v", request)
+	}
+	if request.TokenCount != request.EntryTokens {
+		t.Fatalf("expected TokenCount compatibility alias to match entry tokens: %+v", request)
+	}
+}
+
+func TestPromptBuilderPassesSourceCap(t *testing.T) {
+	t.Parallel()
+
+	sourceCalled := false
+	_, err := aicontext.NewPromptBuilder().
+		Budget(aicontext.PromptBudget{
+			Tokenizer:           whitespaceTokenizer{},
+			ContextWindowTokens: 50,
+		}).
+		Source(aicontext.SectionContext, "capped", aicontext.SourceFunc(func(ctx stdcontext.Context, view aicontext.PromptView, budget aicontext.SourceBudget) ([]aicontext.Part, error) {
+			sourceCalled = true
+			if budget.MaxTokens != 3 {
+				t.Fatalf("expected source cap of 3, got %d", budget.MaxTokens)
+			}
+			return []aicontext.Part{aicontext.NewPart("small", "small")}, nil
+		}), aicontext.SourceTokenCap(3)).
+		User("request", "question", aicontext.Required()).
+		BuildPrompt(stdcontext.Background(), emptyConversation{})
+	if err != nil {
+		t.Fatalf("BuildPrompt failed: %v", err)
+	}
+	if !sourceCalled {
+		t.Fatal("expected capped source to be called")
+	}
+}
+
+func TestPromptBuilderReusesTokenCountForSourceBudget(t *testing.T) {
+	t.Parallel()
+
+	tokenizer := &countingTokenizer{}
+	_, err := aicontext.NewPromptBuilder().
+		Budget(aicontext.PromptBudget{
+			Tokenizer:           tokenizer,
+			ContextWindowTokens: 100,
+		}).
+		System("system", "system", aicontext.Required()).
+		Source(aicontext.SectionContext, "source", aicontext.SourceFunc(func(ctx stdcontext.Context, view aicontext.PromptView, budget aicontext.SourceBudget) ([]aicontext.Part, error) {
+			if tokenizer.CountCalls != 2 {
+				t.Fatalf("source budget should reuse current prompt count, got %d token counts before source", tokenizer.CountCalls)
+			}
+			return []aicontext.Part{aicontext.NewPart("source-part", "source", aicontext.Required())}, nil
+		}), aicontext.Required()).
+		User("request", "question", aicontext.Required()).
+		BuildPrompt(stdcontext.Background(), emptyConversation{})
+	if err != nil {
+		t.Fatalf("BuildPrompt failed: %v", err)
+	}
+}
+
+func TestPromptBuilderDropsEarlierOptionalContextForLaterUserPrompt(t *testing.T) {
+	t.Parallel()
+
+	builder := aicontext.NewPromptBuilder().
+		Budget(aicontext.PromptBudget{
+			Tokenizer:           whitespaceTokenizer{},
+			ContextWindowTokens: 12,
+		}).
+		System("system", "system", aicontext.Required()).
+		Source(aicontext.SectionContext, "optional", aicontext.SourceFunc(func(ctx stdcontext.Context, view aicontext.PromptView, budget aicontext.SourceBudget) ([]aicontext.Part, error) {
+			return []aicontext.Part{aicontext.NewPart("optional-part", "optional")}, nil
+		}), aicontext.Optional()).
+		User("request", "question", aicontext.Required())
+	prompt, err := builder.BuildPrompt(stdcontext.Background(), emptyConversation{})
+	if err != nil {
+		t.Fatalf("BuildPrompt failed: %v", err)
+	}
+	if strings.Contains(prompt.Context, "optional") {
+		t.Fatalf("expected earlier optional context to be dropped for user prompt: %q", prompt.Context)
+	}
+	if !strings.Contains(prompt.Prompt, "question") {
+		t.Fatalf("expected user prompt to remain: %q", prompt.Prompt)
+	}
+	if got := traceEntryStatus(t, builder.LastTrace(), "optional"); got != "dropped" {
+		t.Fatalf("expected earlier optional trace to be dropped, got %q", got)
+	}
+}
+
+func TestPromptBuilderBudgetsRequiredSourceBeforeEarlierOptionalContext(t *testing.T) {
+	t.Parallel()
+
+	requiredSourceCalled := false
+	builder := aicontext.NewPromptBuilder().
+		Budget(aicontext.PromptBudget{
+			Tokenizer:           whitespaceTokenizer{},
+			ContextWindowTokens: 19,
+		}).
+		System("system", "system", aicontext.Required()).
+		Source(aicontext.SectionContext, "optional", aicontext.SourceFunc(func(ctx stdcontext.Context, view aicontext.PromptView, budget aicontext.SourceBudget) ([]aicontext.Part, error) {
+			return []aicontext.Part{aicontext.NewPart("optional-part", "optional content with many extra words")}, nil
+		}), aicontext.Optional()).
+		Source(aicontext.SectionContext, "required", aicontext.SourceFunc(func(ctx stdcontext.Context, view aicontext.PromptView, budget aicontext.SourceBudget) ([]aicontext.Part, error) {
+			requiredSourceCalled = true
+			if budget.MaxTokens == 0 {
+				t.Fatal("required source should receive budget before optional context consumes it")
+			}
+			return []aicontext.Part{aicontext.NewPart("required-part", "required", aicontext.Required())}, nil
+		}), aicontext.Required()).
+		User("request", "question", aicontext.Required())
+
+	prompt, err := builder.BuildPrompt(stdcontext.Background(), emptyConversation{})
+	if err != nil {
+		t.Fatalf("BuildPrompt failed: %v", err)
+	}
+	if !requiredSourceCalled {
+		t.Fatal("expected required source to be called")
+	}
+	if !strings.Contains(prompt.Context, "required") {
+		t.Fatalf("expected required source in context: %q", prompt.Context)
+	}
+	if strings.Contains(prompt.Context, "optional content") {
+		t.Fatalf("expected optional context to be dropped: %q", prompt.Context)
+	}
+}
+
+func TestPromptBuilderRendersRequiredPartsBeforeOptionalParts(t *testing.T) {
+	t.Parallel()
+
+	prompt, err := aicontext.NewPromptBuilder().
+		Context("optional", "optional").
+		Context("required", "required", aicontext.Required()).
+		User("request", "question", aicontext.Required()).
+		BuildPrompt(stdcontext.Background(), emptyConversation{})
+	if err != nil {
+		t.Fatalf("BuildPrompt failed: %v", err)
+	}
+	assertOrdered(t, prompt.Context, "required", "optional")
+}
+
+func TestPromptBuilderDropsOptionalStaticSystemPartOverBudget(t *testing.T) {
+	t.Parallel()
+
+	builder := aicontext.NewPromptBuilder().
+		Budget(aicontext.PromptBudget{
+			Tokenizer:           whitespaceTokenizer{},
+			ContextWindowTokens: 8,
+		}).
+		System("optional-system", "optional system prompt with too many words", aicontext.Optional()).
+		User("request", "question", aicontext.Required())
+
+	prompt, err := builder.BuildPrompt(stdcontext.Background(), emptyConversation{})
+	if err != nil {
+		t.Fatalf("BuildPrompt failed: %v", err)
+	}
+	if strings.Contains(prompt.System, "optional system prompt") {
+		t.Fatalf("expected optional system prompt to be dropped: %q", prompt.System)
+	}
+	if !strings.Contains(prompt.Prompt, "question") {
+		t.Fatalf("expected required user prompt to remain: %q", prompt.Prompt)
+	}
+	if got := traceEntryStatus(t, builder.LastTrace(), "optional-system"); got != "dropped" {
+		t.Fatalf("expected optional static system part to be dropped, got %q", got)
+	}
+}
+
+func TestPromptBuilderSummarizesOptionalStaticUserPartBeforeDropping(t *testing.T) {
+	t.Parallel()
+
+	summarizer := fakeSummarizer{summary: "tiny"}
+	builder := aicontext.NewPromptBuilder().
+		Budget(aicontext.PromptBudget{
+			Tokenizer:           whitespaceTokenizer{},
+			ContextWindowTokens: 17,
+			Summarizer:          summarizer,
+		}).
+		System("system", "system", aicontext.Required()).
+		User("request", "question", aicontext.Required()).
+		User("optional-user", "optional user prompt with too many words", aicontext.Optional())
+
+	prompt, err := builder.BuildPrompt(stdcontext.Background(), emptyConversation{})
+	if err != nil {
+		t.Fatalf("BuildPrompt failed: %v", err)
+	}
+	if strings.Contains(prompt.Prompt, "optional user prompt") {
+		t.Fatalf("expected original optional user prompt to be summarized: %q", prompt.Prompt)
+	}
+	if !strings.Contains(prompt.Prompt, "tiny") {
+		t.Fatalf("expected summarized optional user prompt: %q", prompt.Prompt)
+	}
+	if got := traceEntryStatus(t, builder.LastTrace(), "optional-user"); got != "summarized" {
+		t.Fatalf("expected optional static user part to be summarized, got %q", got)
+	}
+}
+
 func assertContainsAll(t *testing.T, text, name string, values ...string) {
 	t.Helper()
 
@@ -231,6 +488,22 @@ func assertContainsAll(t *testing.T, text, name string, values ...string) {
 			t.Fatalf("expected %s to contain %q: %q", name, value, text)
 		}
 	}
+}
+
+func traceEntryStatus(t *testing.T, trace aicontext.BuildTrace, id string) string {
+	t.Helper()
+	return traceEntry(t, trace, id).Status
+}
+
+func traceEntry(t *testing.T, trace aicontext.BuildTrace, id string) aicontext.BuildTraceEntry {
+	t.Helper()
+	for _, entry := range trace.Entries {
+		if entry.ID == id {
+			return entry
+		}
+	}
+	t.Fatalf("trace entry %q not found: %+v", id, trace.Entries)
+	return aicontext.BuildTraceEntry{}
 }
 
 func assertContainsNone(t *testing.T, text, name string, values ...string) {
@@ -267,4 +540,33 @@ func (sectionNameRenderer) Render(section aicontext.Section, parts []aicontext.P
 		ids = append(ids, part.ID)
 	}
 	return string(section) + ":" + strings.Join(ids, ",")
+}
+
+type fakeSummarizer struct {
+	summary string
+	err     error
+}
+
+func (s fakeSummarizer) Summarize(ctx stdcontext.Context, req aicontext.SummaryRequest) (string, error) {
+	if s.err != nil {
+		return "", s.err
+	}
+	return s.summary, nil
+}
+
+type countingTokenizer struct {
+	CountCalls int
+}
+
+func (t *countingTokenizer) Tokenize(ctx stdcontext.Context, text string) ([]string, error) {
+	return strings.Fields(text), nil
+}
+
+func (t *countingTokenizer) CountTokens(ctx stdcontext.Context, text string) (int, error) {
+	t.CountCalls++
+	tokens, err := t.Tokenize(ctx, text)
+	if err != nil {
+		return 0, err
+	}
+	return len(tokens), nil
 }

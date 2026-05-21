@@ -23,6 +23,7 @@ type Loop struct {
 	Model             ai.Model
 	Tools             []Tool
 	MaxLoopIterations int
+	MaxTokens         int
 	RetryCount        int
 	PromptBuilder     aicontext.PromptBuilder
 	PreProcessToolRes ToolResPreProcessor
@@ -97,7 +98,8 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInfor
 			}
 
 			request := ai.AIRequest{
-				Prompt: prompt,
+				Prompt:    prompt,
+				MaxTokens: a.MaxTokens,
 			}
 			iteration.Request = &request
 
