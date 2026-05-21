@@ -56,6 +56,7 @@ func (s *RAGSource) BuildParts(ctx stdcontext.Context, view PromptView, budget S
 	}
 
 	tokens := 0
+	minOverflowTokens := 0
 	children := []Part{}
 	overflow := []string{}
 	for i, doc := range docs {
@@ -64,6 +65,9 @@ func (s *RAGSource) BuildParts(ctx stdcontext.Context, view PromptView, budget S
 			return nil, err
 		}
 		if tokens+docTokens > limit {
+			if minOverflowTokens == 0 || docTokens < minOverflowTokens {
+				minOverflowTokens = docTokens
+			}
 			overflow = append(overflow, doc.Content)
 			continue
 		}
@@ -102,7 +106,7 @@ func (s *RAGSource) BuildParts(ctx stdcontext.Context, view PromptView, budget S
 
 	if len(children) == 0 {
 		if budget.Required && len(docs) > 0 {
-			return nil, promptBudgetError("rag", 1, limit)
+			return nil, promptBudgetError("rag", minOverflowTokens, limit)
 		}
 		return nil, nil
 	}

@@ -68,6 +68,31 @@ func TestRAGSourceRequiresRAGStore(t *testing.T) {
 	}
 }
 
+func TestRAGSourceReportsMinimumDocumentTokensWhenRequiredDocsDoNotFit(t *testing.T) {
+	t.Parallel()
+
+	store := &fakeRAGStore{
+		docs: []aicontext.Document{
+			{ID: 1, Content: "one two three"},
+			{ID: 2, Content: "four five"},
+		},
+	}
+	_, err := aicontext.RAG(store, 2, func(ctx stdcontext.Context, view aicontext.PromptView) (string, error) {
+		return "query", nil
+	}).BuildParts(stdcontext.Background(), testPromptView{}, aicontext.SourceBudget{
+		Tokenizer:             whitespaceTokenizer{},
+		MaxTokens:             1,
+		RemainingPromptTokens: 1,
+		Required:              true,
+	})
+	if !errors.Is(err, aicontext.ErrPromptBudget) {
+		t.Fatalf("expected ErrPromptBudget, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "would use 2 tokens") {
+		t.Fatalf("expected minimum document token count in error, got %v", err)
+	}
+}
+
 type fakeRAGStore struct {
 	docs []aicontext.Document
 }
