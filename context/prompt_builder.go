@@ -3,6 +3,7 @@ package context
 import (
 	stdcontext "context"
 	"fmt"
+	"maps"
 	"math"
 	"strings"
 
@@ -298,14 +299,16 @@ func (b *Builder) BuildPrompt(ctx stdcontext.Context, conv Conversation) (ai.Pro
 	}
 
 	view := newBuilderView(conv, b.entries)
-	trace := BuildTrace{Parts: map[Section][]Part{}}
-	parts := map[Section][]Part{
-		SectionSystem:  {},
-		SectionContext: {},
-		SectionUser:    {},
+	state := promptBuildState{
+		renderer: renderer,
+		trace:    BuildTrace{Parts: map[Section][]Part{}},
+		parts: map[Section][]Part{
+			SectionSystem:  {},
+			SectionContext: {},
+			SectionUser:    {},
+		},
+		partIDs: map[string]Section{},
 	}
-	partIDs := map[string]Section{}
-	promptTokens := 0
 
 	b.emit(ctx, "prompt_build_started", map[string]any{"entries": len(b.entries)}, nil)
 	for _, entry := range orderedEntries(b.entries) {
@@ -324,127 +327,38 @@ func (b *Builder) BuildPrompt(ctx stdcontext.Context, conv Conversation) (ai.Pro
 				if err != nil {
 					traceEntry.Err = err
 					traceEntry.Status = "error"
-					trace.Entries = append(trace.Entries, traceEntry)
-					b.trace = finalizeTrace(trace, parts)
+					state.trace.Entries = append(state.trace.Entries, traceEntry)
+					b.trace = finalizeTrace(state.trace, state.parts)
 					b.emitEntry(ctx, "prompt_entry_error", traceEntry)
 					return ai.Prompt{}, err
 				}
 				part.Tokens = tokens
 			}
-			nextPartIDs := clonePartIDMap(partIDs)
-			if err := validatePartIDs(nextPartIDs, entry.section, []Part{part}); err != nil {
-				traceEntry.Err = err
-				traceEntry.Status = "error"
-				trace.Entries = append(trace.Entries, traceEntry)
-				b.trace = finalizeTrace(trace, parts)
-				b.emitEntry(ctx, "prompt_entry_error", traceEntry)
+			if err := b.admitEntryParts(ctx, &state, entry, traceEntry, []Part{part}, entryAdmissionOptions{
+				eventPrefix:       "prompt_entry",
+				summarizeOptional: true,
+			}); err != nil {
 				return ai.Prompt{}, err
 			}
-			next := append(cloneParts(parts[entry.section]), part)
-			ok, count, available, err := b.partsFit(ctx, renderer, parts, entry.section, next)
-			if !ok || err != nil {
-				if err != nil {
-					traceEntry.Err = err
-					traceEntry.Status = "error"
-					trace.Entries = append(trace.Entries, traceEntry)
-					b.trace = finalizeTrace(trace, parts)
-					b.emitEntry(ctx, "prompt_entry_error", traceEntry)
-					return ai.Prompt{}, err
-				}
-				setTraceTokens(&traceEntry, part.tokenCount(), count)
-				traceEntry.AvailableTokens = available
-				if entry.required {
-					cleanedParts, ok, retryCount, retryAvailable, err := b.partsFitAfterDroppingOptionalContext(ctx, renderer, parts, entry.section, next)
-					if err != nil {
-						traceEntry.Err = err
-						traceEntry.Status = "error"
-						trace.Entries = append(trace.Entries, traceEntry)
-						b.trace = finalizeTrace(trace, parts)
-						b.emitEntry(ctx, "prompt_entry_error", traceEntry)
-						return ai.Prompt{}, err
-					}
-					if ok {
-						parts = cleanedParts
-						partIDs = rebuildPartIDs(parts)
-						promptTokens = retryCount
-						trace.Entries = markDroppedOptionalContextEntries(trace.Entries)
-						traceEntry.Reason = "dropped_optional_context"
-						setTraceTokens(&traceEntry, part.tokenCount(), retryCount)
-						traceEntry.AvailableTokens = retryAvailable
-						traceEntry.Status = "emitted"
-						traceEntry.Parts = []Part{part}
-						b.emitEntry(ctx, "prompt_entry_emitted", traceEntry)
-						break
-					}
-					err = promptBudgetError(entry.id, count, available)
-					traceEntry.Err = err
-					traceEntry.Status = "error"
-					traceEntry.Reason = "required_over_budget"
-					trace.Entries = append(trace.Entries, traceEntry)
-					b.trace = finalizeTrace(trace, parts)
-					b.emitEntry(ctx, "prompt_entry_error", traceEntry)
-					return ai.Prompt{}, err
-				}
-				traceEntry.Status = "dropped"
-				traceEntry.Reason = "optional_over_budget"
-				if summarizedPart, ok, summaryCount, summaryPromptCount, summaryAvailable, err := b.summarizeOptionalPart(ctx, renderer, parts, entry, part, promptTokens); err != nil {
-					traceEntry.Err = err
-					traceEntry.Status = "error"
-					trace.Entries = append(trace.Entries, traceEntry)
-					b.trace = finalizeTrace(trace, parts)
-					b.emitEntry(ctx, "prompt_entry_error", traceEntry)
-					return ai.Prompt{}, err
-				} else if ok {
-					nextSummaryPartIDs := clonePartIDMap(partIDs)
-					if err := validatePartIDs(nextSummaryPartIDs, entry.section, []Part{summarizedPart}); err != nil {
-						traceEntry.Err = err
-						traceEntry.Status = "error"
-						trace.Entries = append(trace.Entries, traceEntry)
-						b.trace = finalizeTrace(trace, parts)
-						b.emitEntry(ctx, "prompt_entry_error", traceEntry)
-						return ai.Prompt{}, err
-					}
-					parts[entry.section] = append(cloneParts(parts[entry.section]), summarizedPart)
-					partIDs = nextSummaryPartIDs
-					promptTokens = summaryPromptCount
-					traceEntry.Status = "summarized"
-					traceEntry.Reason = "optional_summarized"
-					traceEntry.Parts = []Part{summarizedPart}
-					setTraceTokens(&traceEntry, summaryCount, summaryPromptCount)
-					traceEntry.AvailableTokens = summaryAvailable
-					b.emitEntry(ctx, "prompt_entry_summarized", traceEntry)
-					break
-				}
-				trace.Entries = append(trace.Entries, traceEntry)
-				b.emitEntry(ctx, "prompt_entry_dropped", traceEntry)
-				continue
-			}
-			parts[entry.section] = next
-			partIDs = nextPartIDs
-			promptTokens = count
-			traceEntry.Status = "emitted"
-			traceEntry.Parts = []Part{part}
-			setTraceTokens(&traceEntry, part.tokenCount(), count)
-			b.emitEntry(ctx, "prompt_entry_emitted", traceEntry)
 		case EntryKindSource:
 			if entry.source == nil {
 				err := fmt.Errorf("%w: section %s source %q is nil", ErrPromptSource, entry.section, entry.id)
 				traceEntry.Err = err
 				if entry.required {
 					traceEntry.Status = "error"
-					trace.Entries = append(trace.Entries, traceEntry)
-					b.trace = finalizeTrace(trace, parts)
+					state.trace.Entries = append(state.trace.Entries, traceEntry)
+					b.trace = finalizeTrace(state.trace, state.parts)
 					b.emitEntry(ctx, "prompt_source_error", traceEntry)
 					return ai.Prompt{}, err
 				}
 				traceEntry.Status = "skipped"
 				traceEntry.Reason = "nil_source"
-				trace.Entries = append(trace.Entries, traceEntry)
+				state.trace.Entries = append(state.trace.Entries, traceEntry)
 				b.emitEntry(ctx, "prompt_source_skipped", traceEntry)
 				continue
 			}
 
-			sourceBudget := b.sourceBudget(promptTokens, entry)
+			sourceBudget := b.sourceBudget(state.promptTokens, entry)
 			traceEntry.AvailableTokens = sourceBudget.MaxTokens
 			sourceParts, err := entry.source.BuildParts(ctx, view, sourceBudget)
 			if err != nil {
@@ -453,122 +367,186 @@ func (b *Builder) BuildPrompt(ctx stdcontext.Context, conv Conversation) (ai.Pro
 					wrapped := fmt.Errorf("%w: section %s source %q: %w", ErrPromptSource, entry.section, entry.id, err)
 					traceEntry.Err = wrapped
 					traceEntry.Status = "error"
-					trace.Entries = append(trace.Entries, traceEntry)
-					b.trace = finalizeTrace(trace, parts)
+					state.trace.Entries = append(state.trace.Entries, traceEntry)
+					b.trace = finalizeTrace(state.trace, state.parts)
 					b.emitEntry(ctx, "prompt_source_error", traceEntry)
 					return ai.Prompt{}, wrapped
 				}
 				traceEntry.Status = "skipped"
 				traceEntry.Reason = "optional_source_error"
-				trace.Entries = append(trace.Entries, traceEntry)
+				state.trace.Entries = append(state.trace.Entries, traceEntry)
 				b.emitEntry(ctx, "prompt_source_skipped", traceEntry)
 				continue
 			}
 			if entry.required {
 				markRequired(sourceParts)
 			}
-			nextPartIDs := clonePartIDMap(partIDs)
-			if err := validatePartIDs(nextPartIDs, entry.section, sourceParts); err != nil {
-				traceEntry.Err = err
-				if entry.required {
-					traceEntry.Status = "error"
-					trace.Entries = append(trace.Entries, traceEntry)
-					b.trace = finalizeTrace(trace, parts)
-					b.emitEntry(ctx, "prompt_source_error", traceEntry)
-					return ai.Prompt{}, err
-				}
-				traceEntry.Status = "skipped"
-				traceEntry.Reason = "duplicate_part_id"
-				trace.Entries = append(trace.Entries, traceEntry)
-				b.emitEntry(ctx, "prompt_source_skipped", traceEntry)
-				continue
+			if err := b.admitEntryParts(ctx, &state, entry, traceEntry, sourceParts, entryAdmissionOptions{
+				eventPrefix:         "prompt_source",
+				optionalIDConflict:  true,
+				includeDroppedParts: true,
+			}); err != nil {
+				return ai.Prompt{}, err
 			}
-			next := append(cloneParts(parts[entry.section]), sourceParts...)
-			ok, count, available, err := b.partsFit(ctx, renderer, parts, entry.section, next)
-			if !ok || err != nil {
-				if err != nil {
-					traceEntry.Err = err
-					traceEntry.Status = "error"
-					trace.Entries = append(trace.Entries, traceEntry)
-					b.trace = finalizeTrace(trace, parts)
-					b.emitEntry(ctx, "prompt_source_error", traceEntry)
-					return ai.Prompt{}, err
-				}
-				sourceTokens := partsTokenCount(sourceParts)
-				setTraceTokens(&traceEntry, sourceTokens, count)
-				traceEntry.AvailableTokens = available
-				if entry.required {
-					cleanedParts, ok, retryCount, retryAvailable, err := b.partsFitAfterDroppingOptionalContext(ctx, renderer, parts, entry.section, next)
-					if err != nil {
-						traceEntry.Err = err
-						traceEntry.Status = "error"
-						trace.Entries = append(trace.Entries, traceEntry)
-						b.trace = finalizeTrace(trace, parts)
-						b.emitEntry(ctx, "prompt_source_error", traceEntry)
-						return ai.Prompt{}, err
-					}
-					if ok {
-						parts = cleanedParts
-						partIDs = rebuildPartIDs(parts)
-						promptTokens = retryCount
-						trace.Entries = markDroppedOptionalContextEntries(trace.Entries)
-						traceEntry.Reason = "dropped_optional_context"
-						traceEntry.Status = "emitted"
-						traceEntry.Parts = cloneParts(sourceParts)
-						setTraceTokens(&traceEntry, sourceTokens, retryCount)
-						traceEntry.AvailableTokens = retryAvailable
-						b.emitEntry(ctx, "prompt_source_emitted", traceEntry)
-						break
-					}
-					err = promptBudgetError(entry.id, count, available)
-					traceEntry.Err = err
-					traceEntry.Status = "error"
-					traceEntry.Reason = "required_over_budget"
-					trace.Entries = append(trace.Entries, traceEntry)
-					b.trace = finalizeTrace(trace, parts)
-					b.emitEntry(ctx, "prompt_source_error", traceEntry)
-					return ai.Prompt{}, err
-				}
-				traceEntry.Status = "dropped"
-				traceEntry.Reason = "optional_over_budget"
-				traceEntry.Parts = cloneParts(sourceParts)
-				trace.Entries = append(trace.Entries, traceEntry)
-				b.emitEntry(ctx, "prompt_source_dropped", traceEntry)
-				continue
-			}
-			parts[entry.section] = next
-			partIDs = nextPartIDs
-			promptTokens = count
-			traceEntry.Status = "emitted"
-			traceEntry.Parts = cloneParts(sourceParts)
-			setTraceTokens(&traceEntry, partsTokenCount(sourceParts), count)
-			b.emitEntry(ctx, "prompt_source_emitted", traceEntry)
 		}
-
-		trace.Entries = append(trace.Entries, traceEntry)
 	}
 
-	trace = finalizeTrace(trace, parts)
+	trace := finalizeTrace(state.trace, state.parts)
 	b.trace = trace
-	prompt := renderPrompt(renderer, parts)
+	prompt := renderPrompt(renderer, state.parts)
 	if b.budget != nil {
-		if promptTokens > b.budget.promptLimit() {
-			err := promptBudgetError("prompt", promptTokens, b.budget.promptLimit())
+		if state.promptTokens > b.budget.promptLimit() {
+			err := promptBudgetError("prompt", state.promptTokens, b.budget.promptLimit())
 			b.emit(ctx, "prompt_build_failed", map[string]any{
 				"error":            err.Error(),
-				"prompt_tokens":    promptTokens,
+				"prompt_tokens":    state.promptTokens,
 				"available_tokens": b.budget.promptLimit(),
 			}, err)
 			return ai.Prompt{}, err
 		}
 	}
 	b.emit(ctx, "prompt_build_completed", map[string]any{
-		"system_parts":  len(parts[SectionSystem]),
-		"context_parts": len(parts[SectionContext]),
-		"user_parts":    len(parts[SectionUser]),
+		"system_parts":  len(state.parts[SectionSystem]),
+		"context_parts": len(state.parts[SectionContext]),
+		"user_parts":    len(state.parts[SectionUser]),
 	}, nil)
 
 	return prompt, nil
+}
+
+type promptBuildState struct {
+	renderer     Renderer
+	trace        BuildTrace
+	parts        map[Section][]Part
+	partIDs      map[string]Section
+	promptTokens int
+}
+
+type entryAdmissionOptions struct {
+	eventPrefix         string
+	summarizeOptional   bool
+	optionalIDConflict  bool
+	includeDroppedParts bool
+}
+
+func (b *Builder) admitEntryParts(ctx stdcontext.Context, state *promptBuildState, entry builderEntry, traceEntry BuildTraceEntry, entryParts []Part, opts entryAdmissionOptions) error {
+	nextPartIDs := clonePartIDMap(state.partIDs)
+	if err := validatePartIDs(nextPartIDs, entry.section, entryParts); err != nil {
+		traceEntry.Err = err
+		if opts.optionalIDConflict && !entry.required {
+			traceEntry.Status = "skipped"
+			traceEntry.Reason = "duplicate_part_id"
+			state.trace.Entries = append(state.trace.Entries, traceEntry)
+			b.emitEntry(ctx, opts.eventPrefix+"_skipped", traceEntry)
+			return nil
+		}
+		traceEntry.Status = "error"
+		state.trace.Entries = append(state.trace.Entries, traceEntry)
+		b.trace = finalizeTrace(state.trace, state.parts)
+		b.emitEntry(ctx, opts.eventPrefix+"_error", traceEntry)
+		return err
+	}
+
+	next := append(cloneParts(state.parts[entry.section]), entryParts...)
+	ok, count, available, err := b.partsFit(ctx, state.renderer, state.parts, entry.section, next)
+	if err != nil {
+		traceEntry.Err = err
+		traceEntry.Status = "error"
+		state.trace.Entries = append(state.trace.Entries, traceEntry)
+		b.trace = finalizeTrace(state.trace, state.parts)
+		b.emitEntry(ctx, opts.eventPrefix+"_error", traceEntry)
+		return err
+	}
+	if ok {
+		state.parts[entry.section] = next
+		state.partIDs = nextPartIDs
+		state.promptTokens = count
+		traceEntry.Status = "emitted"
+		traceEntry.Parts = cloneParts(entryParts)
+		setTraceTokens(&traceEntry, partsTokenCount(entryParts), count)
+		state.trace.Entries = append(state.trace.Entries, traceEntry)
+		b.emitEntry(ctx, opts.eventPrefix+"_emitted", traceEntry)
+		return nil
+	}
+
+	entryTokens := partsTokenCount(entryParts)
+	setTraceTokens(&traceEntry, entryTokens, count)
+	traceEntry.AvailableTokens = available
+	if entry.required {
+		cleanedParts, ok, retryCount, retryAvailable, err := b.partsFitAfterDroppingOptionalContext(ctx, state.renderer, state.parts, entry.section, next)
+		if err != nil {
+			traceEntry.Err = err
+			traceEntry.Status = "error"
+			state.trace.Entries = append(state.trace.Entries, traceEntry)
+			b.trace = finalizeTrace(state.trace, state.parts)
+			b.emitEntry(ctx, opts.eventPrefix+"_error", traceEntry)
+			return err
+		}
+		if ok {
+			state.parts = cleanedParts
+			state.partIDs = rebuildPartIDs(state.parts)
+			state.promptTokens = retryCount
+			state.trace.Entries = markDroppedOptionalContextEntries(state.trace.Entries)
+			traceEntry.Reason = "dropped_optional_context"
+			traceEntry.Status = "emitted"
+			traceEntry.Parts = cloneParts(entryParts)
+			setTraceTokens(&traceEntry, entryTokens, retryCount)
+			traceEntry.AvailableTokens = retryAvailable
+			state.trace.Entries = append(state.trace.Entries, traceEntry)
+			b.emitEntry(ctx, opts.eventPrefix+"_emitted", traceEntry)
+			return nil
+		}
+		err = promptBudgetError(entry.id, count, available)
+		traceEntry.Err = err
+		traceEntry.Status = "error"
+		traceEntry.Reason = "required_over_budget"
+		state.trace.Entries = append(state.trace.Entries, traceEntry)
+		b.trace = finalizeTrace(state.trace, state.parts)
+		b.emitEntry(ctx, opts.eventPrefix+"_error", traceEntry)
+		return err
+	}
+
+	traceEntry.Status = "dropped"
+	traceEntry.Reason = "optional_over_budget"
+	if opts.summarizeOptional && len(entryParts) == 1 {
+		summarizedPart, ok, summaryCount, summaryPromptCount, summaryAvailable, err := b.summarizeOptionalPart(ctx, state.renderer, state.parts, entry, entryParts[0], state.promptTokens)
+		if err != nil {
+			traceEntry.Err = err
+			traceEntry.Status = "error"
+			state.trace.Entries = append(state.trace.Entries, traceEntry)
+			b.trace = finalizeTrace(state.trace, state.parts)
+			b.emitEntry(ctx, opts.eventPrefix+"_error", traceEntry)
+			return err
+		}
+		if ok {
+			nextSummaryPartIDs := clonePartIDMap(state.partIDs)
+			if err := validatePartIDs(nextSummaryPartIDs, entry.section, []Part{summarizedPart}); err != nil {
+				traceEntry.Err = err
+				traceEntry.Status = "error"
+				state.trace.Entries = append(state.trace.Entries, traceEntry)
+				b.trace = finalizeTrace(state.trace, state.parts)
+				b.emitEntry(ctx, opts.eventPrefix+"_error", traceEntry)
+				return err
+			}
+			state.parts[entry.section] = append(cloneParts(state.parts[entry.section]), summarizedPart)
+			state.partIDs = nextSummaryPartIDs
+			state.promptTokens = summaryPromptCount
+			traceEntry.Status = "summarized"
+			traceEntry.Reason = "optional_summarized"
+			traceEntry.Parts = []Part{summarizedPart}
+			setTraceTokens(&traceEntry, summaryCount, summaryPromptCount)
+			traceEntry.AvailableTokens = summaryAvailable
+			state.trace.Entries = append(state.trace.Entries, traceEntry)
+			b.emitEntry(ctx, opts.eventPrefix+"_summarized", traceEntry)
+			return nil
+		}
+	}
+	if opts.includeDroppedParts {
+		traceEntry.Parts = cloneParts(entryParts)
+	}
+	state.trace.Entries = append(state.trace.Entries, traceEntry)
+	b.emitEntry(ctx, opts.eventPrefix+"_dropped", traceEntry)
+	return nil
 }
 
 func (b *Builder) validate() error {
@@ -944,9 +922,7 @@ func clonePartsMap(parts map[Section][]Part) map[Section][]Part {
 
 func clonePartIDMap(seen map[string]Section) map[string]Section {
 	cloned := make(map[string]Section, len(seen))
-	for id, section := range seen {
-		cloned[id] = section
-	}
+	maps.Copy(cloned, seen)
 	return cloned
 }
 
@@ -1000,8 +976,6 @@ func cloneMeta(meta map[string]any) map[string]any {
 		return nil
 	}
 	cloned := make(map[string]any, len(meta))
-	for key, value := range meta {
-		cloned[key] = value
-	}
+	maps.Copy(cloned, meta)
 	return cloned
 }
