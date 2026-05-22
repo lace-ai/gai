@@ -118,17 +118,15 @@ type BuildTrace struct {
 }
 
 type BuildTraceEntry struct {
-	ID           string
-	Section      Section
-	Kind         EntryKind
-	Status       string
-	Reason       string
-	Required     bool
-	Parts        []Part
-	EntryTokens  int
-	PromptTokens int
-	// TokenCount is kept as a compatibility alias for EntryTokens.
-	TokenCount      int
+	ID              string
+	Section         Section
+	Kind            EntryKind
+	Status          string
+	Reason          string
+	Required        bool
+	Parts           []Part
+	EntryTokens     int
+	PromptTokens    int
 	AvailableTokens int
 	Err             error
 }
@@ -747,7 +745,6 @@ func partsTokenCount(parts []Part) int {
 func setTraceTokens(entry *BuildTraceEntry, entryTokens, promptTokens int) {
 	entry.EntryTokens = entryTokens
 	entry.PromptTokens = promptTokens
-	entry.TokenCount = entryTokens
 }
 
 func (b *Builder) emitEntry(ctx stdcontext.Context, name string, entry BuildTraceEntry) {
@@ -760,7 +757,7 @@ func (b *Builder) emitEntry(ctx stdcontext.Context, name string, entry BuildTrac
 		"parts":            len(entry.Parts),
 		"entry_tokens":     entry.EntryTokens,
 		"prompt_tokens":    entry.PromptTokens,
-		"token_count":      entry.TokenCount,
+		"token_count":      entry.EntryTokens,
 		"available_tokens": entry.AvailableTokens,
 	}
 	if entry.Reason != "" {

@@ -292,9 +292,6 @@ func TestPromptBuilderTraceSplitsEntryAndPromptTokens(t *testing.T) {
 	if request.PromptTokens <= request.EntryTokens {
 		t.Fatalf("expected prompt tokens to include prior rendered prompt: %+v", request)
 	}
-	if request.TokenCount != request.EntryTokens {
-		t.Fatalf("expected TokenCount compatibility alias to match entry tokens: %+v", request)
-	}
 }
 
 func TestPromptBuilderPassesSourceCap(t *testing.T) {
