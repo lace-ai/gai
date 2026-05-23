@@ -185,6 +185,10 @@ type whitespaceTokenizer struct {
 
 type rejectingEmptyTokenizer struct{}
 
+func (t rejectingEmptyTokenizer) ID() string {
+	return "test.rejecting-empty"
+}
+
 func (t rejectingEmptyTokenizer) Tokenize(ctx stdcontext.Context, text string) ([]string, error) {
 	return whitespaceTokenizer{}.Tokenize(ctx, text)
 }
@@ -201,6 +205,10 @@ func (t whitespaceTokenizer) Tokenize(ctx stdcontext.Context, text string) ([]st
 		return nil, t.err
 	}
 	return strings.Fields(text), nil
+}
+
+func (t whitespaceTokenizer) ID() string {
+	return "test.whitespace"
 }
 
 func (t whitespaceTokenizer) CountTokens(ctx stdcontext.Context, text string) (int, error) {

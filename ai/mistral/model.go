@@ -69,6 +69,10 @@ type Tokenizer struct {
 	debug     gai.DebugSink
 }
 
+func (t *Tokenizer) ID() string {
+	return "mistral." + t.modelName
+}
+
 func (t *Tokenizer) Tokenize(ctx context.Context, text string) ([]string, error) {
 	return nil, ai.ErrTokenizerUnsupported
 }

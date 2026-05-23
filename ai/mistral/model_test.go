@@ -168,6 +168,19 @@ func TestModelTokenizerCountTokens(t *testing.T) {
 	}
 }
 
+func TestModelTokenizerID(t *testing.T) {
+	p := New("test-key", nil)
+	m, err := p.Model(MistralSmallLatest)
+	if err != nil {
+		t.Fatalf("Model error: %v", err)
+	}
+
+	tokenizer := m.Tokenizer()
+	if tokenizer.ID() != "mistral."+MistralSmallLatest {
+		t.Fatalf("unexpected tokenizer ID: %q", tokenizer.ID())
+	}
+}
+
 func TestModelTokenizerCountTokensHTTPError(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)

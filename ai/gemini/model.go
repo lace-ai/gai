@@ -297,6 +297,10 @@ type Tokenizer struct {
 	local     *genaitokenizer.LocalTokenizer
 }
 
+func (t *Tokenizer) ID() string {
+	return "gemini." + t.modelName
+}
+
 func (t *Tokenizer) CountTokens(ctx context.Context, text string) (int, error) {
 	local, err := t.getLocal()
 	if err != nil {

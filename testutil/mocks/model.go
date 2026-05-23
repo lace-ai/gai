@@ -71,6 +71,10 @@ type MockTokenizer struct {
 	Err   error
 }
 
+func (t MockTokenizer) ID() string {
+	return "mock.tokenizer"
+}
+
 func (t MockTokenizer) Tokenize(ctx context.Context, text string) ([]string, error) {
 	if t.Err != nil {
 		return nil, t.Err

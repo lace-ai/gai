@@ -555,6 +555,10 @@ type countingTokenizer struct {
 	CountCalls int
 }
 
+func (t *countingTokenizer) ID() string {
+	return "test.counting"
+}
+
 func (t *countingTokenizer) Tokenize(ctx stdcontext.Context, text string) ([]string, error) {
 	return strings.Fields(text), nil
 }

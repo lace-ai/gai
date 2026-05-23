@@ -81,7 +81,11 @@ func TestBuildThoughtToken(t *testing.T) {
 
 func TestModelTokenizer(t *testing.T) {
 	m := &Model{name: "gemini-2.5-flash"}
-	if m.Tokenizer() == nil {
+	tokenizer := m.Tokenizer()
+	if tokenizer == nil {
 		t.Fatal("expected tokenizer")
+	}
+	if tokenizer.ID() != "gemini.gemini-2.5-flash" {
+		t.Fatalf("unexpected tokenizer ID: %q", tokenizer.ID())
 	}
 }
