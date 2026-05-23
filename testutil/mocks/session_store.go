@@ -37,15 +37,23 @@ type AddMessageCall struct {
 	Message   aicontext.Message
 }
 
+type UpdateMessageTokensCall struct {
+	Context   context.Context
+	MessageID int
+	Tokenizer string
+	Tokens    int
+}
+
 type MockSessionStore struct {
-	Messages         []aicontext.Message
-	Err              error
-	CreateSessionID  int
-	GetSessionCalls  []GetSessionCall
-	GetMessagesCalls []GetMessagesCall
-	CreateCalls      []CreateSessionCall
-	AddMessagesCalls []AddMessagesCall
-	AddMessageCalls  []AddMessageCall
+	Messages                 []aicontext.Message
+	Err                      error
+	CreateSessionID          int
+	GetSessionCalls          []GetSessionCall
+	GetMessagesCalls         []GetMessagesCall
+	CreateCalls              []CreateSessionCall
+	AddMessagesCalls         []AddMessagesCall
+	AddMessageCalls          []AddMessageCall
+	UpdateMessageTokensCalls []UpdateMessageTokensCall
 
 	mu sync.Mutex
 }
@@ -127,4 +135,29 @@ func (s *MockSessionStore) AddMessage(ctx context.Context, sessionID int, messag
 	}
 	s.Messages = append(s.Messages, message)
 	return message, nil
+}
+
+func (s *MockSessionStore) UpdateMessageTokens(ctx context.Context, messageID int, tokenizer string, tokens int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.UpdateMessageTokensCalls = append(s.UpdateMessageTokensCalls, UpdateMessageTokensCall{
+		Context:   ctx,
+		MessageID: messageID,
+		Tokenizer: tokenizer,
+		Tokens:    tokens,
+	})
+	if s.Err != nil {
+		return s.Err
+	}
+	for i := range s.Messages {
+		if s.Messages[i].ID == messageID {
+			if s.Messages[i].TokenCount == nil {
+				s.Messages[i].TokenCount = map[string]int{}
+			}
+			s.Messages[i].TokenCount[tokenizer] = tokens
+			break
+		}
+	}
+	return nil
 }

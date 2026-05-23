@@ -3,6 +3,8 @@ package context
 import (
 	stdcontext "context"
 	"strconv"
+
+	"github.com/lace-ai/gai/ai"
 )
 
 type HistorySource struct {
@@ -40,9 +42,10 @@ func (s *HistorySource) BuildParts(ctx stdcontext.Context, view PromptView, budg
 		conv = view.Conversation()
 	}
 	if conv != nil {
-		renderedConv := renderMessages(conv.Messages())
+		convMessages := conv.Messages()
+		renderedConv := renderMessages(convMessages)
 		if renderedConv != "" {
-			convTokens, err := budget.Tokenizer.CountTokens(ctx, renderedConv)
+			convTokens, err := countRenderedMessages(ctx, budget.Tokenizer, convMessages, renderedConv)
 			if err != nil {
 				return nil, err
 			}
@@ -90,7 +93,7 @@ func (s *HistorySource) BuildParts(ctx stdcontext.Context, view PromptView, budg
 		historyOffset += len(messages)
 
 		rendered := renderMessages(messages)
-		messageTokens, err := budget.Tokenizer.CountTokens(ctx, rendered)
+		messageTokens, err := countRenderedMessages(ctx, budget.Tokenizer, messages, rendered)
 		if err != nil {
 			return nil, err
 		}
@@ -105,6 +108,25 @@ func (s *HistorySource) BuildParts(ctx stdcontext.Context, view PromptView, budg
 
 	parts = append(parts, convParts...)
 	return parts, nil
+}
+
+func countRenderedMessages(ctx stdcontext.Context, tokenizer ai.Tokenizer, messages []Message, rendered string) (int, error) {
+	if tokens, ok := storedMessageTokens(messages, tokenizer.ID()); ok {
+		return tokens, nil
+	}
+	return tokenizer.CountTokens(ctx, rendered)
+}
+
+func storedMessageTokens(messages []Message, tokenizerID string) (int, bool) {
+	tokens := 0
+	for _, message := range messages {
+		messageTokens, ok := message.TokenCount[tokenizerID]
+		if !ok || messageTokens < 0 {
+			return 0, false
+		}
+		tokens += messageTokens
+	}
+	return tokens, true
 }
 
 func newHistoryPart(id, text string, tokens int, required bool) Part {

@@ -108,3 +108,7 @@ func (s *fakeRAGStore) AddDocument(content string) (int, error) {
 	s.docs = append(s.docs, aicontext.Document{ID: len(s.docs) + 1, Content: content})
 	return len(s.docs), nil
 }
+
+func (s *fakeRAGStore) UpdateDocumentTokens(documentID int, tokenizer string, tokens int) error {
+	return nil
+}

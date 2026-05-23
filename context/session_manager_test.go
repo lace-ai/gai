@@ -53,6 +53,45 @@ func TestHistorySourceBuildsPartsWithinTokenBudget(t *testing.T) {
 	assertHistoryStoreQueries(t, store.GetMessagesCalls, 7)
 }
 
+func TestHistorySourceUsesStoredMessageTokenCounts(t *testing.T) {
+	t.Parallel()
+
+	tokenizer := &mocks.MockTokenizer{}
+	store := &mocks.MockSessionStore{
+		Messages: []aicontext.Message{
+			sessionMessageWithTokens(1, aicontext.RoleUser, "stored one", tokenizer.ID(), 2),
+			sessionMessageWithTokens(2, aicontext.RoleAssistant, "stored two three", tokenizer.ID(), 3),
+		},
+	}
+	conv := fakeConversation{
+		messages: []aicontext.Message{
+			sessionMessageWithTokens(0, aicontext.RoleUser, "current question", tokenizer.ID(), 2),
+		},
+	}
+
+	parts, err := aicontext.History(store, 7).BuildParts(stdcontext.Background(), testPromptView{conv: conv}, historyBudget(10, tokenizer))
+	if err != nil {
+		t.Fatalf("BuildParts failed: %v", err)
+	}
+	if tokenizer.CountCalls != 0 {
+		t.Fatalf("expected stored token counts to avoid tokenizer calls, got %d", tokenizer.CountCalls)
+	}
+	if len(parts) != 3 {
+		t.Fatalf("expected current loop plus stored history parts, got %d: %+v", len(parts), parts)
+	}
+
+	wantTokens := map[string]int{
+		"history-0":    2,
+		"history-1":    3,
+		"current-loop": 2,
+	}
+	for _, part := range parts {
+		if part.Tokens != wantTokens[part.ID] {
+			t.Fatalf("part %q has token count %d, want %d", part.ID, part.Tokens, wantTokens[part.ID])
+		}
+	}
+}
+
 func TestHistorySourceFailsWhenRequiredCurrentLoopExceedsBudget(t *testing.T) {
 	t.Parallel()
 
@@ -264,6 +303,12 @@ func sessionMessage(id int, role aicontext.Role, text string) aicontext.Message 
 		Role:      role,
 		Content:   aicontext.NewTextContent(text),
 	}
+}
+
+func sessionMessageWithTokens(id int, role aicontext.Role, text, tokenizerID string, tokens int) aicontext.Message {
+	message := sessionMessage(id, role, text)
+	message.TokenCount = map[string]int{tokenizerID: tokens}
+	return message
 }
 
 func joinPartText(parts []aicontext.Part) string {

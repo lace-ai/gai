@@ -18,7 +18,7 @@ type RAGSource struct {
 type Document struct {
 	ID         int
 	Content    string
-	tokenCount map[string]int
+	TokenCount map[string]int
 }
 
 func RAG(store RAGStore, limit int, query RAGQueryFunc) Source {
@@ -66,9 +66,15 @@ func (s *RAGSource) BuildParts(ctx stdcontext.Context, view PromptView, budget S
 	children := []Part{}
 	overflow := []string{}
 	for i, doc := range docs {
-		docTokens, err := budget.Tokenizer.CountTokens(ctx, doc.Content)
-		if err != nil {
-			return nil, err
+		var docTokens int
+		if count, exist := doc.TokenCount[budget.Tokenizer.ID()]; exist {
+			docTokens = count
+		} else {
+			docTokens, err = budget.Tokenizer.CountTokens(ctx, doc.Content)
+			if err != nil {
+				return nil, err
+			}
+			s.store.UpdateDocumentTokens(doc.ID, budget.Tokenizer.ID(), docTokens)
 		}
 		if tokens+docTokens > limit {
 			if minOverflowTokens == 0 || docTokens < minOverflowTokens {
