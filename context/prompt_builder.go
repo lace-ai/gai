@@ -49,11 +49,11 @@ func (p Part) tokenCount() int {
 }
 
 type PromptBudget struct {
-	Tokenizer                   ai.Tokenizer
-	ContextWindowTokens         int
-	ReservedOutputTokens        int
-	SourceOverheadReserveTokens int
-	Summarizer                  Summarizer
+	Tokenizer                  ai.Tokenizer
+	ContextWindowTokens        int
+	ReservedOutputTokens       int
+	RenderOverheadReserveRatio float64
+	Summarizer                 Summarizer
 }
 
 func (b PromptBudget) promptLimit() int {
@@ -65,19 +65,19 @@ func (b PromptBudget) promptLimit() int {
 }
 
 type SourceBudget struct {
-	Tokenizer             ai.Tokenizer
-	MaxTokens             int
-	RemainingPromptTokens int
-	Required              bool
-	OverheadReserveTokens int
-	Summarizer            Summarizer
+	Tokenizer                  ai.Tokenizer
+	MaxTokens                  int
+	RemainingPromptTokens      int
+	Required                   bool
+	RenderOverheadReserveRatio float64
+	Summarizer                 Summarizer
 }
 
 func (b SourceBudget) ContentLimit() int {
 	if b.MaxTokens == unlimitedTokens {
 		return unlimitedTokens
 	}
-	limit := b.MaxTokens - b.OverheadReserveTokens
+	limit := int(1 + b.RenderOverheadReserveRatio*float64(b.MaxTokens))
 	if limit < 0 {
 		return 0
 	}
@@ -467,7 +467,7 @@ func (b *Builder) admitEntryParts(ctx stdcontext.Context, state *promptBuildStat
 	}
 
 	next := state.nextParts(entry.section, entryParts)
-	ok, count, available, err := b.partsFit(ctx, state.renderer, state.parts, entry.section, next)
+	ok, count, available, err := b.partsFit(state.parts, entry.section, next)
 	if err != nil {
 		return b.failEntry(ctx, state, opts.eventPrefix+"_error", traceEntry, err)
 	}
@@ -485,7 +485,7 @@ func (b *Builder) admitEntryParts(ctx stdcontext.Context, state *promptBuildStat
 	setTraceTokens(&traceEntry, entryTokens, count)
 	traceEntry.AvailableTokens = available
 	if entry.required {
-		cleanedParts, ok, retryCount, retryAvailable, err := b.partsFitAfterDroppingOptionalContext(ctx, state.renderer, state.parts, entry.section, next)
+		cleanedParts, ok, retryCount, retryAvailable, err := b.partsFitAfterDroppingOptionalContext(state.parts, entry.section, next)
 		if err != nil {
 			return b.failEntry(ctx, state, opts.eventPrefix+"_error", traceEntry, err)
 		}
@@ -508,7 +508,7 @@ func (b *Builder) admitEntryParts(ctx stdcontext.Context, state *promptBuildStat
 	traceEntry.Status = "dropped"
 	traceEntry.Reason = "optional_over_budget"
 	if opts.summarizeOptional && len(entryParts) == 1 {
-		summarizedPart, ok, summaryCount, summaryPromptCount, summaryAvailable, err := b.summarizeOptionalPart(ctx, state.renderer, state.parts, entry, entryParts[0], state.promptTokens)
+		summarizedPart, ok, summaryCount, summaryPromptCount, summaryAvailable, err := b.summarizeOptionalPart(ctx, state.parts, entry, entryParts[0], state.promptTokens)
 		if err != nil {
 			return b.failEntry(ctx, state, opts.eventPrefix+"_error", traceEntry, err)
 		}
@@ -630,39 +630,33 @@ func (b *Builder) sourceBudget(usedTokens int, entry builderEntry) SourceBudget 
 			Required:              entry.required,
 		}
 	}
-	remaining := b.budget.promptLimit() - usedTokens
-	if remaining < 0 {
-		remaining = 0
-	}
+	remaining := max(b.budget.promptLimit()-usedTokens, 0)
 	maxTokens := remaining
 	if entry.hasSourceCap && entry.sourceCap < maxTokens {
 		maxTokens = entry.sourceCap
 	}
 	return SourceBudget{
-		Tokenizer:             b.budget.Tokenizer,
-		MaxTokens:             maxTokens,
-		RemainingPromptTokens: remaining,
-		Required:              entry.required,
-		OverheadReserveTokens: b.budget.SourceOverheadReserveTokens,
-		Summarizer:            b.budget.Summarizer,
+		Tokenizer:                  b.budget.Tokenizer,
+		MaxTokens:                  maxTokens,
+		RemainingPromptTokens:      remaining,
+		Required:                   entry.required,
+		RenderOverheadReserveRatio: b.budget.RenderOverheadReserveRatio,
+		Summarizer:                 b.budget.Summarizer,
 	}
 }
 
-func (b *Builder) partsFit(ctx stdcontext.Context, renderer Renderer, parts map[Section][]Part, section Section, next []Part) (bool, int, int, error) {
+func (b *Builder) partsFit(parts map[Section][]Part, section Section, next []Part) (bool, int, int, error) {
 	if b.budget == nil {
 		return true, 0, unlimitedTokens, nil
 	}
 	candidate := clonePartsMap(parts)
 	candidate[section] = cloneParts(next)
-	count, err := b.countPrompt(ctx, renderer, candidate)
-	if err != nil {
-		return false, 0, 0, err
-	}
+	count := b.countPrompt(candidate)
 	limit := b.budget.promptLimit()
 	return count <= limit, count, limit, nil
 }
 
-func (b *Builder) partsFitAfterDroppingOptionalContext(ctx stdcontext.Context, renderer Renderer, parts map[Section][]Part, section Section, next []Part) (map[Section][]Part, bool, int, int, error) {
+func (b *Builder) partsFitAfterDroppingOptionalContext(parts map[Section][]Part, section Section, next []Part) (map[Section][]Part, bool, int, int, error) {
 	if b.budget == nil {
 		return parts, true, 0, unlimitedTokens, nil
 	}
@@ -673,15 +667,12 @@ func (b *Builder) partsFitAfterDroppingOptionalContext(ctx stdcontext.Context, r
 	} else {
 		candidate[section] = cloneParts(next)
 	}
-	count, err := b.countPrompt(ctx, renderer, candidate)
-	if err != nil {
-		return nil, false, 0, 0, err
-	}
+	count := b.countPrompt(candidate)
 	limit := b.budget.promptLimit()
 	return candidate, count <= limit, count, limit, nil
 }
 
-func (b *Builder) summarizeOptionalPart(ctx stdcontext.Context, renderer Renderer, parts map[Section][]Part, entry builderEntry, part Part, usedTokens int) (Part, bool, int, int, int, error) {
+func (b *Builder) summarizeOptionalPart(ctx stdcontext.Context, parts map[Section][]Part, entry builderEntry, part Part, usedTokens int) (Part, bool, int, int, int, error) {
 	if b.budget == nil || b.budget.Summarizer == nil || b.budget.Tokenizer == nil || entry.required {
 		return Part{}, false, 0, 0, 0, nil
 	}
@@ -711,16 +702,21 @@ func (b *Builder) summarizeOptionalPart(ctx stdcontext.Context, renderer Rendere
 		Meta:     cloneMeta(part.Meta),
 	}
 	next := append(cloneParts(parts[entry.section]), summarized)
-	ok, count, available, err := b.partsFit(ctx, renderer, parts, entry.section, next)
+	ok, count, available, err := b.partsFit(parts, entry.section, next)
 	if !ok || err != nil {
 		return Part{}, false, 0, count, available, err
 	}
 	return summarized, true, summaryTokens, count, remaining, nil
 }
 
-func (b *Builder) countPrompt(ctx stdcontext.Context, renderer Renderer, parts map[Section][]Part) (int, error) {
-	prompt := renderPrompt(renderer, parts)
-	return b.budget.Tokenizer.CountTokens(ctx, prompt.CombinedPrompt())
+func (b *Builder) countPrompt(parts map[Section][]Part) int {
+	var count int
+	for _, section := range parts {
+		for _, part := range section {
+			count += part.tokenCount()
+		}
+	}
+	return int(1 + b.budget.RenderOverheadReserveRatio*float64(count))
 }
 
 func promptBudgetError(id string, used, available int) error {
