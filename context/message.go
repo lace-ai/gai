@@ -20,7 +20,9 @@ type Message struct {
 	SessionID int
 	CreatedAt time.Time
 	Content   Content
-	Role      Role
+	// TokenCount key: tokenizer.ID, value: token count for content
+	TokenCount map[string]int
+	Role       Role
 }
 
 func IsValidRole(role Role) bool {
