@@ -29,7 +29,7 @@ func TestHistorySourceBuildsPartsWithinTokenBudget(t *testing.T) {
 		},
 	}
 
-	parts, err := aicontext.History(store, 7).BuildParts(stdcontext.Background(), testPromptView{conv: conv}, historyBudget(17, tokenizer))
+	parts, err := aicontext.History(store, 7).BuildParts(stdcontext.Background(), testPromptView{conv: conv}, historyBudget(11, tokenizer))
 	if err != nil {
 		t.Fatalf("BuildParts failed: %v", err)
 	}
@@ -41,13 +41,17 @@ func TestHistorySourceBuildsPartsWithinTokenBudget(t *testing.T) {
 	if len(parts) != 3 {
 		t.Fatalf("expected current loop plus fitting history parts, got %d: %+v", len(parts), parts)
 	}
+	wantTokens := map[string]int{
+		"history-0":    2,
+		"history-1":    2,
+		"current-loop": 2,
+	}
 	for _, part := range parts {
 		if !part.Required {
 			t.Fatalf("expected all produced parts to be required: %+v", parts)
 		}
-		wantTokens := mustCountTokens(t, tokenizer, part.Text)
-		if part.Tokens != wantTokens {
-			t.Fatalf("part %q has token count %d, want %d", part.ID, part.Tokens, wantTokens)
+		if part.Tokens != wantTokens[part.ID] {
+			t.Fatalf("part %q has token count %d, want %d", part.ID, part.Tokens, wantTokens[part.ID])
 		}
 	}
 	assertHistoryStoreQueries(t, store.GetMessagesCalls, 7)
@@ -106,7 +110,7 @@ func TestHistorySourceFailsWhenRequiredCurrentLoopExceedsBudget(t *testing.T) {
 		},
 	}
 
-	_, err := aicontext.History(store, 7).BuildParts(stdcontext.Background(), testPromptView{conv: conv}, historyBudget(6, whitespaceTokenizer{}))
+	_, err := aicontext.History(store, 7).BuildParts(stdcontext.Background(), testPromptView{conv: conv}, historyBudget(4, whitespaceTokenizer{}))
 	if !errors.Is(err, aicontext.ErrPromptBudget) {
 		t.Fatalf("expected ErrPromptBudget, got %v", err)
 	}
