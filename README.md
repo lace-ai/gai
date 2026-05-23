@@ -26,7 +26,7 @@ It provides a generic interface for providers and models, prompt and context imp
 The library is organized around three ideas:
 
 - 🧩 `ai` defines the core provider, model, request, and response abstractions.
-- 🗂️ `context` stores conversations, renders message history, and loads prompt files.
+- 🗂️ `context` composes prompts, budgets context, renders message history, and loads prompt files.
 - 🔁 `loop` runs iterative model and tool execution when a model returns a tool call.
 
 ## 📋 Requirements
@@ -155,6 +155,24 @@ func (m *MyModel) Close() error {
 
 func (m *MyModel) Tokenizer() ai.Tokenizer {
     // return a tokenizer implementation for your model
+}
+```
+
+**Tokenizer Implementation:**
+
+```go
+type MyTokenizer struct{}
+
+func (t MyTokenizer) ID() string {
+    return "myprovider.my-model"
+}
+
+func (t MyTokenizer) Tokenize(ctx context.Context, text string) ([]string, error) {
+    // split text into model-specific tokens
+}
+
+func (t MyTokenizer) CountTokens(ctx context.Context, text string) (int, error) {
+    // return the token count for text
 }
 ```
 
@@ -297,23 +315,29 @@ for err := range errCh {
 
 <summary>🗄️ Implement Your Own Session Store</summary>
 
-To implement your own session store, please visit the [SessionStore interface](./context/session_store.go) and implement the required methods.
+To implement your own session store, please visit the [SessionStore interface](./context/store.go) and implement the required methods.
 
 </details>
 
 ## 🧱 Package Layout
 
 ```text
-ai/          Core abstractions: Provider, Model, AIRequest, AIResponse, ModelRepository. With implementations for Gemini and Mistral.
-context/     Context management: Conversation/session types, prompt loading, message rendering
-loop/        Agent loop, tool parsing, tool execution helpers
-testutil/    Mocks used by tests
+agent/       Reusable loop-backed agent definitions and built-in agents such as summary.
+ai/          Core abstractions: Provider, Model, Tokenizer, AIRequest, AIResponse, ModelRepository. With implementations for Gemini and Mistral.
+context/     Prompt building, token budgeting, dynamic sources, sessions, RAG, summaries, and message rendering.
+loop/        Agent loop, tool parsing, tool execution helpers.
+testutil/    Mocks used by tests.
 ```
 
 ## 🧩 Core Concepts
 
+<details>
+
+<summary>
+
 ### 🏢 Provider
 
+</summary>
 A provider is responsible for exposing available models and validating its own configuration.
 The shared interface is:
 
@@ -328,7 +352,15 @@ type Provider interface {
 
 Use `ModelRepository` when you want to register multiple providers and look up models by name.
 
+</details>
+
+<details>
+
+<summary>
+
 ### 🧠 Model
+
+</summary>
 
 A model generates text from an `AIRequest` and can return either a complete `AIResponse` or a stream of tokens.
 
@@ -342,7 +374,16 @@ type Model interface {
 }
 ```
 
+
+</details>
+
+<details>
+
+<summary>
+
 ### 📝 Prompt and Request
+
+</summary>
 
 `ai.Prompt` combines three flat strings that providers send upstream:
 
@@ -353,10 +394,10 @@ type Model interface {
 `Prompt.CombinedPrompt()` concatenates those parts onto one string in this order: system, context, prompt.
 For agent loops, prefer building this value through `context.NewPromptBuilder()` so system, context, and user prompt content can be composed from structured parts and dynamic sources.
 
-`AIRequest` currently contains:
+`AIRequest` contains:
 
 - `Prompt`
-- `MaxTokens` is ignored by some providers, and might be removed in future versions.
+- `MaxTokens`, which providers pass through where the upstream API supports an output-token cap
 
 `AIResponse` returns:
 
@@ -366,7 +407,15 @@ For agent loops, prefer building this value through `context.NewPromptBuilder()`
 
 ## 🌐 Providers
 
+</details>
+
+<details>
+
+<summary>
+
 ### ♊ Gemini
+
+</summary>
 
 Package: `ai/gemini`
 
@@ -383,7 +432,15 @@ Known model names:
 - `gemini-3.1-flash-lite-preview`
 - `gemini-2.5-flash-lite`
 
+</details>
+
+<details>
+
+<summary>
+
 ### 🌀 Mistral
+
+</summary>
 
 Package: `ai/mistral`
 
@@ -398,6 +455,10 @@ Known model names:
 - `mistral-small-latest`
 - `mistral-medium-latest`
 - `mistral-large-latest`
+- `codestral-latest`
+
+
+</details>
 
 ### ⚙️ Configuration Note
 
@@ -443,6 +504,17 @@ You provide your own store that can:
 - create sessions
 - fetch sessions and messages
 - add one or many messages
+- update cached per-message token counts
+
+Token counts are keyed by `Tokenizer.ID()` and represent the message content, not the rendered role wrapper produced by `RenderMessages`.
+
+### 🔎 RAGStore
+
+`RAGStore` is an interface for retrieval sources. It can:
+
+- return relevant documents for a query
+- add documents
+- update cached per-document token counts
 
 ### 🧱 PromptBuilder
 
@@ -473,13 +545,13 @@ type Source interface {
 }
 ```
 
-`PromptView` exposes the current conversation and a read-only view of the whole configured prompt plan, so sources can inspect planned entries by ID or section before emitting parts. `SourceBudget` provides the source's cap, remaining prompt budget, tokenizer, overhead reserve, required flag, and optional summarizer. `SourceTokenCap(...)` limits one source's budget; uncapped sources receive the remaining prompt budget.
+`PromptView` exposes the current conversation and a read-only view of the whole configured prompt plan, so sources can inspect planned entries by ID or section before emitting parts. `SourceBudget` provides the source's cap, remaining prompt budget, tokenizer, render-overhead reserve ratio, required flag, and optional summarizer. `SourceTokenCap(...)` limits one source's budget; uncapped sources receive the remaining prompt budget.
 
 The default renderer is XML-like and can be replaced with a custom renderer. Grouped parts render as one outer part with child items, which lets sources like RAG budget individual documents without adding a full XML wrapper around every document. `LastTrace()` returns the most recent build trace, including emitted, skipped, dropped, summarized, token counts, available tokens, and reasons. `Debug(gai.DebugSink)` emits the same prompt-build decisions. Rendered part text is only included in debug events when the sink allows sensitive data.
 
 ### 🧭 History Sources
 
-`History(store, sessionID)` returns a prompt source that loads stored messages, renders them as `history-*` parts, and appends current loop messages as a `current-loop` part. Use `SourceTokenCap(...)` on the source entry to control how many tokens history may consume. If required current-loop content exceeds its source budget, history can use the configured summarizer; if the summary still does not fit, prompt building fails with `ErrPromptBudget`.
+`History(store, sessionID)` returns a prompt source that loads stored messages, renders them as `history-*` parts, and appends current loop messages as a `current-loop` part. Use `SourceTokenCap(...)` on the source entry to control how many tokens history may consume. History reuses cached message token counts when all messages in a batch have a non-negative value for the active tokenizer; otherwise it counts message content and asks the store to save the count asynchronously. If required current-loop content exceeds its source budget, history can use the configured summarizer; if the summary still does not fit, prompt building fails with `ErrPromptBudget`.
 
 ### 🔎 RAG Sources
 
@@ -558,6 +630,13 @@ Common exported errors include:
 - `loop.ErrMaxIterations`
 - `context.ErrPromptMissing`
 - `context.ErrSessionNotFound`
+- `context.ErrSessionStoreNotFound`
+- `context.ErrRAGStoreNotFound`
+- `context.ErrPromptBuilderNil`
+- `context.ErrPromptEntryID`
+- `context.ErrPromptSource`
+- `context.ErrPromptBudget`
+- `context.ErrTokenizerNotFound`
 - `gemini.ErrInvalidAPIKey`
 - `mistral.ErrInvalidAPIKey`
 
@@ -584,7 +663,7 @@ go test ./context/...
 ## 📝 Notes
 
 - The `context` package name intentionally mirrors the domain it manages, but it is easy to confuse with `context.Context` from the standard library. Use an alias in imports. The context package is likely to be renamed before official `1.0` release.
-- The `historyBuilder` is very unefficient for long conversations because it loads every message and counts the tokens separately. This will change in the future.
+- History and RAG token caches store content-token counts by tokenizer ID. Rendered wrappers and renderer overhead are handled by prompt budgeting, not by those cached per-item counts.
 
 ## 🤝 Contributing
 
