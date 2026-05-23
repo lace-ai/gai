@@ -3,6 +3,7 @@ package context
 import (
 	stdcontext "context"
 	"strconv"
+	"time"
 
 	"github.com/lace-ai/gai/ai"
 )
@@ -45,7 +46,7 @@ func (s *HistorySource) BuildParts(ctx stdcontext.Context, view PromptView, budg
 		convMessages := conv.Messages()
 		renderedConv := renderMessages(convMessages)
 		if renderedConv != "" {
-			convTokens, err := countRenderedMessages(ctx, budget.Tokenizer, convMessages, renderedConv)
+			convTokens, err := countRenderedMessages(ctx, s.store, budget.Tokenizer, convMessages)
 			if err != nil {
 				return nil, err
 			}
@@ -93,7 +94,7 @@ func (s *HistorySource) BuildParts(ctx stdcontext.Context, view PromptView, budg
 		historyOffset += len(messages)
 
 		rendered := renderMessages(messages)
-		messageTokens, err := countRenderedMessages(ctx, budget.Tokenizer, messages, rendered)
+		messageTokens, err := countRenderedMessages(ctx, s.store, budget.Tokenizer, messages)
 		if err != nil {
 			return nil, err
 		}
@@ -110,11 +111,24 @@ func (s *HistorySource) BuildParts(ctx stdcontext.Context, view PromptView, budg
 	return parts, nil
 }
 
-func countRenderedMessages(ctx stdcontext.Context, tokenizer ai.Tokenizer, messages []Message, rendered string) (int, error) {
+func countRenderedMessages(ctx stdcontext.Context, store SessionStore, tokenizer ai.Tokenizer, messages []Message) (int, error) {
 	if tokens, ok := storedMessageTokens(messages, tokenizer.ID()); ok {
 		return tokens, nil
 	}
-	return tokenizer.CountTokens(ctx, rendered)
+	var totalTokens int
+	for _, message := range messages {
+		tokens, err := tokenizer.CountTokens(ctx, message.Content.String())
+		if err != nil {
+			return 0, err
+		}
+		go func(message Message, tokens int) {
+			innerCtx, cancel := stdcontext.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+			store.UpdateMessageTokens(innerCtx, message.ID, tokenizer.ID(), tokens)
+		}(message, tokens)
+		totalTokens += tokens
+	}
+	return totalTokens, nil
 }
 
 func storedMessageTokens(messages []Message, tokenizerID string) (int, bool) {
