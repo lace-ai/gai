@@ -460,11 +460,6 @@ Known model names:
 
 </details>
 
-### ⚙️ Configuration Note
-
-This library does not read environment variables automatically.
-Create the provider with the API key you want to use, then register it in the repository.
-
 ## 💾 Context and Sessions
 
 The `context` package is not the standard library `context` package.
@@ -474,7 +469,13 @@ Import it with an alias such as `aicontext` to avoid name collisions.
 import aicontext "github.com/lace-ai/gai/context"
 ```
 
+<details>
+
+<summary>
+
 ### 📨 Messages
+
+</summary>
 
 Messages have one of four roles:
 
@@ -486,7 +487,16 @@ Messages have one of four roles:
 Each message wraps a `Content` implementation such as text, tool calls, or tool results, (you can also implement your own).
 `RenderMessages` formats history as tagged blocks for prompt sources such as `History`.
 
+
+</details>
+
+<details>
+
+<summary>
+
 ### 💬 Conversation
+
+</summary>
 
 `Conversation` is a minimal interface passed to dynamic prompt sources so they can inspect the current loop messages:
 
@@ -496,7 +506,16 @@ type Conversation interface {
 }
 ```
 
+</details>
+
+<details>
+
+<summary>
+
 ### 🗃️ SessionStore
+
+
+</summary>
 
 `SessionStore` is an interface, not a built-in database implementation.
 You provide your own store that can:
@@ -508,7 +527,15 @@ You provide your own store that can:
 
 Token counts are keyed by `Tokenizer.ID()` and represent the message content, not the rendered role wrapper produced by `RenderMessages`.
 
+</details>
+
+<details>
+
+<summary>
+
 ### 🔎 RAGStore
+
+</summary>
 
 `RAGStore` is an interface for retrieval sources. It can:
 
@@ -516,7 +543,15 @@ Token counts are keyed by `Tokenizer.ID()` and represent the message content, no
 - add documents
 - update cached per-document token counts
 
+</details>
+
+<details>
+
+<summary>
+
 ### 🧱 PromptBuilder
+
+</summary>
 
 `PromptBuilder` composes the full `ai.Prompt` from structured parts:
 
@@ -549,29 +584,71 @@ type Source interface {
 
 The default renderer is XML-like and can be replaced with a custom renderer. Grouped parts render as one outer part with child items, which lets sources like RAG budget individual documents without adding a full XML wrapper around every document. `LastTrace()` returns the most recent build trace, including emitted, skipped, dropped, summarized, token counts, available tokens, and reasons. `Debug(gai.DebugSink)` emits the same prompt-build decisions. Rendered part text is only included in debug events when the sink allows sensitive data.
 
+</details>
+
+<details>
+
+<summary>
+
 ### 🧭 History Sources
+
+</summary>
 
 `History(store, sessionID)` returns a prompt source that loads stored messages, renders them as `history-*` parts, and appends current loop messages as a `current-loop` part. Use `SourceTokenCap(...)` on the source entry to control how many tokens history may consume. History reuses cached message token counts when all messages in a batch have a non-negative value for the active tokenizer; otherwise it counts message content and asks the store to save the count asynchronously. If required current-loop content exceeds its source budget, history can use the configured summarizer; if the summary still does not fit, prompt building fails with `ErrPromptBudget`.
 
+
+</details>
+
+<details>
+
+<summary>
+
 ### 🔎 RAG Sources
+
+</summary>
 
 `RAG(store, documentLimit, queryFunc)` returns a prompt source that queries a `RAGStore`, budgets relevant documents in relevance order, and emits a grouped `rag` part. Each document remains a child part for tracing and budgeting, while rendering stays compact. Overflow documents are summarized when a summarizer is available and budget remains; required RAG fails with `ErrPromptBudget` if no document or summary can fit.
 
+</details>
+
+<details>
+
+<summary>
+
 ### 🤖 Agent Definitions and Built-ins
+
+</summary>
 
 The `agent` package provides a small factory for reusable loop-backed agents. A definition combines a model, optional tools, a prompt-builder factory, and loop settings.
 
 Built-in agents live in their own packages. `agent/summary` embeds its default system prompt from `system.md` and exposes a summarizer that implements the context summarizer interface by running a summary agent through `loop`, collecting streamed text tokens, and returning the summary. Pass that summarizer through `PromptBudget.Summarizer` when optional prompt content should be compacted before it is dropped.
 
+</details>
+
+<details>
+
+<summary>
+
 ### 📄 Prompt Files
 
+</summary>
+
 `LoadPromptFromFile` reads `.md` and `.txt` files, trims whitespace, and returns the prompt text.
+
+</details>
 
 ## 🔄 Loop and Tools
 
 The `loop` package is for agent-style execution where the model can request tool calls.
 
+<details>
+
+<summary>
+
 ### 🔁 Loop
+
+
+</summary>
 
 `loop.New(...)` creates a loop with:
 
@@ -584,7 +661,15 @@ The prompt builder is called on every loop iteration, so dynamic sources can inc
 
 The loop stops when the model returns a normal response or when the maximum iteration count is reached.
 
+</details>
+
+<details>
+
+<summary>
+
 ### 🧰 Tool Interface
+
+</summary>
 
 Tools must implement:
 
@@ -611,12 +696,23 @@ Tool calls are expected to arrive as JSON with this shape:
 
 Tool call IDs are generated internally by the runtime and are not model-controlled.
 
+</details>
+
+<details>
+
+<summary>
+
 ### 🧪 Helper Functions
+
+
+</summary>
 
 - `DetectToolCallsInStream` detects tool-call JSON objects in streamed text tokens.
 - `CallTool` runs a tool by name.
 - `DecodeToolArgs` unmarshals tool arguments into a typed struct.
 - `RenderToolSignatures` formats tool metadata for prompting.
+
+</details>
 
 ## ❗ Errors
 
