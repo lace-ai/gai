@@ -8,6 +8,7 @@ import (
 
 	"github.com/lace-ai/gai"
 	aicontext "github.com/lace-ai/gai/context"
+	"github.com/lace-ai/gai/testutil/mocks"
 )
 
 type emptyConversation struct{}
@@ -228,7 +229,7 @@ func TestPromptBuilderDropsOptionalSourceOverBudget(t *testing.T) {
 
 	builder := aicontext.NewPromptBuilder().
 		Budget(aicontext.PromptBudget{
-			Tokenizer:           whitespaceTokenizer{},
+			Tokenizer:           &mocks.MockTokenizer{},
 			ContextWindowTokens: 14,
 		}).
 		System("system", "system", aicontext.Required()).
@@ -255,7 +256,7 @@ func TestPromptBuilderFailsRequiredOverBudget(t *testing.T) {
 
 	_, err := aicontext.NewPromptBuilder().
 		Budget(aicontext.PromptBudget{
-			Tokenizer:           whitespaceTokenizer{},
+			Tokenizer:           &mocks.MockTokenizer{},
 			ContextWindowTokens: 5,
 		}).
 		System("system", "system prompt", aicontext.Required()).
@@ -274,7 +275,7 @@ func TestPromptBuilderTraceSplitsEntryAndPromptTokens(t *testing.T) {
 
 	builder := aicontext.NewPromptBuilder().
 		Budget(aicontext.PromptBudget{
-			Tokenizer:           whitespaceTokenizer{},
+			Tokenizer:           &mocks.MockTokenizer{},
 			ContextWindowTokens: 100,
 		}).
 		System("system", "system", aicontext.Required()).
@@ -300,7 +301,7 @@ func TestPromptBuilderPassesSourceCap(t *testing.T) {
 	sourceCalled := false
 	_, err := aicontext.NewPromptBuilder().
 		Budget(aicontext.PromptBudget{
-			Tokenizer:           whitespaceTokenizer{},
+			Tokenizer:           &mocks.MockTokenizer{},
 			ContextWindowTokens: 50,
 		}).
 		Source(aicontext.SectionContext, "capped", aicontext.SourceFunc(func(ctx stdcontext.Context, view aicontext.PromptView, budget aicontext.SourceBudget) ([]aicontext.Part, error) {
@@ -323,7 +324,7 @@ func TestPromptBuilderPassesSourceCap(t *testing.T) {
 func TestPromptBuilderReusesTokenCountForSourceBudget(t *testing.T) {
 	t.Parallel()
 
-	tokenizer := &countingTokenizer{}
+	tokenizer := &mocks.MockTokenizer{}
 	_, err := aicontext.NewPromptBuilder().
 		Budget(aicontext.PromptBudget{
 			Tokenizer:           tokenizer,
@@ -348,7 +349,7 @@ func TestPromptBuilderDropsEarlierOptionalContextForLaterUserPrompt(t *testing.T
 
 	builder := aicontext.NewPromptBuilder().
 		Budget(aicontext.PromptBudget{
-			Tokenizer:           whitespaceTokenizer{},
+			Tokenizer:           &mocks.MockTokenizer{},
 			ContextWindowTokens: 12,
 		}).
 		System("system", "system", aicontext.Required()).
@@ -377,7 +378,7 @@ func TestPromptBuilderBudgetsRequiredSourceBeforeEarlierOptionalContext(t *testi
 	requiredSourceCalled := false
 	builder := aicontext.NewPromptBuilder().
 		Budget(aicontext.PromptBudget{
-			Tokenizer:           whitespaceTokenizer{},
+			Tokenizer:           &mocks.MockTokenizer{},
 			ContextWindowTokens: 19,
 		}).
 		System("system", "system", aicontext.Required()).
@@ -427,7 +428,7 @@ func TestPromptBuilderDropsOptionalStaticSystemPartOverBudget(t *testing.T) {
 
 	builder := aicontext.NewPromptBuilder().
 		Budget(aicontext.PromptBudget{
-			Tokenizer:           whitespaceTokenizer{},
+			Tokenizer:           &mocks.MockTokenizer{},
 			ContextWindowTokens: 8,
 		}).
 		System("optional-system", "optional system prompt with too many words", aicontext.Optional()).
@@ -454,7 +455,7 @@ func TestPromptBuilderSummarizesOptionalStaticUserPartBeforeDropping(t *testing.
 	summarizer := fakeSummarizer{summary: "tiny"}
 	builder := aicontext.NewPromptBuilder().
 		Budget(aicontext.PromptBudget{
-			Tokenizer:           whitespaceTokenizer{},
+			Tokenizer:           &mocks.MockTokenizer{},
 			ContextWindowTokens: 17,
 			Summarizer:          summarizer,
 		}).
@@ -549,25 +550,4 @@ func (s fakeSummarizer) Summarize(ctx stdcontext.Context, req aicontext.SummaryR
 		return "", s.err
 	}
 	return s.summary, nil
-}
-
-type countingTokenizer struct {
-	CountCalls int
-}
-
-func (t *countingTokenizer) ID() string {
-	return "test.counting"
-}
-
-func (t *countingTokenizer) Tokenize(ctx stdcontext.Context, text string) ([]string, error) {
-	return strings.Fields(text), nil
-}
-
-func (t *countingTokenizer) CountTokens(ctx stdcontext.Context, text string) (int, error) {
-	t.CountCalls++
-	tokens, err := t.Tokenize(ctx, text)
-	if err != nil {
-		return 0, err
-	}
-	return len(tokens), nil
 }

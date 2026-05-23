@@ -72,7 +72,7 @@ func (m *scriptedStreamModel) Close() error {
 }
 
 func (m *scriptedStreamModel) Tokenizer() ai.Tokenizer {
-	return mocks.MockTokenizer{}
+	return &mocks.MockTokenizer{}
 }
 
 func (m *scriptedStreamModel) Requests() []ai.AIRequest {

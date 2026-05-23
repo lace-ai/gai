@@ -138,7 +138,7 @@ func (m *recordingModel) Close() error {
 }
 
 func (m *recordingModel) Tokenizer() ai.Tokenizer {
-	return mocks.MockTokenizer{}
+	return &mocks.MockTokenizer{}
 }
 
 type toolCallModel struct {
@@ -169,7 +169,7 @@ func (m toolCallModel) Close() error {
 }
 
 func (m toolCallModel) Tokenizer() ai.Tokenizer {
-	return mocks.MockTokenizer{}
+	return &mocks.MockTokenizer{}
 }
 
 type staticTool struct {
