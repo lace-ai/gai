@@ -77,7 +77,7 @@ func (b SourceBudget) ContentLimit() int {
 	if b.MaxTokens == unlimitedTokens {
 		return unlimitedTokens
 	}
-	limit := int(1 + b.RenderOverheadReserveRatio*float64(b.MaxTokens))
+	limit := b.MaxTokens - renderOverheadTokens(b.MaxTokens, b.RenderOverheadReserveRatio)
 	if limit < 0 {
 		return 0
 	}
@@ -716,7 +716,14 @@ func (b *Builder) countPrompt(parts map[Section][]Part) int {
 			count += part.tokenCount()
 		}
 	}
-	return int(1 + b.budget.RenderOverheadReserveRatio*float64(count))
+	return count + renderOverheadTokens(count, b.budget.RenderOverheadReserveRatio)
+}
+
+func renderOverheadTokens(tokens int, ratio float64) int {
+	if tokens <= 0 || ratio <= 0 {
+		return 0
+	}
+	return int(math.Ceil(float64(tokens) * ratio))
 }
 
 func promptBudgetError(id string, used, available int) error {

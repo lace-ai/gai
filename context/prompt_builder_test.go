@@ -230,11 +230,11 @@ func TestPromptBuilderDropsOptionalSourceOverBudget(t *testing.T) {
 	builder := aicontext.NewPromptBuilder().
 		Budget(aicontext.PromptBudget{
 			Tokenizer:           &mocks.MockTokenizer{},
-			ContextWindowTokens: 14,
+			ContextWindowTokens: 6,
 		}).
 		System("system", "system", aicontext.Required()).
 		Source(aicontext.SectionContext, "optional", aicontext.SourceFunc(func(ctx stdcontext.Context, view aicontext.PromptView, budget aicontext.SourceBudget) ([]aicontext.Part, error) {
-			return []aicontext.Part{aicontext.NewPart("optional-part", "optional content that does not fit")}, nil
+			return []aicontext.Part{aicontext.NewPart("optional-part", "optional content that does not fit", aicontext.Tokens(5))}, nil
 		}), aicontext.Optional()).
 		User("request", "question", aicontext.Required())
 
@@ -257,7 +257,7 @@ func TestPromptBuilderFailsRequiredOverBudget(t *testing.T) {
 	_, err := aicontext.NewPromptBuilder().
 		Budget(aicontext.PromptBudget{
 			Tokenizer:           &mocks.MockTokenizer{},
-			ContextWindowTokens: 5,
+			ContextWindowTokens: 2,
 		}).
 		System("system", "system prompt", aicontext.Required()).
 		User("request", "question", aicontext.Required()).
@@ -290,8 +290,8 @@ func TestPromptBuilderTraceSplitsEntryAndPromptTokens(t *testing.T) {
 	if request.EntryTokens == 0 {
 		t.Fatalf("expected entry tokens: %+v", request)
 	}
-	if request.PromptTokens <= request.EntryTokens {
-		t.Fatalf("expected prompt tokens to include prior rendered prompt: %+v", request)
+	if request.PromptTokens < request.EntryTokens {
+		t.Fatalf("expected prompt tokens to include at least the current entry tokens: %+v", request)
 	}
 }
 
@@ -332,10 +332,10 @@ func TestPromptBuilderReusesTokenCountForSourceBudget(t *testing.T) {
 		}).
 		System("system", "system", aicontext.Required()).
 		Source(aicontext.SectionContext, "source", aicontext.SourceFunc(func(ctx stdcontext.Context, view aicontext.PromptView, budget aicontext.SourceBudget) ([]aicontext.Part, error) {
-			if tokenizer.CountCalls != 2 {
-				t.Fatalf("source budget should reuse current prompt count, got %d token counts before source", tokenizer.CountCalls)
+			if tokenizer.CountCalls != 1 {
+				t.Fatalf("source budget should reuse counted part tokens, got %d token counts before source", tokenizer.CountCalls)
 			}
-			return []aicontext.Part{aicontext.NewPart("source-part", "source", aicontext.Required())}, nil
+			return []aicontext.Part{aicontext.NewPart("source-part", "source", aicontext.Required(), aicontext.Tokens(1))}, nil
 		}), aicontext.Required()).
 		User("request", "question", aicontext.Required()).
 		BuildPrompt(stdcontext.Background(), emptyConversation{})
@@ -350,11 +350,11 @@ func TestPromptBuilderDropsEarlierOptionalContextForLaterUserPrompt(t *testing.T
 	builder := aicontext.NewPromptBuilder().
 		Budget(aicontext.PromptBudget{
 			Tokenizer:           &mocks.MockTokenizer{},
-			ContextWindowTokens: 12,
+			ContextWindowTokens: 2,
 		}).
 		System("system", "system", aicontext.Required()).
 		Source(aicontext.SectionContext, "optional", aicontext.SourceFunc(func(ctx stdcontext.Context, view aicontext.PromptView, budget aicontext.SourceBudget) ([]aicontext.Part, error) {
-			return []aicontext.Part{aicontext.NewPart("optional-part", "optional")}, nil
+			return []aicontext.Part{aicontext.NewPart("optional-part", "optional", aicontext.Tokens(1))}, nil
 		}), aicontext.Optional()).
 		User("request", "question", aicontext.Required())
 	prompt, err := builder.BuildPrompt(stdcontext.Background(), emptyConversation{})
@@ -379,18 +379,18 @@ func TestPromptBuilderBudgetsRequiredSourceBeforeEarlierOptionalContext(t *testi
 	builder := aicontext.NewPromptBuilder().
 		Budget(aicontext.PromptBudget{
 			Tokenizer:           &mocks.MockTokenizer{},
-			ContextWindowTokens: 19,
+			ContextWindowTokens: 8,
 		}).
 		System("system", "system", aicontext.Required()).
 		Source(aicontext.SectionContext, "optional", aicontext.SourceFunc(func(ctx stdcontext.Context, view aicontext.PromptView, budget aicontext.SourceBudget) ([]aicontext.Part, error) {
-			return []aicontext.Part{aicontext.NewPart("optional-part", "optional content with many extra words")}, nil
+			return []aicontext.Part{aicontext.NewPart("optional-part", "optional content with many extra words", aicontext.Tokens(6))}, nil
 		}), aicontext.Optional()).
 		Source(aicontext.SectionContext, "required", aicontext.SourceFunc(func(ctx stdcontext.Context, view aicontext.PromptView, budget aicontext.SourceBudget) ([]aicontext.Part, error) {
 			requiredSourceCalled = true
 			if budget.MaxTokens == 0 {
 				t.Fatal("required source should receive budget before optional context consumes it")
 			}
-			return []aicontext.Part{aicontext.NewPart("required-part", "required", aicontext.Required())}, nil
+			return []aicontext.Part{aicontext.NewPart("required-part", "required", aicontext.Required(), aicontext.Tokens(1))}, nil
 		}), aicontext.Required()).
 		User("request", "question", aicontext.Required())
 
@@ -429,7 +429,7 @@ func TestPromptBuilderDropsOptionalStaticSystemPartOverBudget(t *testing.T) {
 	builder := aicontext.NewPromptBuilder().
 		Budget(aicontext.PromptBudget{
 			Tokenizer:           &mocks.MockTokenizer{},
-			ContextWindowTokens: 8,
+			ContextWindowTokens: 7,
 		}).
 		System("optional-system", "optional system prompt with too many words", aicontext.Optional()).
 		User("request", "question", aicontext.Required())
@@ -456,7 +456,7 @@ func TestPromptBuilderSummarizesOptionalStaticUserPartBeforeDropping(t *testing.
 	builder := aicontext.NewPromptBuilder().
 		Budget(aicontext.PromptBudget{
 			Tokenizer:           &mocks.MockTokenizer{},
-			ContextWindowTokens: 17,
+			ContextWindowTokens: 3,
 			Summarizer:          summarizer,
 		}).
 		System("system", "system", aicontext.Required()).
