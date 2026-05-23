@@ -67,7 +67,7 @@ func (s *RAGSource) BuildParts(ctx stdcontext.Context, view PromptView, budget S
 	overflow := []string{}
 	for i, doc := range docs {
 		var docTokens int
-		if count, exist := doc.TokenCount[budget.Tokenizer.ID()]; exist {
+		if count, exist := doc.TokenCount[budget.Tokenizer.ID()]; exist && count >= 0 {
 			docTokens = count
 		} else {
 			docTokens, err = budget.Tokenizer.CountTokens(ctx, doc.Content)
