@@ -15,6 +15,12 @@ type RAGSource struct {
 	query RAGQueryFunc
 }
 
+type Document struct {
+	ID         int
+	Content    string
+	tokenCount map[string]int
+}
+
 func RAG(store RAGStore, limit int, query RAGQueryFunc) Source {
 	return &RAGSource{
 		store: store,

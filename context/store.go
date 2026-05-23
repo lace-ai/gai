@@ -11,11 +11,6 @@ type SessionStore interface {
 	AddMessage(ctx context.Context, sessionID int, message Message) (Message, error)
 }
 
-type Document struct {
-	ID      int
-	Content string
-}
-
 type RAGStore interface {
 	// GetRelevantDocuments returns relevant documents for a query, ordered by relevance desc
 	GetRelevantDocuments(query string, limit int) ([]Document, error)
