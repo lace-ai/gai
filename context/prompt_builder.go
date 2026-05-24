@@ -345,13 +345,6 @@ func (b *Builder) buildPrompt(ctx stdcontext.Context, conv Conversation, reserve
 		switch entry.kind {
 		case EntryKindPart:
 			part := entry.part()
-			if b.budget != nil && part.Tokens == 0 && part.Text != "" {
-				tokens, err := b.budget.Tokenizer.CountTokens(ctx, part.Text)
-				if err != nil {
-					return ai.Prompt{}, state, b.failEntry(ctx, &state, "prompt_entry_error", traceEntry, err)
-				}
-				part.Tokens = tokens
-			}
 			if err := b.admitEntryParts(ctx, &state, entry, traceEntry, []Part{part}, entryAdmissionOptions{
 				eventPrefix:       "prompt_entry",
 				summarizeOptional: true,
@@ -578,6 +571,12 @@ func (b *Builder) failEntry(ctx stdcontext.Context, state *promptBuildState, eve
 }
 
 func (b *Builder) admitEntryParts(ctx stdcontext.Context, state *promptBuildState, entry builderEntry, traceEntry BuildTraceEntry, entryParts []Part, opts entryAdmissionOptions) error {
+	var err error
+	entryParts, err = b.normalizeMissingPartTokens(ctx, entryParts)
+	if err != nil {
+		return b.failEntry(ctx, state, opts.eventPrefix+"_error", traceEntry, err)
+	}
+
 	nextPartIDs := clonePartIDMap(state.partIDs)
 	if err := validatePartIDs(nextPartIDs, entry.section, entryParts); err != nil {
 		traceEntry.Err = err
@@ -658,6 +657,42 @@ func (b *Builder) admitEntryParts(ctx stdcontext.Context, state *promptBuildStat
 	}
 	state.record(traceEntry)
 	b.emitEntry(ctx, opts.eventPrefix+"_dropped", traceEntry)
+	return nil
+}
+
+func (b *Builder) normalizeMissingPartTokens(ctx stdcontext.Context, parts []Part) ([]Part, error) {
+	if b.budget == nil || b.budget.Tokenizer == nil {
+		return parts, nil
+	}
+	normalized := cloneParts(parts)
+	for i := range normalized {
+		if err := b.normalizePartTokens(ctx, &normalized[i]); err != nil {
+			return nil, err
+		}
+	}
+	return normalized, nil
+}
+
+func (b *Builder) normalizePartTokens(ctx stdcontext.Context, part *Part) error {
+	childTokens := 0
+	for i := range part.Children {
+		if err := b.normalizePartTokens(ctx, &part.Children[i]); err != nil {
+			return err
+		}
+		childTokens += part.Children[i].tokenCount()
+	}
+	if part.Tokens > 0 {
+		return nil
+	}
+	if part.Text != "" {
+		tokens, err := b.budget.Tokenizer.CountTokens(ctx, part.Text)
+		if err != nil {
+			return err
+		}
+		part.Tokens = tokens + childTokens
+		return nil
+	}
+	part.Tokens = childTokens
 	return nil
 }
 

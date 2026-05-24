@@ -251,6 +251,40 @@ func TestPromptBuilderDropsOptionalSourceOverBudget(t *testing.T) {
 	}
 }
 
+func TestPromptBuilderCountsSourcePartsWithoutExplicitTokens(t *testing.T) {
+	t.Parallel()
+
+	builder := aicontext.NewPromptBuilder().
+		Budget(aicontext.PromptBudget{
+			Tokenizer:           &mocks.MockTokenizer{},
+			ContextWindowTokens: 4,
+		}).
+		System("system", "system", aicontext.Required()).
+		Source(aicontext.SectionContext, "optional", aicontext.SourceFunc(func(ctx stdcontext.Context, view aicontext.PromptView, budget aicontext.SourceBudget) ([]aicontext.Part, error) {
+			return []aicontext.Part{
+				aicontext.NewPartGroup("group", []aicontext.Part{
+					aicontext.NewPart("child", "source child exceeds budget"),
+				}),
+			}, nil
+		}), aicontext.Optional()).
+		User("request", "question", aicontext.Required())
+
+	prompt, err := builder.BuildPrompt(stdcontext.Background(), emptyConversation{})
+	if err != nil {
+		t.Fatalf("BuildPrompt failed: %v", err)
+	}
+	if strings.Contains(prompt.Context, "source child exceeds budget") {
+		t.Fatalf("expected un-tokenized source child to be counted and dropped: %q", prompt.Context)
+	}
+	optional := traceEntry(t, builder.LastTrace(), "optional")
+	if optional.Status != "dropped" {
+		t.Fatalf("expected optional source to be dropped, got %+v", optional)
+	}
+	if optional.EntryTokens != 4 {
+		t.Fatalf("expected normalized source child token count, got %+v", optional)
+	}
+}
+
 func TestPromptBuilderFailsRequiredOverBudget(t *testing.T) {
 	t.Parallel()
 
