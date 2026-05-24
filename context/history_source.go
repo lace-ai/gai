@@ -5,12 +5,14 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
 )
 
 type HistorySource struct {
 	store SessionStore
 	id    int
+	debug gai.DebugSink
 }
 
 func History(store SessionStore, id int) Source {
@@ -18,6 +20,10 @@ func History(store SessionStore, id int) Source {
 		store: store,
 		id:    id,
 	}
+}
+
+func (s *HistorySource) DebugSink(debug gai.DebugSink) {
+	s.debug = debug
 }
 
 func (s *HistorySource) BuildParts(ctx stdcontext.Context, view PromptView, budget SourceBudget) ([]Part, error) {
@@ -50,7 +56,7 @@ func (s *HistorySource) BuildParts(ctx stdcontext.Context, view PromptView, budg
 		historyOffset += len(messages)
 
 		rendered := renderMessages(messages)
-		messageTokens, err := countRenderedMessages(ctx, s.store, budget.Tokenizer, messages)
+		messageTokens, err := s.countRenderedMessages(ctx, s.store, budget.Tokenizer, messages)
 		if err != nil {
 			return nil, err
 		}
@@ -66,7 +72,7 @@ func (s *HistorySource) BuildParts(ctx stdcontext.Context, view PromptView, budg
 	return parts, nil
 }
 
-func countRenderedMessages(ctx stdcontext.Context, store SessionStore, tokenizer ai.Tokenizer, messages []Message) (int, error) {
+func (s *HistorySource) countRenderedMessages(ctx stdcontext.Context, store SessionStore, tokenizer ai.Tokenizer, messages []Message) (int, error) {
 	if tokens, ok := storedMessageTokens(messages, tokenizer.ID()); ok {
 		return tokens, nil
 	}
@@ -79,7 +85,21 @@ func countRenderedMessages(ctx stdcontext.Context, store SessionStore, tokenizer
 		go func(message Message, tokens int) {
 			innerCtx, cancel := stdcontext.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
-			store.UpdateMessageTokens(innerCtx, message.ID, tokenizer.ID(), tokens)
+			err := store.UpdateMessageTokens(innerCtx, message.ID, tokenizer.ID(), tokens)
+			if err != nil {
+				if s.debug != nil {
+					s.debug.Emit(ctx, gai.DebugEvent{
+						Name:   "HistorySource",
+						Source: "token_count_update_error",
+						Fields: map[string]any{
+							"message_id":   message.ID,
+							"tokenizer_id": tokenizer.ID(),
+							"error":        err.Error(),
+						},
+						Err: err,
+					})
+				}
+			}
 		}(message, tokens)
 		totalTokens += tokens
 	}
