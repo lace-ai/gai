@@ -82,6 +82,20 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInfor
 
 		retryCount := 0
 		completedToolCalls := map[string]struct{}{}
+		var promptSession aicontext.PromptSession
+		var currentPrompt ai.Prompt
+		incrementalPrompt := false
+
+		if builder, ok := a.PromptBuilder.(aicontext.IncrementalPromptBuilder); ok {
+			session, err := builder.StartPrompt(ctx)
+			if err != nil {
+				errCh <- fmt.Errorf("%w: %w", ErrBuildPrompt, err)
+				return
+			}
+			promptSession = session
+			currentPrompt = session.Prompt()
+			incrementalPrompt = true
+		}
 
 		var iteration Iteration
 		for i := range a.MaxLoopIterations {
@@ -90,11 +104,15 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInfor
 
 			iterCtx, cancel := context.WithCancel(ctx)
 
-			prompt, err := a.PromptBuilder.BuildPrompt(iterCtx, a)
-			if err != nil {
-				errCh <- fmt.Errorf("%w: %w", ErrBuildPrompt, err)
-				cancel()
-				return
+			prompt := currentPrompt
+			if !incrementalPrompt {
+				var err error
+				prompt, err = a.PromptBuilder.BuildPrompt(iterCtx, a)
+				if err != nil {
+					errCh <- fmt.Errorf("%w: %w", ErrBuildPrompt, err)
+					cancel()
+					return
+				}
 			}
 
 			request := ai.AIRequest{
@@ -198,6 +216,15 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInfor
 			if len(toolCalls) == 0 && !retrying {
 				cancel()
 				return
+			}
+			if incrementalPrompt {
+				var err error
+				currentPrompt, err = promptSession.AppendMessages(iterCtx, iteration.DeltaMessages())
+				if err != nil {
+					errCh <- fmt.Errorf("%w: %w", ErrBuildPrompt, err)
+					cancel()
+					return
+				}
 			}
 			cancel()
 		}

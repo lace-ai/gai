@@ -52,6 +52,7 @@ type PromptBudget struct {
 	Tokenizer                  ai.Tokenizer
 	ContextWindowTokens        int
 	ReservedOutputTokens       int
+	ConversationReserveTokens  int
 	RenderOverheadReserveRatio float64
 	Summarizer                 Summarizer
 }
@@ -133,6 +134,15 @@ type BuildTraceEntry struct {
 
 type PromptBuilder interface {
 	BuildPrompt(ctx stdcontext.Context, conv Conversation) (ai.Prompt, error)
+}
+
+type IncrementalPromptBuilder interface {
+	StartPrompt(ctx stdcontext.Context) (PromptSession, error)
+}
+
+type PromptSession interface {
+	Prompt() ai.Prompt
+	AppendMessages(ctx stdcontext.Context, messages []Message) (ai.Prompt, error)
 }
 
 type Builder struct {
@@ -283,8 +293,32 @@ func (b *Builder) LastTrace() BuildTrace {
 }
 
 func (b *Builder) BuildPrompt(ctx stdcontext.Context, conv Conversation) (ai.Prompt, error) {
+	prompt, _, err := b.buildPrompt(ctx, conv, 0)
+	return prompt, err
+}
+
+func (b *Builder) StartPrompt(ctx stdcontext.Context) (PromptSession, error) {
+	reserveTokens := 0
+	if b != nil && b.budget != nil {
+		reserveTokens = b.budget.ConversationReserveTokens
+	}
+	prompt, state, err := b.buildPrompt(ctx, nil, reserveTokens)
+	if err != nil {
+		return nil, err
+	}
+	return &builderPromptSession{
+		builder:       b,
+		basePrompt:    prompt,
+		prompt:        prompt,
+		baseReserve:   reserveTokens,
+		activeReserve: reserveTokens,
+		baseTokens:    state.promptTokens,
+	}, nil
+}
+
+func (b *Builder) buildPrompt(ctx stdcontext.Context, conv Conversation, reserveTokens int) (ai.Prompt, promptBuildState, error) {
 	if b == nil {
-		return ai.Prompt{}, ErrPromptBuilderNil
+		return ai.Prompt{}, promptBuildState{}, ErrPromptBuilderNil
 	}
 	renderer := b.renderer
 	if renderer == nil {
@@ -293,11 +327,11 @@ func (b *Builder) BuildPrompt(ctx stdcontext.Context, conv Conversation) (ai.Pro
 	if err := b.validate(); err != nil {
 		b.trace = BuildTrace{}
 		b.emit(ctx, "prompt_build_failed", map[string]any{"error": err.Error()}, err)
-		return ai.Prompt{}, err
+		return ai.Prompt{}, promptBuildState{}, err
 	}
 
 	view := newBuilderView(conv, b.entries)
-	state := newPromptBuildState(renderer)
+	state := newPromptBuildState(renderer, reserveTokens)
 
 	b.emit(ctx, "prompt_build_started", map[string]any{"entries": len(b.entries)}, nil)
 	for _, entry := range orderedEntries(b.entries) {
@@ -314,7 +348,7 @@ func (b *Builder) BuildPrompt(ctx stdcontext.Context, conv Conversation) (ai.Pro
 			if b.budget != nil && part.Tokens == 0 && part.Text != "" {
 				tokens, err := b.budget.Tokenizer.CountTokens(ctx, part.Text)
 				if err != nil {
-					return ai.Prompt{}, b.failEntry(ctx, &state, "prompt_entry_error", traceEntry, err)
+					return ai.Prompt{}, state, b.failEntry(ctx, &state, "prompt_entry_error", traceEntry, err)
 				}
 				part.Tokens = tokens
 			}
@@ -322,14 +356,14 @@ func (b *Builder) BuildPrompt(ctx stdcontext.Context, conv Conversation) (ai.Pro
 				eventPrefix:       "prompt_entry",
 				summarizeOptional: true,
 			}); err != nil {
-				return ai.Prompt{}, err
+				return ai.Prompt{}, state, err
 			}
 		case EntryKindSource:
 			if entry.source == nil {
 				err := fmt.Errorf("%w: section %s source %q is nil", ErrPromptSource, entry.section, entry.id)
 				traceEntry.Err = err
 				if entry.required {
-					return ai.Prompt{}, b.failEntry(ctx, &state, "prompt_source_error", traceEntry, err)
+					return ai.Prompt{}, state, b.failEntry(ctx, &state, "prompt_source_error", traceEntry, err)
 				}
 				traceEntry.Status = "skipped"
 				traceEntry.Reason = "nil_source"
@@ -338,7 +372,7 @@ func (b *Builder) BuildPrompt(ctx stdcontext.Context, conv Conversation) (ai.Pro
 				continue
 			}
 
-			sourceBudget := b.sourceBudget(state.promptTokens, entry)
+			sourceBudget := b.sourceBudget(state.promptTokens, state.reserveTokens, entry)
 			traceEntry.AvailableTokens = sourceBudget.MaxTokens
 			sourceParts, err := entry.source.BuildParts(ctx, view, sourceBudget)
 			if err != nil {
@@ -346,7 +380,7 @@ func (b *Builder) BuildPrompt(ctx stdcontext.Context, conv Conversation) (ai.Pro
 				if entry.required {
 					wrapped := fmt.Errorf("%w: section %s source %q: %w", ErrPromptSource, entry.section, entry.id, err)
 					traceEntry.Err = wrapped
-					return ai.Prompt{}, b.failEntry(ctx, &state, "prompt_source_error", traceEntry, wrapped)
+					return ai.Prompt{}, state, b.failEntry(ctx, &state, "prompt_source_error", traceEntry, wrapped)
 				}
 				traceEntry.Status = "skipped"
 				traceEntry.Reason = "optional_source_error"
@@ -362,7 +396,7 @@ func (b *Builder) BuildPrompt(ctx stdcontext.Context, conv Conversation) (ai.Pro
 				optionalIDConflict:  true,
 				includeDroppedParts: true,
 			}); err != nil {
-				return ai.Prompt{}, err
+				return ai.Prompt{}, state, err
 			}
 		}
 	}
@@ -371,14 +405,14 @@ func (b *Builder) BuildPrompt(ctx stdcontext.Context, conv Conversation) (ai.Pro
 	b.trace = trace
 	prompt := renderPrompt(renderer, state.parts)
 	if b.budget != nil {
-		if state.promptTokens > b.budget.promptLimit() {
-			err := promptBudgetError("prompt", state.promptTokens, b.budget.promptLimit())
+		if state.promptTokens > b.promptLimit(reserveTokens) {
+			err := promptBudgetError("prompt", state.promptTokens, b.promptLimit(reserveTokens))
 			b.emit(ctx, "prompt_build_failed", map[string]any{
 				"error":            err.Error(),
 				"prompt_tokens":    state.promptTokens,
-				"available_tokens": b.budget.promptLimit(),
+				"available_tokens": b.promptLimit(reserveTokens),
 			}, err)
-			return ai.Prompt{}, err
+			return ai.Prompt{}, state, err
 		}
 	}
 	b.emit(ctx, "prompt_build_completed", map[string]any{
@@ -387,18 +421,108 @@ func (b *Builder) BuildPrompt(ctx stdcontext.Context, conv Conversation) (ai.Pro
 		"user_parts":    len(state.parts[SectionUser]),
 	}, nil)
 
-	return prompt, nil
+	return prompt, state, nil
+}
+
+type builderPromptSession struct {
+	builder       *Builder
+	basePrompt    ai.Prompt
+	prompt        ai.Prompt
+	baseReserve   int
+	activeReserve int
+	baseTokens    int
+	deltaMessages []Message
+	deltaText     string
+	deltaTokens   int
+}
+
+func (s *builderPromptSession) Prompt() ai.Prompt {
+	if s == nil {
+		return ai.Prompt{}
+	}
+	return s.prompt
+}
+
+func (s *builderPromptSession) AppendMessages(ctx stdcontext.Context, messages []Message) (ai.Prompt, error) {
+	if s == nil || s.builder == nil {
+		return ai.Prompt{}, ErrPromptBuilderNil
+	}
+	if len(messages) == 0 {
+		return s.prompt, nil
+	}
+
+	rendered := renderMessages(messages)
+	if rendered == "" {
+		return s.prompt, nil
+	}
+
+	messageTokens := 0
+	if s.builder.budget != nil {
+		tokens, err := countMessageContentTokens(ctx, s.builder.budget.Tokenizer, messages)
+		if err != nil {
+			return ai.Prompt{}, err
+		}
+		messageTokens = tokens
+	}
+
+	s.deltaMessages = append(s.deltaMessages, cloneMessages(messages)...)
+	s.deltaText = appendPromptText(s.deltaText, rendered)
+	s.deltaTokens += messageTokens
+
+	if s.builder.budget != nil && s.deltaTokens > s.activeReserve {
+		if err := s.rebuildBase(ctx, s.deltaTokens); err != nil {
+			return ai.Prompt{}, err
+		}
+	}
+
+	s.prompt = s.basePrompt
+	s.prompt.Prompt = appendPromptText(s.basePrompt.Prompt, s.deltaText)
+	return s.prompt, nil
+}
+
+func (s *builderPromptSession) rebuildBase(ctx stdcontext.Context, reserveTokens int) error {
+	if reserveTokens < s.baseReserve {
+		reserveTokens = s.baseReserve
+	}
+	prompt, state, err := s.builder.buildPrompt(ctx, nil, reserveTokens)
+	if err != nil {
+		return err
+	}
+	s.basePrompt = prompt
+	s.activeReserve = reserveTokens
+	s.baseTokens = state.promptTokens
+	return nil
+}
+
+func appendPromptText(base, next string) string {
+	if base == "" {
+		return next
+	}
+	if next == "" {
+		return base
+	}
+	return base + "\n" + next
+}
+
+func cloneMessages(messages []Message) []Message {
+	cloned := make([]Message, len(messages))
+	for i, message := range messages {
+		cloned[i] = message
+		cloned[i].TokenCount = maps.Clone(message.TokenCount)
+	}
+	return cloned
 }
 
 type promptBuildState struct {
-	renderer     Renderer
-	trace        BuildTrace
-	parts        map[Section][]Part
-	partIDs      map[string]Section
-	promptTokens int
+	renderer      Renderer
+	trace         BuildTrace
+	parts         map[Section][]Part
+	partIDs       map[string]Section
+	promptTokens  int
+	reserveTokens int
 }
 
-func newPromptBuildState(renderer Renderer) promptBuildState {
+func newPromptBuildState(renderer Renderer, reserveTokens int) promptBuildState {
 	return promptBuildState{
 		renderer: renderer,
 		trace:    BuildTrace{Parts: map[Section][]Part{}},
@@ -407,7 +531,8 @@ func newPromptBuildState(renderer Renderer) promptBuildState {
 			SectionContext: {},
 			SectionUser:    {},
 		},
-		partIDs: map[string]Section{},
+		partIDs:       map[string]Section{},
+		reserveTokens: reserveTokens,
 	}
 }
 
@@ -467,7 +592,7 @@ func (b *Builder) admitEntryParts(ctx stdcontext.Context, state *promptBuildStat
 	}
 
 	next := state.nextParts(entry.section, entryParts)
-	ok, count, available, err := b.partsFit(state.parts, entry.section, next)
+	ok, count, available, err := b.partsFit(state.parts, entry.section, next, state.reserveTokens)
 	if err != nil {
 		return b.failEntry(ctx, state, opts.eventPrefix+"_error", traceEntry, err)
 	}
@@ -485,7 +610,7 @@ func (b *Builder) admitEntryParts(ctx stdcontext.Context, state *promptBuildStat
 	setTraceTokens(&traceEntry, entryTokens, count)
 	traceEntry.AvailableTokens = available
 	if entry.required {
-		cleanedParts, ok, retryCount, retryAvailable, err := b.partsFitAfterDroppingOptionalContext(state.parts, entry.section, next)
+		cleanedParts, ok, retryCount, retryAvailable, err := b.partsFitAfterDroppingOptionalContext(state.parts, entry.section, next, state.reserveTokens)
 		if err != nil {
 			return b.failEntry(ctx, state, opts.eventPrefix+"_error", traceEntry, err)
 		}
@@ -508,7 +633,7 @@ func (b *Builder) admitEntryParts(ctx stdcontext.Context, state *promptBuildStat
 	traceEntry.Status = "dropped"
 	traceEntry.Reason = "optional_over_budget"
 	if opts.summarizeOptional && len(entryParts) == 1 {
-		summarizedPart, ok, summaryCount, summaryPromptCount, summaryAvailable, err := b.summarizeOptionalPart(ctx, state.parts, entry, entryParts[0], state.promptTokens)
+		summarizedPart, ok, summaryCount, summaryPromptCount, summaryAvailable, err := b.summarizeOptionalPart(ctx, state.parts, entry, entryParts[0], state.promptTokens, state.reserveTokens)
 		if err != nil {
 			return b.failEntry(ctx, state, opts.eventPrefix+"_error", traceEntry, err)
 		}
@@ -622,7 +747,7 @@ func validSection(section Section) bool {
 	}
 }
 
-func (b *Builder) sourceBudget(usedTokens int, entry builderEntry) SourceBudget {
+func (b *Builder) sourceBudget(usedTokens int, reserveTokens int, entry builderEntry) SourceBudget {
 	if b.budget == nil {
 		return SourceBudget{
 			MaxTokens:             unlimitedTokens,
@@ -630,7 +755,7 @@ func (b *Builder) sourceBudget(usedTokens int, entry builderEntry) SourceBudget 
 			Required:              entry.required,
 		}
 	}
-	remaining := max(b.budget.promptLimit()-usedTokens, 0)
+	remaining := max(b.promptLimit(reserveTokens)-usedTokens, 0)
 	maxTokens := remaining
 	if entry.hasSourceCap && entry.sourceCap < maxTokens {
 		maxTokens = entry.sourceCap
@@ -645,18 +770,18 @@ func (b *Builder) sourceBudget(usedTokens int, entry builderEntry) SourceBudget 
 	}
 }
 
-func (b *Builder) partsFit(parts map[Section][]Part, section Section, next []Part) (bool, int, int, error) {
+func (b *Builder) partsFit(parts map[Section][]Part, section Section, next []Part, reserveTokens int) (bool, int, int, error) {
 	if b.budget == nil {
 		return true, 0, unlimitedTokens, nil
 	}
 	candidate := clonePartsMap(parts)
 	candidate[section] = cloneParts(next)
 	count := b.countPrompt(candidate)
-	limit := b.budget.promptLimit()
+	limit := b.promptLimit(reserveTokens)
 	return count <= limit, count, limit, nil
 }
 
-func (b *Builder) partsFitAfterDroppingOptionalContext(parts map[Section][]Part, section Section, next []Part) (map[Section][]Part, bool, int, int, error) {
+func (b *Builder) partsFitAfterDroppingOptionalContext(parts map[Section][]Part, section Section, next []Part, reserveTokens int) (map[Section][]Part, bool, int, int, error) {
 	if b.budget == nil {
 		return parts, true, 0, unlimitedTokens, nil
 	}
@@ -668,17 +793,17 @@ func (b *Builder) partsFitAfterDroppingOptionalContext(parts map[Section][]Part,
 		candidate[section] = cloneParts(next)
 	}
 	count := b.countPrompt(candidate)
-	limit := b.budget.promptLimit()
+	limit := b.promptLimit(reserveTokens)
 	return candidate, count <= limit, count, limit, nil
 }
 
-func (b *Builder) summarizeOptionalPart(ctx stdcontext.Context, parts map[Section][]Part, entry builderEntry, part Part, usedTokens int) (Part, bool, int, int, int, error) {
+func (b *Builder) summarizeOptionalPart(ctx stdcontext.Context, parts map[Section][]Part, entry builderEntry, part Part, usedTokens int, reserveTokens int) (Part, bool, int, int, int, error) {
 	if b.budget == nil || b.budget.Summarizer == nil || b.budget.Tokenizer == nil || entry.required {
 		return Part{}, false, 0, 0, 0, nil
 	}
-	remaining := b.budget.promptLimit() - usedTokens
+	remaining := b.promptLimit(reserveTokens) - usedTokens
 	if remaining <= 0 {
-		return Part{}, false, 0, 0, b.budget.promptLimit(), nil
+		return Part{}, false, 0, 0, b.promptLimit(reserveTokens), nil
 	}
 	summary, err := b.budget.Summarizer.Summarize(ctx, SummaryRequest{
 		ID:        entry.id,
@@ -702,7 +827,7 @@ func (b *Builder) summarizeOptionalPart(ctx stdcontext.Context, parts map[Sectio
 		Meta:     cloneMeta(part.Meta),
 	}
 	next := append(cloneParts(parts[entry.section]), summarized)
-	ok, count, available, err := b.partsFit(parts, entry.section, next)
+	ok, count, available, err := b.partsFit(parts, entry.section, next, reserveTokens)
 	if !ok || err != nil {
 		return Part{}, false, 0, count, available, err
 	}
@@ -717,6 +842,13 @@ func (b *Builder) countPrompt(parts map[Section][]Part) int {
 		}
 	}
 	return count + renderOverheadTokens(count, b.budget.RenderOverheadReserveRatio)
+}
+
+func (b *Builder) promptLimit(reserveTokens int) int {
+	if b.budget == nil {
+		return unlimitedTokens
+	}
+	return max(b.budget.promptLimit()-reserveTokens, 0)
 }
 
 func renderOverheadTokens(tokens int, ratio float64) int {

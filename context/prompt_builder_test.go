@@ -478,6 +478,49 @@ func TestPromptBuilderSummarizesOptionalStaticUserPartBeforeDropping(t *testing.
 	}
 }
 
+func TestPromptSessionRebuildsSourcesWhenConversationReserveIsExceeded(t *testing.T) {
+	t.Parallel()
+
+	buildCount := 0
+	builder := aicontext.NewPromptBuilder().
+		Budget(aicontext.PromptBudget{
+			Tokenizer:                  &mocks.MockTokenizer{},
+			ContextWindowTokens:        7,
+			ConversationReserveTokens:  1,
+			RenderOverheadReserveRatio: 0,
+		}).
+		System("system", "system", aicontext.Required(), aicontext.Tokens(1)).
+		Source(aicontext.SectionContext, "optional", aicontext.SourceFunc(func(ctx stdcontext.Context, view aicontext.PromptView, budget aicontext.SourceBudget) ([]aicontext.Part, error) {
+			buildCount++
+			return []aicontext.Part{aicontext.NewPart("optional-context", "optional context", aicontext.Tokens(4))}, nil
+		}), aicontext.Optional()).
+		User("request", "question", aicontext.Required(), aicontext.Tokens(1))
+
+	session, err := builder.StartPrompt(stdcontext.Background())
+	if err != nil {
+		t.Fatalf("StartPrompt failed: %v", err)
+	}
+	if !strings.Contains(session.Prompt().Context, "optional context") {
+		t.Fatalf("expected optional source before reserve overflow: %q", session.Prompt().Context)
+	}
+
+	prompt, err := session.AppendMessages(stdcontext.Background(), []aicontext.Message{
+		sessionMessageWithTokens(1, aicontext.RoleAssistant, "tool delta", "mock.tokenizer", 3),
+	})
+	if err != nil {
+		t.Fatalf("AppendMessages failed: %v", err)
+	}
+	if buildCount != 2 {
+		t.Fatalf("expected source rebuild after reserve overflow, got %d builds", buildCount)
+	}
+	if strings.Contains(prompt.Context, "optional context") {
+		t.Fatalf("expected optional source to be dropped after reserve overflow: %q", prompt.Context)
+	}
+	if !strings.Contains(prompt.Prompt, "tool delta") {
+		t.Fatalf("expected appended delta in prompt: %q", prompt.Prompt)
+	}
+}
+
 func assertContainsAll(t *testing.T, text, name string, values ...string) {
 	t.Helper()
 

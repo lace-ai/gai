@@ -101,6 +101,18 @@ func (i *Iteration) Messages() []aicontext.Message {
 		}
 	}
 
+	return append(msgs, i.partMessages()...)
+}
+
+func (i *Iteration) DeltaMessages() []aicontext.Message {
+	if i == nil {
+		return nil
+	}
+	return i.partMessages()
+}
+
+func (i *Iteration) partMessages() []aicontext.Message {
+	var msgs []aicontext.Message
 	for _, part := range i.Parts {
 		switch part.Type {
 		case IterationTypeToolCall, IterationTypeToolError:
@@ -132,7 +144,6 @@ func (i *Iteration) Messages() []aicontext.Message {
 			}
 		}
 	}
-
 	return msgs
 }
 

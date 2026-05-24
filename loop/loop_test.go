@@ -32,6 +32,15 @@ type scriptedStreamModel struct {
 	requests  []ai.AIRequest
 }
 
+type countingPromptBuilder struct {
+	count atomic.Int32
+}
+
+func (b *countingPromptBuilder) BuildPrompt(ctx context.Context, conv aicontext.Conversation) (ai.Prompt, error) {
+	count := b.count.Add(1)
+	return ai.Prompt{Prompt: fmt.Sprintf("prompt-%d", count)}, nil
+}
+
 func (m *scriptedStreamModel) Name() string {
 	return "scripted-stream-model"
 }
@@ -378,7 +387,7 @@ func TestLoopSuppressesRepeatedCompletedToolCall(t *testing.T) {
 	}
 }
 
-func TestLoopBuildsStructuredPromptEveryIteration(t *testing.T) {
+func TestLoopAppendsIterationMessagesToIncrementalPrompt(t *testing.T) {
 	t.Parallel()
 
 	var buildCount atomic.Int32
@@ -421,8 +430,8 @@ func TestLoopBuildsStructuredPromptEveryIteration(t *testing.T) {
 		}
 	}
 
-	if got := buildCount.Load(); got != 2 {
-		t.Fatalf("expected prompt builder to run twice, got %d", got)
+	if got := buildCount.Load(); got != 1 {
+		t.Fatalf("expected incremental prompt builder to build sources once, got %d", got)
 	}
 	requests := model.Requests()
 	if len(requests) != 2 {
@@ -431,10 +440,63 @@ func TestLoopBuildsStructuredPromptEveryIteration(t *testing.T) {
 	if !strings.Contains(requests[0].Prompt.System, "System prompt") {
 		t.Fatalf("expected structured system prompt in first request: %+v", requests[0].Prompt)
 	}
-	if !strings.Contains(requests[0].Prompt.Context, "build-1") || !strings.Contains(requests[1].Prompt.Context, "build-2") {
-		t.Fatalf("expected dynamic context to be rebuilt per iteration: first=%q second=%q", requests[0].Prompt.Context, requests[1].Prompt.Context)
+	if !strings.Contains(requests[0].Prompt.Context, "build-1") || !strings.Contains(requests[1].Prompt.Context, "build-1") {
+		t.Fatalf("expected dynamic context to be reused: first=%q second=%q", requests[0].Prompt.Context, requests[1].Prompt.Context)
 	}
 	if !strings.Contains(requests[0].Prompt.Prompt, "Initial prompt") {
 		t.Fatalf("expected structured user prompt in first request: %+v", requests[0].Prompt)
+	}
+	if strings.Contains(requests[0].Prompt.Prompt, "payload") {
+		t.Fatalf("first request should not contain future tool delta: %q", requests[0].Prompt.Prompt)
+	}
+	if !strings.Contains(requests[1].Prompt.Prompt, "payload") {
+		t.Fatalf("second request should include appended tool delta: %q", requests[1].Prompt.Prompt)
+	}
+}
+
+func TestLoopFallsBackToBuildPromptEveryIteration(t *testing.T) {
+	t.Parallel()
+
+	promptBuilder := &countingPromptBuilder{}
+	model := &scriptedStreamModel{
+		sequences: [][]ai.Token{
+			{
+				{
+					Type: ai.TokenTypeToolCall,
+					ToolCall: &ai.ToolCall{
+						ID:   "call-1",
+						Type: "function",
+						Name: "echo",
+						Args: json.RawMessage(`{"text":"payload"}`),
+					},
+				},
+			},
+			{
+				{Type: ai.TokenTypeText, Data: []byte("done")},
+			},
+		},
+	}
+
+	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, promptBuilder, nil)
+	l.MaxLoopIterations = 3
+
+	tokenCh, _, errCh := l.Loop(context.Background())
+	for range tokenCh {
+	}
+	for err := range errCh {
+		if err != nil {
+			t.Fatalf("unexpected loop error: %v", err)
+		}
+	}
+
+	if got := promptBuilder.count.Load(); got != 2 {
+		t.Fatalf("expected non-incremental prompt builder to run twice, got %d", got)
+	}
+	requests := model.Requests()
+	if len(requests) != 2 {
+		t.Fatalf("expected 2 model requests, got %d", len(requests))
+	}
+	if requests[0].Prompt.Prompt != "prompt-1" || requests[1].Prompt.Prompt != "prompt-2" {
+		t.Fatalf("expected rebuilt prompts, got first=%q second=%q", requests[0].Prompt.Prompt, requests[1].Prompt.Prompt)
 	}
 }

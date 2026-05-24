@@ -37,50 +37,6 @@ func (s *HistorySource) BuildParts(ctx stdcontext.Context, view PromptView, budg
 	}
 
 	tokens := 0
-	convParts := []Part{}
-	var conv Conversation
-	if view != nil {
-		conv = view.Conversation()
-	}
-	if conv != nil {
-		convMessages := conv.Messages()
-		renderedConv := renderMessages(convMessages)
-		if renderedConv != "" {
-			convTokens, err := countRenderedMessages(ctx, s.store, budget.Tokenizer, convMessages)
-			if err != nil {
-				return nil, err
-			}
-			if convTokens > limit {
-				if budget.Required && budget.Summarizer != nil {
-					summary, err := budget.Summarizer.Summarize(ctx, SummaryRequest{
-						ID:        "current-loop",
-						Text:      renderedConv,
-						MaxTokens: limit,
-						Required:  true,
-					})
-					if err != nil {
-						return nil, err
-					}
-					summaryTokens, err := budget.Tokenizer.CountTokens(ctx, summary)
-					if err != nil {
-						return nil, err
-					}
-					if summaryTokens > limit {
-						return nil, promptBudgetError("current-loop", summaryTokens, limit)
-					}
-					convTokens = summaryTokens
-					renderedConv = summary
-				} else if budget.Required {
-					return nil, promptBudgetError("current-loop", convTokens, limit)
-				} else {
-					return nil, nil
-				}
-			}
-			tokens += convTokens
-			convParts = append(convParts, newHistoryPart("current-loop", renderedConv, convTokens, budget.Required))
-		}
-	}
-
 	parts := []Part{}
 	historyOffset := 0
 	for tokens < limit {
@@ -107,7 +63,6 @@ func (s *HistorySource) BuildParts(ctx stdcontext.Context, view PromptView, budg
 		parts = append(parts, part)
 	}
 
-	parts = append(parts, convParts...)
 	return parts, nil
 }
 
@@ -117,7 +72,7 @@ func countRenderedMessages(ctx stdcontext.Context, store SessionStore, tokenizer
 	}
 	var totalTokens int
 	for _, message := range messages {
-		tokens, err := tokenizer.CountTokens(ctx, message.Content.String())
+		tokens, err := countMessageContentTokens(ctx, tokenizer, []Message{message})
 		if err != nil {
 			return 0, err
 		}
@@ -126,6 +81,18 @@ func countRenderedMessages(ctx stdcontext.Context, store SessionStore, tokenizer
 			defer cancel()
 			store.UpdateMessageTokens(innerCtx, message.ID, tokenizer.ID(), tokens)
 		}(message, tokens)
+		totalTokens += tokens
+	}
+	return totalTokens, nil
+}
+
+func countMessageContentTokens(ctx stdcontext.Context, tokenizer ai.Tokenizer, messages []Message) (int, error) {
+	var totalTokens int
+	for _, message := range messages {
+		tokens, err := tokenizer.CountTokens(ctx, message.Content.String())
+		if err != nil {
+			return 0, err
+		}
 		totalTokens += tokens
 	}
 	return totalTokens, nil
