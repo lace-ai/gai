@@ -14,7 +14,7 @@ type SessionStore interface {
 
 type RAGStore interface {
 	// GetRelevantDocuments returns relevant documents for a query, ordered by relevance desc
-	GetRelevantDocuments(query string, limit int) ([]Document, error)
-	AddDocument(content string) (int, error)
-	UpdateDocumentTokens(documentID int, tokenizer string, tokens int) error
+	GetRelevantDocuments(ctx context.Context, query string, limit int) ([]Document, error)
+	AddDocument(ctx context.Context, content string) (int, error)
+	UpdateDocumentTokens(ctx context.Context, documentID int, tokenizer string, tokens int) error
 }

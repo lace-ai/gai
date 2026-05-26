@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/lace-ai/gai"
 )
 
 type RAGQueryFunc func(ctx stdcontext.Context, view PromptView) (string, error)
@@ -13,6 +16,7 @@ type RAGSource struct {
 	store RAGStore
 	limit int
 	query RAGQueryFunc
+	debug gai.DebugSink
 }
 
 type Document struct {
@@ -27,6 +31,10 @@ func RAG(store RAGStore, limit int, query RAGQueryFunc) Source {
 		limit: limit,
 		query: query,
 	}
+}
+
+func (s *RAGSource) DebugSink(debug gai.DebugSink) {
+	s.debug = debug
 }
 
 func (s *RAGSource) BuildParts(ctx stdcontext.Context, view PromptView, budget SourceBudget) ([]Part, error) {
@@ -48,7 +56,7 @@ func (s *RAGSource) BuildParts(ctx stdcontext.Context, view PromptView, budget S
 		return nil, nil
 	}
 
-	docs, err := s.store.GetRelevantDocuments(query, s.limit)
+	docs, err := s.store.GetRelevantDocuments(ctx, query, s.limit)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +82,28 @@ func (s *RAGSource) BuildParts(ctx stdcontext.Context, view PromptView, budget S
 			if err != nil {
 				return nil, err
 			}
-			s.store.UpdateDocumentTokens(doc.ID, budget.Tokenizer.ID(), docTokens)
+
+			go func(docID, tokens int) {
+				innerCtx, cancel := stdcontext.WithTimeout(ctx, 5*time.Second)
+				defer cancel()
+				s.store.UpdateDocumentTokens(innerCtx, docID, budget.Tokenizer.ID(), tokens)
+				if err != nil {
+					if s.debug != nil {
+						s.debug.Emit(ctx, gai.DebugEvent{
+							Name:   "Rag-Source",
+							Source: "token_count_update_error",
+							Fields: map[string]any{
+								"doc.id":       docID,
+								"tokenizer_id": budget.Tokenizer.ID(),
+								"error":        err.Error(),
+							},
+							Err: err,
+						})
+					}
+				}
+			}(doc.ID, tokens)
+			go func() {
+			}()
 		}
 		if tokens+docTokens > limit {
 			if minOverflowTokens == 0 || docTokens < minOverflowTokens {
