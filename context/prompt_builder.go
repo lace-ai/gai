@@ -866,7 +866,7 @@ func (b *Builder) summarizeOptionalPart(ctx stdcontext.Context, parts map[Sectio
 	if !ok || err != nil {
 		return Part{}, false, 0, count, available, err
 	}
-	return summarized, true, summaryTokens, count, remaining, nil
+	return summarized, true, summaryTokens, count, available, nil
 }
 
 func (b *Builder) countPrompt(parts map[Section][]Part) int {
