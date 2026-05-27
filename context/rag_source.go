@@ -1,6 +1,7 @@
 package context
 
 import (
+	"context"
 	stdcontext "context"
 	"fmt"
 	"strconv"
@@ -84,7 +85,8 @@ func (s *RAGSource) BuildParts(ctx stdcontext.Context, view PromptView, budget S
 			}
 
 			go func(docID, tokens int) {
-				innerCtx, cancel := stdcontext.WithTimeout(ctx, 5*time.Second)
+				detashedCtx := context.WithoutCancel(ctx)
+				innerCtx, cancel := stdcontext.WithTimeout(detashedCtx, 5*time.Second)
 				defer cancel()
 				err := s.store.UpdateDocumentTokens(innerCtx, docID, budget.Tokenizer.ID(), tokens)
 				if err != nil {

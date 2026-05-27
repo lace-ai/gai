@@ -1,6 +1,7 @@
 package context
 
 import (
+	"context"
 	stdcontext "context"
 	"strconv"
 	"time"
@@ -83,12 +84,13 @@ func (s *HistorySource) countRenderedMessages(ctx stdcontext.Context, store Sess
 			return 0, err
 		}
 		go func(message Message, tokens int) {
-			innerCtx, cancel := stdcontext.WithTimeout(ctx, 5*time.Second)
+			detashedCtx := context.WithoutCancel(ctx)
+			innerCtx, cancel := stdcontext.WithTimeout(detashedCtx, 5*time.Second)
 			defer cancel()
 			err := store.UpdateMessageTokens(innerCtx, message.ID, tokenizer.ID(), tokens)
 			if err != nil {
 				if s.debug != nil {
-					s.debug.Emit(ctx, gai.DebugEvent{
+					s.debug.Emit(innerCtx, gai.DebugEvent{
 						Name:   "HistorySource",
 						Source: "token_count_update_error",
 						Fields: map[string]any{
