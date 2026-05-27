@@ -97,18 +97,18 @@ type fakeRAGStore struct {
 	docs []aicontext.Document
 }
 
-func (s *fakeRAGStore) GetRelevantDocuments(query string, limit int) ([]aicontext.Document, error) {
+func (s *fakeRAGStore) GetRelevantDocuments(ctx stdcontext.Context, query string, limit int) ([]aicontext.Document, error) {
 	if limit > 0 && limit < len(s.docs) {
 		return s.docs[:limit], nil
 	}
 	return s.docs, nil
 }
 
-func (s *fakeRAGStore) AddDocument(content string) (int, error) {
+func (s *fakeRAGStore) AddDocument(ctx stdcontext.Context, content string) (int, error) {
 	s.docs = append(s.docs, aicontext.Document{ID: len(s.docs) + 1, Content: content})
 	return len(s.docs), nil
 }
 
-func (s *fakeRAGStore) UpdateDocumentTokens(documentID int, tokenizer string, tokens int) error {
+func (s *fakeRAGStore) UpdateDocumentTokens(ctx stdcontext.Context, documentID int, tokenizer string, tokens int) error {
 	return nil
 }
