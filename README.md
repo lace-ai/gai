@@ -570,7 +570,7 @@ prompt := aicontext.NewPromptBuilder().
 
 Entries use stable IDs and are rendered in fixed section order (`system`, `context`, `user`). Inside each section, required entries render before optional entries; configured order is preserved within the required group and within the optional group. This lets required sources receive budget before optional context can consume it.
 
-With `Budget(...)` configured, the builder counts the rendered prompt with the configured tokenizer. `ContextWindowTokens - ReservedOutputTokens` is the prompt budget. Required entries must fit or `BuildPrompt` returns `ErrPromptBudget`. Optional entries are best-effort: the builder includes them when they fit, asks the configured `Summarizer` to compact optional static parts when they do not fit, and drops them when there is no fitting summary. Optional source failures are skipped, and optional source overflow is dropped.
+With `Budget(...)` configured, the builder counts the rendered prompt with the configured tokenizer. `ContextWindowTokens - ReservedOutputTokens` is the prompt budget, and `ConversationReserveTokens` reserves space for loop messages appended by incremental prompt sessions. Required entries must fit or `BuildPrompt` returns `ErrPromptBudget`. Optional entries are best-effort: the builder includes them when they fit, asks the configured `Summarizer` to compact optional static parts when they do not fit, and drops them when there is no fitting summary. Optional source failures are skipped, and optional source overflow is dropped.
 
 Dynamic sources implement:
 
@@ -594,7 +594,7 @@ The default renderer is XML-like and can be replaced with a custom renderer. Gro
 
 </summary>
 
-`History(store, sessionID)` returns a prompt source that loads stored messages, renders them as `history-*` parts, and appends current loop messages as a `current-loop` part. Use `SourceTokenCap(...)` on the source entry to control how many tokens history may consume. History reuses cached message token counts when all messages in a batch have a non-negative value for the active tokenizer; otherwise it counts message content and asks the store to save the count asynchronously. If required current-loop content exceeds its source budget, history can use the configured summarizer; if the summary still does not fit, prompt building fails with `ErrPromptBudget`.
+`History(store, sessionID)` returns a prompt source that loads stored messages and renders fitting messages as `history-*` parts. Use `SourceTokenCap(...)` on the source entry to control how many tokens history may consume. History reuses cached message token counts when all messages in a batch have a non-negative value for the active tokenizer; otherwise it counts message content and asks the store to save the count asynchronously. Stored messages that exceed the source budget are left out.
 
 
 </details>
@@ -657,7 +657,7 @@ The `loop` package is for agent-style execution where the model can request tool
 - a structured prompt builder
 - an optional tool-response preprocessor
 
-The prompt builder is called on every loop iteration, so dynamic sources can include current loop messages, session history, summaries, RAG results, or other runtime context.
+When the prompt builder supports incremental prompts, the loop builds the base prompt once and appends each iteration's delta messages through the prompt session. Other prompt builders are called on every loop iteration, so dynamic sources can include the current loop conversation, session history, summaries, RAG results, or other runtime context.
 
 The loop stops when the model returns a normal response or when the maximum iteration count is reached.
 
