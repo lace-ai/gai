@@ -6,7 +6,7 @@ import (
 	"sync"
 
 	"github.com/lace-ai/gai/ai"
-	aicontext "github.com/lace-ai/gai/context"
+	gaictx "github.com/lace-ai/gai/context"
 )
 
 const (
@@ -25,7 +25,7 @@ type Loop struct {
 	MaxLoopIterations int
 	MaxTokens         int
 	RetryCount        int
-	PromptBuilder     aicontext.PromptBuilder
+	PromptBuilder     gaictx.PromptBuilder
 	PreProcessToolRes ToolResPreProcessor
 }
 
@@ -45,7 +45,7 @@ func (a *Loop) Validate() error {
 	return nil
 }
 
-func New(model ai.Model, tools []Tool, promptBuilder aicontext.PromptBuilder, toolResPreProcessor ToolResPreProcessor) *Loop {
+func New(model ai.Model, tools []Tool, promptBuilder gaictx.PromptBuilder, toolResPreProcessor ToolResPreProcessor) *Loop {
 	agent := &Loop{
 		Model:             model,
 		Tools:             tools,
@@ -82,11 +82,11 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInfor
 
 		retryCount := 0
 		completedToolCalls := map[string]struct{}{}
-		var promptSession aicontext.PromptSession
+		var promptSession gaictx.PromptSession
 		var currentPrompt ai.Prompt
 		incrementalPrompt := false
 
-		if builder, ok := a.PromptBuilder.(aicontext.IncrementalPromptBuilder); ok {
+		if builder, ok := a.PromptBuilder.(gaictx.IncrementalPromptBuilder); ok {
 			session, err := builder.StartPrompt(ctx)
 			if err != nil {
 				errCh <- fmt.Errorf("%w: %w", ErrBuildPrompt, err)
@@ -235,8 +235,8 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInfor
 	return tokenCh, statusCh, errCh
 }
 
-func (a *Loop) Messages() []aicontext.Message {
-	var msgs []aicontext.Message
+func (a *Loop) Messages() []gaictx.Message {
+	var msgs []gaictx.Message
 
 	for _, i := range a.Iterations {
 		msgs = append(msgs, i.Messages()...)

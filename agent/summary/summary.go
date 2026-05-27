@@ -8,7 +8,7 @@ import (
 
 	"github.com/lace-ai/gai/agent"
 	"github.com/lace-ai/gai/ai"
-	aicontext "github.com/lace-ai/gai/context"
+	gaictx "github.com/lace-ai/gai/context"
 	"github.com/lace-ai/gai/loop"
 )
 
@@ -22,7 +22,7 @@ type Config struct {
 	MaxLoopIterations int
 	RetryCount        int
 	MaxTokens         int
-	PromptBudget      *aicontext.PromptBudget
+	PromptBudget      *gaictx.PromptBudget
 }
 
 type Option func(*Config)
@@ -63,7 +63,7 @@ func WithMaxTokens(maxTokens int) Option {
 	}
 }
 
-func WithPromptBudget(budget aicontext.PromptBudget) Option {
+func WithPromptBudget(budget gaictx.PromptBudget) Option {
 	return func(config *Config) {
 		config.PromptBudget = &budget
 	}
@@ -87,14 +87,14 @@ func Definition(model ai.Model, opts ...Option) agent.Definition {
 		MaxLoopIterations: config.MaxLoopIterations,
 		RetryCount:        config.RetryCount,
 		MaxTokens:         config.MaxTokens,
-		PromptBuilderFactory: func(input agent.RunInput) aicontext.PromptBuilder {
-			builder := aicontext.NewPromptBuilder()
+		PromptBuilderFactory: func(input agent.RunInput) gaictx.PromptBuilder {
+			builder := gaictx.NewPromptBuilder()
 			if config.PromptBudget != nil {
 				builder.Budget(*config.PromptBudget)
 			}
 			return builder.
-				System("summary-system", systemPrompt, aicontext.Required()).
-				User("summary-request", input.Text, aicontext.Required())
+				System("summary-system", systemPrompt, gaictx.Required()).
+				User("summary-request", input.Text, gaictx.Required())
 		},
 	}
 }
@@ -111,9 +111,9 @@ type Summarizer struct {
 
 type activeKey struct{}
 
-func (s Summarizer) Summarize(ctx context.Context, req aicontext.SummaryRequest) (string, error) {
+func (s Summarizer) Summarize(ctx context.Context, req gaictx.SummaryRequest) (string, error) {
 	if ctx.Value(activeKey{}) == true {
-		return "", fmt.Errorf("%w: recursive summary agent call", aicontext.ErrPromptSource)
+		return "", fmt.Errorf("%w: recursive summary agent call", gaictx.ErrPromptSource)
 	}
 	def := s.Definition
 	if def.MaxLoopIterations == 0 {
@@ -171,7 +171,7 @@ func (s Summarizer) Summarize(ctx context.Context, req aicontext.SummaryRequest)
 		return "", err
 	}
 	if len(summary) == 0 {
-		return "", fmt.Errorf("%w: summary agent produced no text", aicontext.ErrPromptSource)
+		return "", fmt.Errorf("%w: summary agent produced no text", gaictx.ErrPromptSource)
 	}
 	return string(summary), nil
 }

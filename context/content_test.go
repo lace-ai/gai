@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	aicontext "github.com/lace-ai/gai/context"
+	gaictx "github.com/lace-ai/gai/context"
 )
 
 func TestNewContentFromType(t *testing.T) {
@@ -15,33 +15,33 @@ func TestNewContentFromType(t *testing.T) {
 		name        string
 		contentType string
 		input       any
-		want        aicontext.Content
+		want        gaictx.Content
 		wantString  string
 	}{
 		{
 			name:        "Text content",
-			contentType: aicontext.ContentTypeText,
-			input:       aicontext.TextContent{Text: "hello"},
-			want:        aicontext.TextContent{Text: "hello"},
+			contentType: gaictx.ContentTypeText,
+			input:       gaictx.TextContent{Text: "hello"},
+			want:        gaictx.TextContent{Text: "hello"},
 			wantString:  "hello",
 		},
 		{
 			name:        "Tool call content",
-			contentType: aicontext.ContentTypeToolCall,
-			input:       aicontext.ToolCallContent{ToolName: "search", Args: `{"query":"docs"}`},
-			want:        aicontext.ToolCallContent{ToolName: "search", Args: `{"query":"docs"}`},
+			contentType: gaictx.ContentTypeToolCall,
+			input:       gaictx.ToolCallContent{ToolName: "search", Args: `{"query":"docs"}`},
+			want:        gaictx.ToolCallContent{ToolName: "search", Args: `{"query":"docs"}`},
 			wantString:  `search({"query":"docs"})`,
 		},
 		{
 			name:        "Tool result content",
-			contentType: aicontext.ContentTypeToolResult,
-			input: aicontext.ToolResultContent{
+			contentType: gaictx.ContentTypeToolResult,
+			input: gaictx.ToolResultContent{
 				ToolName:          "search",
 				Result:            "found",
 				Precomputed:       true,
 				PrecomputedResult: "cached",
 			},
-			want: aicontext.ToolResultContent{
+			want: gaictx.ToolResultContent{
 				ToolName:          "search",
 				Result:            "found",
 				Precomputed:       true,
@@ -51,9 +51,9 @@ func TestNewContentFromType(t *testing.T) {
 		},
 		{
 			name:        "Tool result error content",
-			contentType: aicontext.ContentTypeToolResultErr,
-			input:       aicontext.ToolResultErrContent{ToolName: "search", Err: "failed"},
-			want:        aicontext.ToolResultErrContent{ToolName: "search", Err: "failed"},
+			contentType: gaictx.ContentTypeToolResultErr,
+			input:       gaictx.ToolResultErrContent{ToolName: "search", Err: "failed"},
+			want:        gaictx.ToolResultErrContent{ToolName: "search", Err: "failed"},
 			wantString:  "search error: failed",
 		},
 	}
@@ -68,7 +68,7 @@ func TestNewContentFromType(t *testing.T) {
 				t.Fatalf("Marshal failed: %v", err)
 			}
 
-			got, err := aicontext.NewContentFromType(tt.contentType, data)
+			got, err := gaictx.NewContentFromType(tt.contentType, data)
 			if err != nil {
 				t.Fatalf("NewContentFromType failed: %v", err)
 			}
@@ -90,28 +90,28 @@ func TestContentMarshalRoundTrip(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		content aicontext.Content
-		want    aicontext.Content
+		content gaictx.Content
+		want    gaictx.Content
 	}{
 		{
 			name:    "Text content",
-			content: aicontext.TextContent{Text: "hello"},
-			want:    aicontext.TextContent{Text: "hello"},
+			content: gaictx.TextContent{Text: "hello"},
+			want:    gaictx.TextContent{Text: "hello"},
 		},
 		{
 			name:    "Tool call content",
-			content: aicontext.ToolCallContent{ToolName: "search", Args: `{"query":"docs"}`},
-			want:    aicontext.ToolCallContent{ToolName: "search", Args: `{"query":"docs"}`},
+			content: gaictx.ToolCallContent{ToolName: "search", Args: `{"query":"docs"}`},
+			want:    gaictx.ToolCallContent{ToolName: "search", Args: `{"query":"docs"}`},
 		},
 		{
 			name: "Tool result content",
-			content: aicontext.ToolResultContent{
+			content: gaictx.ToolResultContent{
 				ToolName:          "search",
 				Result:            "found",
 				Precomputed:       true,
 				PrecomputedResult: "cached",
 			},
-			want: aicontext.ToolResultContent{
+			want: gaictx.ToolResultContent{
 				ToolName:          "search",
 				Result:            "found",
 				Precomputed:       true,
@@ -120,8 +120,8 @@ func TestContentMarshalRoundTrip(t *testing.T) {
 		},
 		{
 			name:    "Tool result error content",
-			content: aicontext.ToolResultErrContent{ToolName: "search", Err: "failed"},
-			want:    aicontext.ToolResultErrContent{ToolName: "search", Err: "failed"},
+			content: gaictx.ToolResultErrContent{ToolName: "search", Err: "failed"},
+			want:    gaictx.ToolResultErrContent{ToolName: "search", Err: "failed"},
 		},
 	}
 
@@ -135,7 +135,7 @@ func TestContentMarshalRoundTrip(t *testing.T) {
 				t.Fatalf("Marshal failed: %v", err)
 			}
 
-			got, err := aicontext.NewContentFromType(tt.content.Type(), data)
+			got, err := gaictx.NewContentFromType(tt.content.Type(), data)
 			if err != nil {
 				t.Fatalf("NewContentFromType failed: %v", err)
 			}
@@ -149,7 +149,7 @@ func TestContentMarshalRoundTrip(t *testing.T) {
 func TestNewContentFromTypeRejectsInvalidJSON(t *testing.T) {
 	t.Parallel()
 
-	_, err := aicontext.NewContentFromType(aicontext.ContentTypeText, []byte(`{`))
+	_, err := gaictx.NewContentFromType(gaictx.ContentTypeText, []byte(`{`))
 	if err == nil {
 		t.Fatal("expected invalid JSON error")
 	}
@@ -158,7 +158,7 @@ func TestNewContentFromTypeRejectsInvalidJSON(t *testing.T) {
 func TestNewContentFromTypeRejectsUnknownType(t *testing.T) {
 	t.Parallel()
 
-	_, err := aicontext.NewContentFromType("unknown", []byte(`{}`))
+	_, err := gaictx.NewContentFromType("unknown", []byte(`{}`))
 	if err == nil {
 		t.Fatal("expected unknown content type error")
 	}

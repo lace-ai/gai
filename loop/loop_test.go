@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/lace-ai/gai/ai"
-	aicontext "github.com/lace-ai/gai/context"
+	gaictx "github.com/lace-ai/gai/context"
 	"github.com/lace-ai/gai/loop"
 	"github.com/lace-ai/gai/testutil/mocks"
 )
@@ -36,7 +36,7 @@ type countingPromptBuilder struct {
 	count atomic.Int32
 }
 
-func (b *countingPromptBuilder) BuildPrompt(ctx context.Context, conv aicontext.Conversation) (ai.Prompt, error) {
+func (b *countingPromptBuilder) BuildPrompt(ctx context.Context, conv gaictx.Conversation) (ai.Prompt, error) {
 	count := b.count.Add(1)
 	return ai.Prompt{Prompt: fmt.Sprintf("prompt-%d", count)}, nil
 }
@@ -93,10 +93,10 @@ func (m *scriptedStreamModel) Requests() []ai.AIRequest {
 	return requests
 }
 
-func testPromptBuilder() aicontext.PromptBuilder {
-	return aicontext.NewPromptBuilder().
-		System("system", "System prompt", aicontext.Required()).
-		User("request", "Initial prompt", aicontext.Required())
+func testPromptBuilder() gaictx.PromptBuilder {
+	return gaictx.NewPromptBuilder().
+		System("system", "System prompt", gaictx.Required()).
+		User("request", "Initial prompt", gaictx.Required())
 }
 
 func TestLoop(t *testing.T) {
@@ -391,13 +391,13 @@ func TestLoopAppendsIterationMessagesToIncrementalPrompt(t *testing.T) {
 	t.Parallel()
 
 	var buildCount atomic.Int32
-	promptBuilder := aicontext.NewPromptBuilder().
-		System("system", "System prompt", aicontext.Required()).
-		Source(aicontext.SectionContext, "dynamic-context", aicontext.SourceFunc(func(ctx context.Context, view aicontext.PromptView, budget aicontext.SourceBudget) ([]aicontext.Part, error) {
+	promptBuilder := gaictx.NewPromptBuilder().
+		System("system", "System prompt", gaictx.Required()).
+		Source(gaictx.SectionContext, "dynamic-context", gaictx.SourceFunc(func(ctx context.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
 			count := buildCount.Add(1)
-			return []aicontext.Part{aicontext.NewPart("iteration", fmt.Sprintf("build-%d", count))}, nil
-		}), aicontext.Required()).
-		User("request", "Initial prompt", aicontext.Required())
+			return []gaictx.Part{gaictx.NewPart("iteration", fmt.Sprintf("build-%d", count))}, nil
+		}), gaictx.Required()).
+		User("request", "Initial prompt", gaictx.Required())
 
 	model := &scriptedStreamModel{
 		sequences: [][]ai.Token{

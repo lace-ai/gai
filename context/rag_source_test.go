@@ -6,21 +6,21 @@ import (
 	"strings"
 	"testing"
 
-	aicontext "github.com/lace-ai/gai/context"
+	gaictx "github.com/lace-ai/gai/context"
 )
 
 func TestRAGSourceBudgetsDocumentsInsideGroup(t *testing.T) {
 	t.Parallel()
 
 	store := &fakeRAGStore{
-		docs: []aicontext.Document{
+		docs: []gaictx.Document{
 			{ID: 1, Content: "one two"},
 			{ID: 2, Content: "three four five"},
 		},
 	}
-	parts, err := aicontext.RAG(store, 2, func(ctx stdcontext.Context, view aicontext.PromptView) (string, error) {
+	parts, err := gaictx.RAG(store, 2, func(ctx stdcontext.Context, view gaictx.PromptView) (string, error) {
 		return "query", nil
-	}).BuildParts(stdcontext.Background(), testPromptView{}, aicontext.SourceBudget{
+	}).BuildParts(stdcontext.Background(), testPromptView{}, gaictx.SourceBudget{
 		Tokenizer:             whitespaceTokenizer{},
 		MaxTokens:             4,
 		RemainingPromptTokens: 4,
@@ -42,11 +42,11 @@ func TestRAGSourceBudgetsDocumentsInsideGroup(t *testing.T) {
 func TestXMLRendererRendersPartGroupAsSinglePart(t *testing.T) {
 	t.Parallel()
 
-	group := aicontext.NewPartGroup("rag", []aicontext.Part{
-		aicontext.NewPart("doc-1", "document one"),
-		aicontext.NewPart("doc-2", "document two"),
+	group := gaictx.NewPartGroup("rag", []gaictx.Part{
+		gaictx.NewPart("doc-1", "document one"),
+		gaictx.NewPart("doc-2", "document two"),
 	})
-	rendered := aicontext.XMLRenderer{}.Render(aicontext.SectionContext, []aicontext.Part{group})
+	rendered := gaictx.XMLRenderer{}.Render(gaictx.SectionContext, []gaictx.Part{group})
 	if strings.Count(rendered, "<part ") != 1 {
 		t.Fatalf("expected one outer part, got %q", rendered)
 	}
@@ -56,14 +56,14 @@ func TestXMLRendererRendersPartGroupAsSinglePart(t *testing.T) {
 func TestRAGSourceRequiresRAGStore(t *testing.T) {
 	t.Parallel()
 
-	_, err := aicontext.RAG(nil, 1, func(ctx stdcontext.Context, view aicontext.PromptView) (string, error) {
+	_, err := gaictx.RAG(nil, 1, func(ctx stdcontext.Context, view gaictx.PromptView) (string, error) {
 		return "query", nil
-	}).BuildParts(stdcontext.Background(), testPromptView{}, aicontext.SourceBudget{
+	}).BuildParts(stdcontext.Background(), testPromptView{}, gaictx.SourceBudget{
 		Tokenizer:             whitespaceTokenizer{},
 		MaxTokens:             4,
 		RemainingPromptTokens: 4,
 	})
-	if !errors.Is(err, aicontext.ErrRAGStoreNotFound) {
+	if !errors.Is(err, gaictx.ErrRAGStoreNotFound) {
 		t.Fatalf("expected ErrRAGStoreNotFound, got %v", err)
 	}
 }
@@ -72,20 +72,20 @@ func TestRAGSourceReportsMinimumDocumentTokensWhenRequiredDocsDoNotFit(t *testin
 	t.Parallel()
 
 	store := &fakeRAGStore{
-		docs: []aicontext.Document{
+		docs: []gaictx.Document{
 			{ID: 1, Content: "one two three"},
 			{ID: 2, Content: "four five"},
 		},
 	}
-	_, err := aicontext.RAG(store, 2, func(ctx stdcontext.Context, view aicontext.PromptView) (string, error) {
+	_, err := gaictx.RAG(store, 2, func(ctx stdcontext.Context, view gaictx.PromptView) (string, error) {
 		return "query", nil
-	}).BuildParts(stdcontext.Background(), testPromptView{}, aicontext.SourceBudget{
+	}).BuildParts(stdcontext.Background(), testPromptView{}, gaictx.SourceBudget{
 		Tokenizer:             whitespaceTokenizer{},
 		MaxTokens:             1,
 		RemainingPromptTokens: 1,
 		Required:              true,
 	})
-	if !errors.Is(err, aicontext.ErrPromptBudget) {
+	if !errors.Is(err, gaictx.ErrPromptBudget) {
 		t.Fatalf("expected ErrPromptBudget, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "would use 2 tokens") {
@@ -94,10 +94,10 @@ func TestRAGSourceReportsMinimumDocumentTokensWhenRequiredDocsDoNotFit(t *testin
 }
 
 type fakeRAGStore struct {
-	docs []aicontext.Document
+	docs []gaictx.Document
 }
 
-func (s *fakeRAGStore) GetRelevantDocuments(ctx stdcontext.Context, query string, limit int) ([]aicontext.Document, error) {
+func (s *fakeRAGStore) GetRelevantDocuments(ctx stdcontext.Context, query string, limit int) ([]gaictx.Document, error) {
 	if limit > 0 && limit < len(s.docs) {
 		return s.docs[:limit], nil
 	}
@@ -105,7 +105,7 @@ func (s *fakeRAGStore) GetRelevantDocuments(ctx stdcontext.Context, query string
 }
 
 func (s *fakeRAGStore) AddDocument(ctx stdcontext.Context, content string) (int, error) {
-	s.docs = append(s.docs, aicontext.Document{ID: len(s.docs) + 1, Content: content})
+	s.docs = append(s.docs, gaictx.Document{ID: len(s.docs) + 1, Content: content})
 	return len(s.docs), nil
 }
 

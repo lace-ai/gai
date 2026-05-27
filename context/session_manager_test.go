@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/lace-ai/gai/ai"
-	aicontext "github.com/lace-ai/gai/context"
+	gaictx "github.com/lace-ai/gai/context"
 	"github.com/lace-ai/gai/testutil/mocks"
 )
 
@@ -16,20 +16,20 @@ func TestHistorySourceBuildsPartsWithinTokenBudget(t *testing.T) {
 	t.Parallel()
 
 	store := &mocks.MockSessionStore{
-		Messages: []aicontext.Message{
-			sessionMessage(1, aicontext.RoleUser, "stored one"),
-			sessionMessage(2, aicontext.RoleAssistant, "stored two"),
-			sessionMessage(3, aicontext.RoleUser, "stored message that does not fit"),
+		Messages: []gaictx.Message{
+			sessionMessage(1, gaictx.RoleUser, "stored one"),
+			sessionMessage(2, gaictx.RoleAssistant, "stored two"),
+			sessionMessage(3, gaictx.RoleUser, "stored message that does not fit"),
 		},
 	}
 	tokenizer := whitespaceTokenizer{}
 	conv := fakeConversation{
-		messages: []aicontext.Message{
-			sessionMessage(0, aicontext.RoleUser, "current question"),
+		messages: []gaictx.Message{
+			sessionMessage(0, gaictx.RoleUser, "current question"),
 		},
 	}
 
-	parts, err := aicontext.History(store, 7).BuildParts(stdcontext.Background(), testPromptView{conv: conv}, historyBudget(4, tokenizer))
+	parts, err := gaictx.History(store, 7).BuildParts(stdcontext.Background(), testPromptView{conv: conv}, historyBudget(4, tokenizer))
 	if err != nil {
 		t.Fatalf("BuildParts failed: %v", err)
 	}
@@ -61,18 +61,18 @@ func TestHistorySourceUsesStoredMessageTokenCounts(t *testing.T) {
 
 	tokenizer := &mocks.MockTokenizer{}
 	store := &mocks.MockSessionStore{
-		Messages: []aicontext.Message{
-			sessionMessageWithTokens(1, aicontext.RoleUser, "stored one", tokenizer.ID(), 2),
-			sessionMessageWithTokens(2, aicontext.RoleAssistant, "stored two three", tokenizer.ID(), 3),
+		Messages: []gaictx.Message{
+			sessionMessageWithTokens(1, gaictx.RoleUser, "stored one", tokenizer.ID(), 2),
+			sessionMessageWithTokens(2, gaictx.RoleAssistant, "stored two three", tokenizer.ID(), 3),
 		},
 	}
 	conv := fakeConversation{
-		messages: []aicontext.Message{
-			sessionMessageWithTokens(0, aicontext.RoleUser, "current question", tokenizer.ID(), 2),
+		messages: []gaictx.Message{
+			sessionMessageWithTokens(0, gaictx.RoleUser, "current question", tokenizer.ID(), 2),
 		},
 	}
 
-	parts, err := aicontext.History(store, 7).BuildParts(stdcontext.Background(), testPromptView{conv: conv}, historyBudget(10, tokenizer))
+	parts, err := gaictx.History(store, 7).BuildParts(stdcontext.Background(), testPromptView{conv: conv}, historyBudget(10, tokenizer))
 	if err != nil {
 		t.Fatalf("BuildParts failed: %v", err)
 	}
@@ -98,17 +98,17 @@ func TestHistorySourceIgnoresCurrentLoopBudget(t *testing.T) {
 	t.Parallel()
 
 	store := &mocks.MockSessionStore{
-		Messages: []aicontext.Message{
-			sessionMessage(1, aicontext.RoleUser, "stored one"),
+		Messages: []gaictx.Message{
+			sessionMessage(1, gaictx.RoleUser, "stored one"),
 		},
 	}
 	conv := fakeConversation{
-		messages: []aicontext.Message{
-			sessionMessage(0, aicontext.RoleUser, "current message already fills budget"),
+		messages: []gaictx.Message{
+			sessionMessage(0, gaictx.RoleUser, "current message already fills budget"),
 		},
 	}
 
-	parts, err := aicontext.History(store, 7).BuildParts(stdcontext.Background(), testPromptView{conv: conv}, historyBudget(6, whitespaceTokenizer{}))
+	parts, err := gaictx.History(store, 7).BuildParts(stdcontext.Background(), testPromptView{conv: conv}, historyBudget(6, whitespaceTokenizer{}))
 	if err != nil {
 		t.Fatalf("BuildParts failed: %v", err)
 	}
@@ -122,17 +122,17 @@ func TestHistorySourceUsesEntryRequiredness(t *testing.T) {
 	t.Parallel()
 
 	store := &mocks.MockSessionStore{
-		Messages: []aicontext.Message{
-			sessionMessage(1, aicontext.RoleUser, "stored one"),
+		Messages: []gaictx.Message{
+			sessionMessage(1, gaictx.RoleUser, "stored one"),
 		},
 	}
 	conv := fakeConversation{
-		messages: []aicontext.Message{
-			sessionMessage(0, aicontext.RoleUser, "current question"),
+		messages: []gaictx.Message{
+			sessionMessage(0, gaictx.RoleUser, "current question"),
 		},
 	}
 
-	parts, err := aicontext.History(store, 7).BuildParts(stdcontext.Background(), testPromptView{conv: conv}, aicontext.SourceBudget{
+	parts, err := gaictx.History(store, 7).BuildParts(stdcontext.Background(), testPromptView{conv: conv}, gaictx.SourceBudget{
 		Tokenizer:             whitespaceTokenizer{},
 		MaxTokens:             20,
 		RemainingPromptTokens: 20,
@@ -155,12 +155,12 @@ func TestHistorySourceSkipsEmptyCurrentLoop(t *testing.T) {
 	t.Parallel()
 
 	store := &mocks.MockSessionStore{
-		Messages: []aicontext.Message{
-			sessionMessage(1, aicontext.RoleUser, "stored one"),
+		Messages: []gaictx.Message{
+			sessionMessage(1, gaictx.RoleUser, "stored one"),
 		},
 	}
 
-	parts, err := aicontext.History(store, 7).BuildParts(stdcontext.Background(), testPromptView{conv: fakeConversation{}}, historyBudget(100, rejectingEmptyTokenizer{}))
+	parts, err := gaictx.History(store, 7).BuildParts(stdcontext.Background(), testPromptView{conv: fakeConversation{}}, historyBudget(100, rejectingEmptyTokenizer{}))
 	if err != nil {
 		t.Fatalf("BuildParts failed: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestHistorySourcePropagatesStoreErrors(t *testing.T) {
 	wantErr := errors.New("read failed")
 	store := &mocks.MockSessionStore{Err: wantErr}
 
-	_, err := aicontext.History(store, 7).BuildParts(stdcontext.Background(), testPromptView{conv: fakeConversation{}}, historyBudget(100, whitespaceTokenizer{}))
+	_, err := gaictx.History(store, 7).BuildParts(stdcontext.Background(), testPromptView{conv: fakeConversation{}}, historyBudget(100, whitespaceTokenizer{}))
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("expected store error %v, got %v", wantErr, err)
 	}
@@ -190,12 +190,12 @@ func TestHistorySourcePropagatesTokenizerErrors(t *testing.T) {
 
 	wantErr := errors.New("count failed")
 	store := &mocks.MockSessionStore{
-		Messages: []aicontext.Message{
-			sessionMessage(1, aicontext.RoleUser, "stored one"),
+		Messages: []gaictx.Message{
+			sessionMessage(1, gaictx.RoleUser, "stored one"),
 		},
 	}
 
-	_, err := aicontext.History(store, 7).BuildParts(stdcontext.Background(), testPromptView{conv: fakeConversation{}}, historyBudget(100, whitespaceTokenizer{err: wantErr}))
+	_, err := gaictx.History(store, 7).BuildParts(stdcontext.Background(), testPromptView{conv: fakeConversation{}}, historyBudget(100, whitespaceTokenizer{err: wantErr}))
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("expected tokenizer error %v, got %v", wantErr, err)
 	}
@@ -204,8 +204,8 @@ func TestHistorySourcePropagatesTokenizerErrors(t *testing.T) {
 func TestHistorySourceRequiresStore(t *testing.T) {
 	t.Parallel()
 
-	_, err := aicontext.History(nil, 7).BuildParts(stdcontext.Background(), testPromptView{conv: fakeConversation{}}, historyBudget(100, whitespaceTokenizer{}))
-	if !errors.Is(err, aicontext.ErrSessionStoreNotFound) {
+	_, err := gaictx.History(nil, 7).BuildParts(stdcontext.Background(), testPromptView{conv: fakeConversation{}}, historyBudget(100, whitespaceTokenizer{}))
+	if !errors.Is(err, gaictx.ErrSessionStoreNotFound) {
 		t.Fatalf("expected ErrSessionStoreNotFound, got %v", err)
 	}
 }
@@ -215,8 +215,8 @@ func TestHistorySourceRequiresTokenizer(t *testing.T) {
 
 	store := &mocks.MockSessionStore{}
 
-	_, err := aicontext.History(store, 7).BuildParts(stdcontext.Background(), testPromptView{conv: fakeConversation{}}, historyBudget(100, nil))
-	if !errors.Is(err, aicontext.ErrTokenizerNotFound) {
+	_, err := gaictx.History(store, 7).BuildParts(stdcontext.Background(), testPromptView{conv: fakeConversation{}}, historyBudget(100, nil))
+	if !errors.Is(err, gaictx.ErrTokenizerNotFound) {
 		t.Fatalf("expected ErrTokenizerNotFound, got %v", err)
 	}
 }
@@ -261,8 +261,8 @@ func (t whitespaceTokenizer) CountTokens(ctx stdcontext.Context, text string) (i
 	return len(tokens), nil
 }
 
-func historyBudget(maxTokens int, tokenizer ai.Tokenizer) aicontext.SourceBudget {
-	return aicontext.SourceBudget{
+func historyBudget(maxTokens int, tokenizer ai.Tokenizer) gaictx.SourceBudget {
+	return gaictx.SourceBudget{
 		Tokenizer:             tokenizer,
 		MaxTokens:             maxTokens,
 		RemainingPromptTokens: maxTokens,
@@ -271,50 +271,50 @@ func historyBudget(maxTokens int, tokenizer ai.Tokenizer) aicontext.SourceBudget
 }
 
 type fakeConversation struct {
-	messages []aicontext.Message
+	messages []gaictx.Message
 }
 
-func (c fakeConversation) Messages() []aicontext.Message {
+func (c fakeConversation) Messages() []gaictx.Message {
 	return c.messages
 }
 
 type testPromptView struct {
-	conv aicontext.Conversation
+	conv gaictx.Conversation
 }
 
-func (v testPromptView) Conversation() aicontext.Conversation {
+func (v testPromptView) Conversation() gaictx.Conversation {
 	return v.conv
 }
 
-func (v testPromptView) Entries() []aicontext.EntryView {
+func (v testPromptView) Entries() []gaictx.EntryView {
 	return nil
 }
 
-func (v testPromptView) SectionEntries(section aicontext.Section) []aicontext.EntryView {
+func (v testPromptView) SectionEntries(section gaictx.Section) []gaictx.EntryView {
 	return nil
 }
 
-func (v testPromptView) Entry(id string) (aicontext.EntryView, bool) {
-	return aicontext.EntryView{}, false
+func (v testPromptView) Entry(id string) (gaictx.EntryView, bool) {
+	return gaictx.EntryView{}, false
 }
 
-func sessionMessage(id int, role aicontext.Role, text string) aicontext.Message {
-	return aicontext.Message{
+func sessionMessage(id int, role gaictx.Role, text string) gaictx.Message {
+	return gaictx.Message{
 		ID:        id,
 		SessionID: 7,
 		CreatedAt: time.Now(),
 		Role:      role,
-		Content:   aicontext.NewTextContent(text),
+		Content:   gaictx.NewTextContent(text),
 	}
 }
 
-func sessionMessageWithTokens(id int, role aicontext.Role, text, tokenizerID string, tokens int) aicontext.Message {
+func sessionMessageWithTokens(id int, role gaictx.Role, text, tokenizerID string, tokens int) gaictx.Message {
 	message := sessionMessage(id, role, text)
 	message.TokenCount = map[string]int{tokenizerID: tokens}
 	return message
 }
 
-func joinPartText(parts []aicontext.Part) string {
+func joinPartText(parts []gaictx.Part) string {
 	var builder strings.Builder
 	for _, part := range parts {
 		builder.WriteString(part.Text)

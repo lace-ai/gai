@@ -188,20 +188,20 @@ To build an agent with tools, use the `loop` package:
 > Use an alias for the `context` package to avoid conflicts with `context` package from the standard library. For example:
 >
 > ```go
-> import aicontext "github.com/lace-ai/gai/context"
+> import gaictx "github.com/lace-ai/gai/context"
 > ```
 
 ```go
-prompt := aicontext.NewPromptBuilder().
+prompt := gaictx.NewPromptBuilder().
     System(
         "base-system",
         "You are a helpful assistant that can call tools to get information.",
-        aicontext.Required(),
+        gaictx.Required(),
     ).
     User(
         "request",
         "What is the weather in New York?",
-        aicontext.Required(),
+        gaictx.Required(),
     )
 
 l := loop.New(
@@ -223,7 +223,7 @@ for err := range errCh {
 messages := l.Messages() // get final conversation messages, including tool calls and responses
 
 var builder strings.Builder
-aicontext.RenderMessages(messages, &builder)
+gaictx.RenderMessages(messages, &builder)
 fmt.Println(builder.String()) // render the messages for display
 ```
 
@@ -276,8 +276,8 @@ To manage conversation history and build prompts from it, use the `context` pack
 ```go
 store := mySessionStore // your implementation of SessionStore (e.g. in-memory, database, etc.)
 sessionID := 1
-prompt := aicontext.NewPromptBuilder().
-    Budget(aicontext.PromptBudget{
+prompt := gaictx.NewPromptBuilder().
+    Budget(gaictx.PromptBudget{
         Tokenizer:            model.Tokenizer(),
         ContextWindowTokens:  128000,
         ReservedOutputTokens: 4096,
@@ -285,13 +285,13 @@ prompt := aicontext.NewPromptBuilder().
     System(
         "base-system",
         "You are a helpful assistant that can call tools to get information.",
-        aicontext.Required(),
+        gaictx.Required(),
     ).
-    Source(aicontext.SectionContext, "history", aicontext.History(store, sessionID), aicontext.Required(), aicontext.SourceTokenCap(10000)).
+    Source(gaictx.SectionContext, "history", gaictx.History(store, sessionID), gaictx.Required(), gaictx.SourceTokenCap(10000)).
     User(
         "request",
         "What is the weather in New York?",
-        aicontext.Required(),
+        gaictx.Required(),
     )
 
 l := loop.New(
@@ -463,10 +463,10 @@ Known model names:
 ## 💾 Context and Sessions
 
 The `context` package is not the standard library `context` package.
-Import it with an alias such as `aicontext` to avoid name collisions.
+Import it with an alias such as `gaictx` to avoid name collisions.
 
 ```go
-import aicontext "github.com/lace-ai/gai/context"
+import gaictx "github.com/lace-ai/gai/context"
 ```
 
 <details>
@@ -556,16 +556,16 @@ Token counts are keyed by `Tokenizer.ID()` and represent the message content, no
 `PromptBuilder` composes the full `ai.Prompt` from structured parts:
 
 ```go
-prompt := aicontext.NewPromptBuilder().
-    Budget(aicontext.PromptBudget{
+prompt := gaictx.NewPromptBuilder().
+    Budget(gaictx.PromptBudget{
         Tokenizer:            model.Tokenizer(),
         ContextWindowTokens:  128000,
         ReservedOutputTokens: 4096,
     }).
-    System("base-system", "Follow the system policy.", aicontext.Required()).
-    Source(aicontext.SectionContext, "history", aicontext.History(store, sessionID), aicontext.Required(), aicontext.SourceTokenCap(1000)).
-    Source(aicontext.SectionContext, "rag", ragSource, aicontext.Optional(), aicontext.SourceTokenCap(2000)).
-    User("request", "Summarize the project status.", aicontext.Required())
+    System("base-system", "Follow the system policy.", gaictx.Required()).
+    Source(gaictx.SectionContext, "history", gaictx.History(store, sessionID), gaictx.Required(), gaictx.SourceTokenCap(1000)).
+    Source(gaictx.SectionContext, "rag", ragSource, gaictx.Optional(), gaictx.SourceTokenCap(2000)).
+    User("request", "Summarize the project status.", gaictx.Required())
 ```
 
 Entries use stable IDs and are rendered in fixed section order (`system`, `context`, `user`). Inside each section, required entries render before optional entries; configured order is preserved within the required group and within the optional group. This lets required sources receive budget before optional context can consume it.

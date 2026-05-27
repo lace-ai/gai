@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/lace-ai/gai/agent"
-	aicontext "github.com/lace-ai/gai/context"
+	gaictx "github.com/lace-ai/gai/context"
 	"github.com/lace-ai/gai/testutil/mocks"
 )
 
@@ -14,10 +14,10 @@ func TestNewLoopCreatesReusableAgentLoop(t *testing.T) {
 	model := &mocks.MockModel{}
 	l, err := agent.NewLoop(agent.Definition{
 		Model: model,
-		PromptBuilderFactory: func(input agent.RunInput) aicontext.PromptBuilder {
-			return aicontext.NewPromptBuilder().
-				System("system", "system", aicontext.Required()).
-				User("request", input.Text, aicontext.Required())
+		PromptBuilderFactory: func(input agent.RunInput) gaictx.PromptBuilder {
+			return gaictx.NewPromptBuilder().
+				System("system", "system", gaictx.Required()).
+				User("request", input.Text, gaictx.Required())
 		},
 		MaxLoopIterations: 2,
 		RetryCount:        1,

@@ -2,7 +2,7 @@ package agent
 
 import (
 	"github.com/lace-ai/gai/ai"
-	aicontext "github.com/lace-ai/gai/context"
+	gaictx "github.com/lace-ai/gai/context"
 	"github.com/lace-ai/gai/loop"
 )
 
@@ -13,7 +13,7 @@ type RunInput struct {
 	Meta      map[string]any
 }
 
-type PromptBuilderFactory func(input RunInput) aicontext.PromptBuilder
+type PromptBuilderFactory func(input RunInput) gaictx.PromptBuilder
 
 type Definition struct {
 	Model                ai.Model
