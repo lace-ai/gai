@@ -83,8 +83,8 @@ func (s *HistorySource) countRenderedMessages(ctx context.Context, store Session
 			return 0, err
 		}
 		go func(message Message, tokens int) {
-			detashedCtx := context.WithoutCancel(ctx)
-			innerCtx, cancel := context.WithTimeout(detashedCtx, 5*time.Second)
+			detachedCtx := context.WithoutCancel(ctx)
+			innerCtx, cancel := context.WithTimeout(detachedCtx, 5*time.Second)
 			defer cancel()
 			err := store.UpdateMessageTokens(innerCtx, message.ID, tokenizer.ID(), tokens)
 			if err != nil {

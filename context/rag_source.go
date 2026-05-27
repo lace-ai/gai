@@ -84,8 +84,8 @@ func (s *RAGSource) BuildParts(ctx context.Context, view PromptView, budget Sour
 			}
 
 			go func(docID, tokens int) {
-				detashedCtx := context.WithoutCancel(ctx)
-				innerCtx, cancel := context.WithTimeout(detashedCtx, 5*time.Second)
+				detachedCtx := context.WithoutCancel(ctx)
+				innerCtx, cancel := context.WithTimeout(detachedCtx, 5*time.Second)
 				defer cancel()
 				err := s.store.UpdateDocumentTokens(innerCtx, docID, budget.Tokenizer.ID(), tokens)
 				if err != nil {
