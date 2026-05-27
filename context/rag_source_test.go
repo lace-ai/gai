@@ -1,7 +1,7 @@
 package context_test
 
 import (
-	stdcontext "context"
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -18,9 +18,9 @@ func TestRAGSourceBudgetsDocumentsInsideGroup(t *testing.T) {
 			{ID: 2, Content: "three four five"},
 		},
 	}
-	parts, err := gaictx.RAG(store, 2, func(ctx stdcontext.Context, view gaictx.PromptView) (string, error) {
+	parts, err := gaictx.RAG(store, 2, func(ctx context.Context, view gaictx.PromptView) (string, error) {
 		return "query", nil
-	}).BuildParts(stdcontext.Background(), testPromptView{}, gaictx.SourceBudget{
+	}).BuildParts(context.Background(), testPromptView{}, gaictx.SourceBudget{
 		Tokenizer:             whitespaceTokenizer{},
 		MaxTokens:             4,
 		RemainingPromptTokens: 4,
@@ -56,9 +56,9 @@ func TestXMLRendererRendersPartGroupAsSinglePart(t *testing.T) {
 func TestRAGSourceRequiresRAGStore(t *testing.T) {
 	t.Parallel()
 
-	_, err := gaictx.RAG(nil, 1, func(ctx stdcontext.Context, view gaictx.PromptView) (string, error) {
+	_, err := gaictx.RAG(nil, 1, func(ctx context.Context, view gaictx.PromptView) (string, error) {
 		return "query", nil
-	}).BuildParts(stdcontext.Background(), testPromptView{}, gaictx.SourceBudget{
+	}).BuildParts(context.Background(), testPromptView{}, gaictx.SourceBudget{
 		Tokenizer:             whitespaceTokenizer{},
 		MaxTokens:             4,
 		RemainingPromptTokens: 4,
@@ -77,9 +77,9 @@ func TestRAGSourceReportsMinimumDocumentTokensWhenRequiredDocsDoNotFit(t *testin
 			{ID: 2, Content: "four five"},
 		},
 	}
-	_, err := gaictx.RAG(store, 2, func(ctx stdcontext.Context, view gaictx.PromptView) (string, error) {
+	_, err := gaictx.RAG(store, 2, func(ctx context.Context, view gaictx.PromptView) (string, error) {
 		return "query", nil
-	}).BuildParts(stdcontext.Background(), testPromptView{}, gaictx.SourceBudget{
+	}).BuildParts(context.Background(), testPromptView{}, gaictx.SourceBudget{
 		Tokenizer:             whitespaceTokenizer{},
 		MaxTokens:             1,
 		RemainingPromptTokens: 1,
@@ -97,18 +97,18 @@ type fakeRAGStore struct {
 	docs []gaictx.Document
 }
 
-func (s *fakeRAGStore) GetRelevantDocuments(ctx stdcontext.Context, query string, limit int) ([]gaictx.Document, error) {
+func (s *fakeRAGStore) GetRelevantDocuments(ctx context.Context, query string, limit int) ([]gaictx.Document, error) {
 	if limit > 0 && limit < len(s.docs) {
 		return s.docs[:limit], nil
 	}
 	return s.docs, nil
 }
 
-func (s *fakeRAGStore) AddDocument(ctx stdcontext.Context, content string) (int, error) {
+func (s *fakeRAGStore) AddDocument(ctx context.Context, content string) (int, error) {
 	s.docs = append(s.docs, gaictx.Document{ID: len(s.docs) + 1, Content: content})
 	return len(s.docs), nil
 }
 
-func (s *fakeRAGStore) UpdateDocumentTokens(ctx stdcontext.Context, documentID int, tokenizer string, tokens int) error {
+func (s *fakeRAGStore) UpdateDocumentTokens(ctx context.Context, documentID int, tokenizer string, tokens int) error {
 	return nil
 }

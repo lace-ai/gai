@@ -1,7 +1,7 @@
 package context_test
 
 import (
-	stdcontext "context"
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -24,7 +24,7 @@ func TestPromptBuilderBuildsStructuredPrompt(t *testing.T) {
 	builder := gaictx.NewPromptBuilder().
 		System("base", "base system", gaictx.Required(), gaictx.Tokens(12)).
 		System("dynamic", "dynamic system", gaictx.Tokens(4)).
-		Source(gaictx.SectionContext, "memory", gaictx.SourceFunc(func(ctx stdcontext.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
+		Source(gaictx.SectionContext, "memory", gaictx.SourceFunc(func(ctx context.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
 			sourceCalled = true
 			if _, ok := view.Entry("base"); !ok {
 				t.Fatal("expected source view to expose full configured plan")
@@ -36,7 +36,7 @@ func TestPromptBuilderBuildsStructuredPrompt(t *testing.T) {
 		}), gaictx.Required()).
 		User("request", "answer this", gaictx.Required())
 
-	prompt, err := builder.BuildPrompt(stdcontext.Background(), emptyConversation{})
+	prompt, err := builder.BuildPrompt(context.Background(), emptyConversation{})
 	if err != nil {
 		t.Fatalf("BuildPrompt failed: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestPromptBuilderEscapesPartIDs(t *testing.T) {
 
 	prompt, err := gaictx.NewPromptBuilder().
 		User(`request "<tag>"`, "answer this").
-		BuildPrompt(stdcontext.Background(), emptyConversation{})
+		BuildPrompt(context.Background(), emptyConversation{})
 	if err != nil {
 		t.Fatalf("BuildPrompt failed: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestPromptBuilderRejectsDuplicateIDs(t *testing.T) {
 	_, err := gaictx.NewPromptBuilder().
 		System("same", "system").
 		User("same", "user").
-		BuildPrompt(stdcontext.Background(), emptyConversation{})
+		BuildPrompt(context.Background(), emptyConversation{})
 	if err == nil {
 		t.Fatal("expected duplicate ID error")
 	}
@@ -99,10 +99,10 @@ func TestPromptBuilderRejectsDuplicateEmittedPartIDs(t *testing.T) {
 
 	_, err := gaictx.NewPromptBuilder().
 		System("base", "system").
-		Source(gaictx.SectionContext, "dup-source", gaictx.SourceFunc(func(ctx stdcontext.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
+		Source(gaictx.SectionContext, "dup-source", gaictx.SourceFunc(func(ctx context.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
 			return []gaictx.Part{gaictx.NewPart("base", "duplicate")}, nil
 		}), gaictx.Required()).
-		BuildPrompt(stdcontext.Background(), emptyConversation{})
+		BuildPrompt(context.Background(), emptyConversation{})
 	if err == nil {
 		t.Fatal("expected duplicate emitted part ID error")
 	}
@@ -115,7 +115,7 @@ func TestPromptBuilderSourceFailurePolicy(t *testing.T) {
 	t.Parallel()
 
 	sourceErr := errors.New("source unavailable")
-	failingSource := gaictx.SourceFunc(func(ctx stdcontext.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
+	failingSource := gaictx.SourceFunc(func(ctx context.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
 		return nil, sourceErr
 	})
 
@@ -124,7 +124,7 @@ func TestPromptBuilderSourceFailurePolicy(t *testing.T) {
 		Source(gaictx.SectionContext, "optional-rag", failingSource, gaictx.Optional()).
 		User("request", "answer this", gaictx.Required())
 
-	prompt, err := builder.BuildPrompt(stdcontext.Background(), emptyConversation{})
+	prompt, err := builder.BuildPrompt(context.Background(), emptyConversation{})
 	if err != nil {
 		t.Fatalf("optional source should be skipped, got error: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestPromptBuilderSourceFailurePolicy(t *testing.T) {
 	_, err = gaictx.NewPromptBuilder().
 		Source(gaictx.SectionContext, "required-rag", failingSource, gaictx.Required()).
 		User("request", "answer this", gaictx.Required()).
-		BuildPrompt(stdcontext.Background(), emptyConversation{})
+		BuildPrompt(context.Background(), emptyConversation{})
 	if err == nil {
 		t.Fatal("expected required source error")
 	}
@@ -155,7 +155,7 @@ func TestPromptBuilderSourceCanInspectWholePlan(t *testing.T) {
 
 	prompt, err := gaictx.NewPromptBuilder().
 		System("base", "base system", gaictx.Required(), gaictx.Meta("role", "base")).
-		Source(gaictx.SectionContext, "conditional", gaictx.SourceFunc(func(ctx stdcontext.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
+		Source(gaictx.SectionContext, "conditional", gaictx.SourceFunc(func(ctx context.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
 			entry, ok := view.Entry("base")
 			if !ok || entry.Meta["role"] != "base" {
 				return nil, nil
@@ -166,7 +166,7 @@ func TestPromptBuilderSourceCanInspectWholePlan(t *testing.T) {
 			return []gaictx.Part{gaictx.NewPart("conditional-context", "visible from source")}, nil
 		})).
 		User("request", "answer this").
-		BuildPrompt(stdcontext.Background(), emptyConversation{})
+		BuildPrompt(context.Background(), emptyConversation{})
 	if err != nil {
 		t.Fatalf("BuildPrompt failed: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestPromptBuilderUsesCustomRenderer(t *testing.T) {
 		System("base", "system").
 		Context("ctx", "context").
 		User("request", "user").
-		BuildPrompt(stdcontext.Background(), emptyConversation{})
+		BuildPrompt(context.Background(), emptyConversation{})
 	if err != nil {
 		t.Fatalf("BuildPrompt failed: %v", err)
 	}
@@ -198,7 +198,7 @@ func TestPromptBuilderEmitsDebugEvents(t *testing.T) {
 	t.Parallel()
 
 	var events []gai.DebugEvent
-	debug := gai.DebugSinkFunc(func(ctx stdcontext.Context, event gai.DebugEvent) {
+	debug := gai.DebugSinkFunc(func(ctx context.Context, event gai.DebugEvent) {
 		events = append(events, event)
 	})
 
@@ -206,7 +206,7 @@ func TestPromptBuilderEmitsDebugEvents(t *testing.T) {
 		Debug(debug).
 		System("base", "system").
 		User("request", "user").
-		BuildPrompt(stdcontext.Background(), emptyConversation{})
+		BuildPrompt(context.Background(), emptyConversation{})
 	if err != nil {
 		t.Fatalf("BuildPrompt failed: %v", err)
 	}
@@ -233,12 +233,12 @@ func TestPromptBuilderDropsOptionalSourceOverBudget(t *testing.T) {
 			ContextWindowTokens: 6,
 		}).
 		System("system", "system", gaictx.Required()).
-		Source(gaictx.SectionContext, "optional", gaictx.SourceFunc(func(ctx stdcontext.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
+		Source(gaictx.SectionContext, "optional", gaictx.SourceFunc(func(ctx context.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
 			return []gaictx.Part{gaictx.NewPart("optional-part", "optional content that does not fit", gaictx.Tokens(5))}, nil
 		}), gaictx.Optional()).
 		User("request", "question", gaictx.Required())
 
-	prompt, err := builder.BuildPrompt(stdcontext.Background(), emptyConversation{})
+	prompt, err := builder.BuildPrompt(context.Background(), emptyConversation{})
 	if err != nil {
 		t.Fatalf("BuildPrompt failed: %v", err)
 	}
@@ -260,7 +260,7 @@ func TestPromptBuilderCountsSourcePartsWithoutExplicitTokens(t *testing.T) {
 			ContextWindowTokens: 4,
 		}).
 		System("system", "system", gaictx.Required()).
-		Source(gaictx.SectionContext, "optional", gaictx.SourceFunc(func(ctx stdcontext.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
+		Source(gaictx.SectionContext, "optional", gaictx.SourceFunc(func(ctx context.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
 			return []gaictx.Part{
 				gaictx.NewPartGroup("group", []gaictx.Part{
 					gaictx.NewPart("child", "source child exceeds budget"),
@@ -269,7 +269,7 @@ func TestPromptBuilderCountsSourcePartsWithoutExplicitTokens(t *testing.T) {
 		}), gaictx.Optional()).
 		User("request", "question", gaictx.Required())
 
-	prompt, err := builder.BuildPrompt(stdcontext.Background(), emptyConversation{})
+	prompt, err := builder.BuildPrompt(context.Background(), emptyConversation{})
 	if err != nil {
 		t.Fatalf("BuildPrompt failed: %v", err)
 	}
@@ -295,7 +295,7 @@ func TestPromptBuilderFailsRequiredOverBudget(t *testing.T) {
 		}).
 		System("system", "system prompt", gaictx.Required()).
 		User("request", "question", gaictx.Required()).
-		BuildPrompt(stdcontext.Background(), emptyConversation{})
+		BuildPrompt(context.Background(), emptyConversation{})
 	if !errors.Is(err, gaictx.ErrPromptBudget) {
 		t.Fatalf("expected ErrPromptBudget, got %v", err)
 	}
@@ -314,7 +314,7 @@ func TestPromptBuilderTraceSplitsEntryAndPromptTokens(t *testing.T) {
 		}).
 		System("system", "system", gaictx.Required()).
 		User("request", "question", gaictx.Required())
-	_, err := builder.BuildPrompt(stdcontext.Background(), emptyConversation{})
+	_, err := builder.BuildPrompt(context.Background(), emptyConversation{})
 	if err != nil {
 		t.Fatalf("BuildPrompt failed: %v", err)
 	}
@@ -338,7 +338,7 @@ func TestPromptBuilderPassesSourceCap(t *testing.T) {
 			Tokenizer:           &mocks.MockTokenizer{},
 			ContextWindowTokens: 50,
 		}).
-		Source(gaictx.SectionContext, "capped", gaictx.SourceFunc(func(ctx stdcontext.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
+		Source(gaictx.SectionContext, "capped", gaictx.SourceFunc(func(ctx context.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
 			sourceCalled = true
 			if budget.MaxTokens != 3 {
 				t.Fatalf("expected source cap of 3, got %d", budget.MaxTokens)
@@ -346,7 +346,7 @@ func TestPromptBuilderPassesSourceCap(t *testing.T) {
 			return []gaictx.Part{gaictx.NewPart("small", "small")}, nil
 		}), gaictx.SourceTokenCap(3)).
 		User("request", "question", gaictx.Required()).
-		BuildPrompt(stdcontext.Background(), emptyConversation{})
+		BuildPrompt(context.Background(), emptyConversation{})
 	if err != nil {
 		t.Fatalf("BuildPrompt failed: %v", err)
 	}
@@ -365,14 +365,14 @@ func TestPromptBuilderReusesTokenCountForSourceBudget(t *testing.T) {
 			ContextWindowTokens: 100,
 		}).
 		System("system", "system", gaictx.Required()).
-		Source(gaictx.SectionContext, "source", gaictx.SourceFunc(func(ctx stdcontext.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
+		Source(gaictx.SectionContext, "source", gaictx.SourceFunc(func(ctx context.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
 			if tokenizer.CountCalls != 1 {
 				t.Fatalf("source budget should reuse counted part tokens, got %d token counts before source", tokenizer.CountCalls)
 			}
 			return []gaictx.Part{gaictx.NewPart("source-part", "source", gaictx.Required(), gaictx.Tokens(1))}, nil
 		}), gaictx.Required()).
 		User("request", "question", gaictx.Required()).
-		BuildPrompt(stdcontext.Background(), emptyConversation{})
+		BuildPrompt(context.Background(), emptyConversation{})
 	if err != nil {
 		t.Fatalf("BuildPrompt failed: %v", err)
 	}
@@ -387,11 +387,11 @@ func TestPromptBuilderDropsEarlierOptionalContextForLaterUserPrompt(t *testing.T
 			ContextWindowTokens: 2,
 		}).
 		System("system", "system", gaictx.Required()).
-		Source(gaictx.SectionContext, "optional", gaictx.SourceFunc(func(ctx stdcontext.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
+		Source(gaictx.SectionContext, "optional", gaictx.SourceFunc(func(ctx context.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
 			return []gaictx.Part{gaictx.NewPart("optional-part", "optional", gaictx.Tokens(1))}, nil
 		}), gaictx.Optional()).
 		User("request", "question", gaictx.Required())
-	prompt, err := builder.BuildPrompt(stdcontext.Background(), emptyConversation{})
+	prompt, err := builder.BuildPrompt(context.Background(), emptyConversation{})
 	if err != nil {
 		t.Fatalf("BuildPrompt failed: %v", err)
 	}
@@ -416,10 +416,10 @@ func TestPromptBuilderBudgetsRequiredSourceBeforeEarlierOptionalContext(t *testi
 			ContextWindowTokens: 8,
 		}).
 		System("system", "system", gaictx.Required()).
-		Source(gaictx.SectionContext, "optional", gaictx.SourceFunc(func(ctx stdcontext.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
+		Source(gaictx.SectionContext, "optional", gaictx.SourceFunc(func(ctx context.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
 			return []gaictx.Part{gaictx.NewPart("optional-part", "optional content with many extra words", gaictx.Tokens(6))}, nil
 		}), gaictx.Optional()).
-		Source(gaictx.SectionContext, "required", gaictx.SourceFunc(func(ctx stdcontext.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
+		Source(gaictx.SectionContext, "required", gaictx.SourceFunc(func(ctx context.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
 			requiredSourceCalled = true
 			if budget.MaxTokens == 0 {
 				t.Fatal("required source should receive budget before optional context consumes it")
@@ -428,7 +428,7 @@ func TestPromptBuilderBudgetsRequiredSourceBeforeEarlierOptionalContext(t *testi
 		}), gaictx.Required()).
 		User("request", "question", gaictx.Required())
 
-	prompt, err := builder.BuildPrompt(stdcontext.Background(), emptyConversation{})
+	prompt, err := builder.BuildPrompt(context.Background(), emptyConversation{})
 	if err != nil {
 		t.Fatalf("BuildPrompt failed: %v", err)
 	}
@@ -450,7 +450,7 @@ func TestPromptBuilderRendersRequiredPartsBeforeOptionalParts(t *testing.T) {
 		Context("optional", "optional").
 		Context("required", "required", gaictx.Required()).
 		User("request", "question", gaictx.Required()).
-		BuildPrompt(stdcontext.Background(), emptyConversation{})
+		BuildPrompt(context.Background(), emptyConversation{})
 	if err != nil {
 		t.Fatalf("BuildPrompt failed: %v", err)
 	}
@@ -468,7 +468,7 @@ func TestPromptBuilderDropsOptionalStaticSystemPartOverBudget(t *testing.T) {
 		System("optional-system", "optional system prompt with too many words", gaictx.Optional()).
 		User("request", "question", gaictx.Required())
 
-	prompt, err := builder.BuildPrompt(stdcontext.Background(), emptyConversation{})
+	prompt, err := builder.BuildPrompt(context.Background(), emptyConversation{})
 	if err != nil {
 		t.Fatalf("BuildPrompt failed: %v", err)
 	}
@@ -497,7 +497,7 @@ func TestPromptBuilderSummarizesOptionalStaticUserPartBeforeDropping(t *testing.
 		User("request", "question", gaictx.Required()).
 		User("optional-user", "optional user prompt with too many words", gaictx.Optional())
 
-	prompt, err := builder.BuildPrompt(stdcontext.Background(), emptyConversation{})
+	prompt, err := builder.BuildPrompt(context.Background(), emptyConversation{})
 	if err != nil {
 		t.Fatalf("BuildPrompt failed: %v", err)
 	}
@@ -524,13 +524,13 @@ func TestPromptSessionRebuildsSourcesWhenConversationReserveIsExceeded(t *testin
 			RenderOverheadReserveRatio: 0,
 		}).
 		System("system", "system", gaictx.Required(), gaictx.Tokens(1)).
-		Source(gaictx.SectionContext, "optional", gaictx.SourceFunc(func(ctx stdcontext.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
+		Source(gaictx.SectionContext, "optional", gaictx.SourceFunc(func(ctx context.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
 			buildCount++
 			return []gaictx.Part{gaictx.NewPart("optional-context", "optional context", gaictx.Tokens(4))}, nil
 		}), gaictx.Optional()).
 		User("request", "question", gaictx.Required(), gaictx.Tokens(1))
 
-	session, err := builder.StartPrompt(stdcontext.Background())
+	session, err := builder.StartPrompt(context.Background())
 	if err != nil {
 		t.Fatalf("StartPrompt failed: %v", err)
 	}
@@ -538,7 +538,7 @@ func TestPromptSessionRebuildsSourcesWhenConversationReserveIsExceeded(t *testin
 		t.Fatalf("expected optional source before reserve overflow: %q", session.Prompt().Context)
 	}
 
-	prompt, err := session.AppendMessages(stdcontext.Background(), []gaictx.Message{
+	prompt, err := session.AppendMessages(context.Background(), []gaictx.Message{
 		sessionMessageWithTokens(1, gaictx.RoleAssistant, "tool delta", "mock.tokenizer", 3),
 	})
 	if err != nil {
@@ -622,7 +622,7 @@ type fakeSummarizer struct {
 	err     error
 }
 
-func (s fakeSummarizer) Summarize(ctx stdcontext.Context, req gaictx.SummaryRequest) (string, error) {
+func (s fakeSummarizer) Summarize(ctx context.Context, req gaictx.SummaryRequest) (string, error) {
 	if s.err != nil {
 		return "", s.err
 	}

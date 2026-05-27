@@ -2,7 +2,6 @@ package context
 
 import (
 	"context"
-	stdcontext "context"
 	"strconv"
 	"time"
 
@@ -27,7 +26,7 @@ func (s *HistorySource) DebugSink(debug gai.DebugSink) {
 	s.debug = debug
 }
 
-func (s *HistorySource) BuildParts(ctx stdcontext.Context, view PromptView, budget SourceBudget) ([]Part, error) {
+func (s *HistorySource) BuildParts(ctx context.Context, view PromptView, budget SourceBudget) ([]Part, error) {
 	if s == nil || s.store == nil {
 		return nil, ErrSessionStoreNotFound
 	}
@@ -73,7 +72,7 @@ func (s *HistorySource) BuildParts(ctx stdcontext.Context, view PromptView, budg
 	return parts, nil
 }
 
-func (s *HistorySource) countRenderedMessages(ctx stdcontext.Context, store SessionStore, tokenizer ai.Tokenizer, messages []Message) (int, error) {
+func (s *HistorySource) countRenderedMessages(ctx context.Context, store SessionStore, tokenizer ai.Tokenizer, messages []Message) (int, error) {
 	if tokens, ok := storedMessageTokens(messages, tokenizer.ID()); ok {
 		return tokens, nil
 	}
@@ -85,7 +84,7 @@ func (s *HistorySource) countRenderedMessages(ctx stdcontext.Context, store Sess
 		}
 		go func(message Message, tokens int) {
 			detashedCtx := context.WithoutCancel(ctx)
-			innerCtx, cancel := stdcontext.WithTimeout(detashedCtx, 5*time.Second)
+			innerCtx, cancel := context.WithTimeout(detashedCtx, 5*time.Second)
 			defer cancel()
 			err := store.UpdateMessageTokens(innerCtx, message.ID, tokenizer.ID(), tokens)
 			if err != nil {
@@ -108,7 +107,7 @@ func (s *HistorySource) countRenderedMessages(ctx stdcontext.Context, store Sess
 	return totalTokens, nil
 }
 
-func countMessageContentTokens(ctx stdcontext.Context, tokenizer ai.Tokenizer, messages []Message) (int, error) {
+func countMessageContentTokens(ctx context.Context, tokenizer ai.Tokenizer, messages []Message) (int, error) {
 	var totalTokens int
 	for _, message := range messages {
 		tokens, err := tokenizer.CountTokens(ctx, message.Content.String())

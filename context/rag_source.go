@@ -2,7 +2,6 @@ package context
 
 import (
 	"context"
-	stdcontext "context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -11,7 +10,7 @@ import (
 	"github.com/lace-ai/gai"
 )
 
-type RAGQueryFunc func(ctx stdcontext.Context, view PromptView) (string, error)
+type RAGQueryFunc func(ctx context.Context, view PromptView) (string, error)
 
 type RAGSource struct {
 	store RAGStore
@@ -38,7 +37,7 @@ func (s *RAGSource) DebugSink(debug gai.DebugSink) {
 	s.debug = debug
 }
 
-func (s *RAGSource) BuildParts(ctx stdcontext.Context, view PromptView, budget SourceBudget) ([]Part, error) {
+func (s *RAGSource) BuildParts(ctx context.Context, view PromptView, budget SourceBudget) ([]Part, error) {
 	if s == nil || s.store == nil {
 		return nil, ErrRAGStoreNotFound
 	}
@@ -86,7 +85,7 @@ func (s *RAGSource) BuildParts(ctx stdcontext.Context, view PromptView, budget S
 
 			go func(docID, tokens int) {
 				detashedCtx := context.WithoutCancel(ctx)
-				innerCtx, cancel := stdcontext.WithTimeout(detashedCtx, 5*time.Second)
+				innerCtx, cancel := context.WithTimeout(detashedCtx, 5*time.Second)
 				defer cancel()
 				err := s.store.UpdateDocumentTokens(innerCtx, docID, budget.Tokenizer.ID(), tokens)
 				if err != nil {

@@ -1,6 +1,6 @@
 package context
 
-import stdcontext "context"
+import "context"
 
 type SummaryRequest struct {
 	ID        string
@@ -11,5 +11,5 @@ type SummaryRequest struct {
 }
 
 type Summarizer interface {
-	Summarize(ctx stdcontext.Context, req SummaryRequest) (string, error)
+	Summarize(ctx context.Context, req SummaryRequest) (string, error)
 }

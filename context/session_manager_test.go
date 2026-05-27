@@ -1,7 +1,7 @@
 package context_test
 
 import (
-	stdcontext "context"
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -29,7 +29,7 @@ func TestHistorySourceBuildsPartsWithinTokenBudget(t *testing.T) {
 		},
 	}
 
-	parts, err := gaictx.History(store, 7).BuildParts(stdcontext.Background(), testPromptView{conv: conv}, historyBudget(4, tokenizer))
+	parts, err := gaictx.History(store, 7).BuildParts(context.Background(), testPromptView{conv: conv}, historyBudget(4, tokenizer))
 	if err != nil {
 		t.Fatalf("BuildParts failed: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestHistorySourceUsesStoredMessageTokenCounts(t *testing.T) {
 		},
 	}
 
-	parts, err := gaictx.History(store, 7).BuildParts(stdcontext.Background(), testPromptView{conv: conv}, historyBudget(10, tokenizer))
+	parts, err := gaictx.History(store, 7).BuildParts(context.Background(), testPromptView{conv: conv}, historyBudget(10, tokenizer))
 	if err != nil {
 		t.Fatalf("BuildParts failed: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestHistorySourceIgnoresCurrentLoopBudget(t *testing.T) {
 		},
 	}
 
-	parts, err := gaictx.History(store, 7).BuildParts(stdcontext.Background(), testPromptView{conv: conv}, historyBudget(6, whitespaceTokenizer{}))
+	parts, err := gaictx.History(store, 7).BuildParts(context.Background(), testPromptView{conv: conv}, historyBudget(6, whitespaceTokenizer{}))
 	if err != nil {
 		t.Fatalf("BuildParts failed: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestHistorySourceUsesEntryRequiredness(t *testing.T) {
 		},
 	}
 
-	parts, err := gaictx.History(store, 7).BuildParts(stdcontext.Background(), testPromptView{conv: conv}, gaictx.SourceBudget{
+	parts, err := gaictx.History(store, 7).BuildParts(context.Background(), testPromptView{conv: conv}, gaictx.SourceBudget{
 		Tokenizer:             whitespaceTokenizer{},
 		MaxTokens:             20,
 		RemainingPromptTokens: 20,
@@ -160,7 +160,7 @@ func TestHistorySourceSkipsEmptyCurrentLoop(t *testing.T) {
 		},
 	}
 
-	parts, err := gaictx.History(store, 7).BuildParts(stdcontext.Background(), testPromptView{conv: fakeConversation{}}, historyBudget(100, rejectingEmptyTokenizer{}))
+	parts, err := gaictx.History(store, 7).BuildParts(context.Background(), testPromptView{conv: fakeConversation{}}, historyBudget(100, rejectingEmptyTokenizer{}))
 	if err != nil {
 		t.Fatalf("BuildParts failed: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestHistorySourcePropagatesStoreErrors(t *testing.T) {
 	wantErr := errors.New("read failed")
 	store := &mocks.MockSessionStore{Err: wantErr}
 
-	_, err := gaictx.History(store, 7).BuildParts(stdcontext.Background(), testPromptView{conv: fakeConversation{}}, historyBudget(100, whitespaceTokenizer{}))
+	_, err := gaictx.History(store, 7).BuildParts(context.Background(), testPromptView{conv: fakeConversation{}}, historyBudget(100, whitespaceTokenizer{}))
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("expected store error %v, got %v", wantErr, err)
 	}
@@ -195,7 +195,7 @@ func TestHistorySourcePropagatesTokenizerErrors(t *testing.T) {
 		},
 	}
 
-	_, err := gaictx.History(store, 7).BuildParts(stdcontext.Background(), testPromptView{conv: fakeConversation{}}, historyBudget(100, whitespaceTokenizer{err: wantErr}))
+	_, err := gaictx.History(store, 7).BuildParts(context.Background(), testPromptView{conv: fakeConversation{}}, historyBudget(100, whitespaceTokenizer{err: wantErr}))
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("expected tokenizer error %v, got %v", wantErr, err)
 	}
@@ -204,7 +204,7 @@ func TestHistorySourcePropagatesTokenizerErrors(t *testing.T) {
 func TestHistorySourceRequiresStore(t *testing.T) {
 	t.Parallel()
 
-	_, err := gaictx.History(nil, 7).BuildParts(stdcontext.Background(), testPromptView{conv: fakeConversation{}}, historyBudget(100, whitespaceTokenizer{}))
+	_, err := gaictx.History(nil, 7).BuildParts(context.Background(), testPromptView{conv: fakeConversation{}}, historyBudget(100, whitespaceTokenizer{}))
 	if !errors.Is(err, gaictx.ErrSessionStoreNotFound) {
 		t.Fatalf("expected ErrSessionStoreNotFound, got %v", err)
 	}
@@ -215,7 +215,7 @@ func TestHistorySourceRequiresTokenizer(t *testing.T) {
 
 	store := &mocks.MockSessionStore{}
 
-	_, err := gaictx.History(store, 7).BuildParts(stdcontext.Background(), testPromptView{conv: fakeConversation{}}, historyBudget(100, nil))
+	_, err := gaictx.History(store, 7).BuildParts(context.Background(), testPromptView{conv: fakeConversation{}}, historyBudget(100, nil))
 	if !errors.Is(err, gaictx.ErrTokenizerNotFound) {
 		t.Fatalf("expected ErrTokenizerNotFound, got %v", err)
 	}
@@ -231,18 +231,18 @@ func (t rejectingEmptyTokenizer) ID() string {
 	return "test.rejecting-empty"
 }
 
-func (t rejectingEmptyTokenizer) Tokenize(ctx stdcontext.Context, text string) ([]string, error) {
+func (t rejectingEmptyTokenizer) Tokenize(ctx context.Context, text string) ([]string, error) {
 	return whitespaceTokenizer{}.Tokenize(ctx, text)
 }
 
-func (t rejectingEmptyTokenizer) CountTokens(ctx stdcontext.Context, text string) (int, error) {
+func (t rejectingEmptyTokenizer) CountTokens(ctx context.Context, text string) (int, error) {
 	if text == "" {
 		return 0, errors.New("empty text")
 	}
 	return whitespaceTokenizer{}.CountTokens(ctx, text)
 }
 
-func (t whitespaceTokenizer) Tokenize(ctx stdcontext.Context, text string) ([]string, error) {
+func (t whitespaceTokenizer) Tokenize(ctx context.Context, text string) ([]string, error) {
 	if t.err != nil {
 		return nil, t.err
 	}
@@ -253,7 +253,7 @@ func (t whitespaceTokenizer) ID() string {
 	return "test.whitespace"
 }
 
-func (t whitespaceTokenizer) CountTokens(ctx stdcontext.Context, text string) (int, error) {
+func (t whitespaceTokenizer) CountTokens(ctx context.Context, text string) (int, error) {
 	tokens, err := t.Tokenize(ctx, text)
 	if err != nil {
 		return 0, err
@@ -361,7 +361,7 @@ func assertHistoryStoreQueries(t *testing.T, calls []mocks.GetMessagesCall, sess
 
 func mustCountTokens(t *testing.T, tokenizer whitespaceTokenizer, text string) int {
 	t.Helper()
-	tokens, err := tokenizer.CountTokens(stdcontext.Background(), text)
+	tokens, err := tokenizer.CountTokens(context.Background(), text)
 	if err != nil {
 		t.Fatalf("CountTokens failed: %v", err)
 	}

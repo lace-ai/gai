@@ -1,7 +1,7 @@
 package context
 
 import (
-	stdcontext "context"
+	"context"
 	"fmt"
 	"maps"
 	"math"
@@ -86,12 +86,12 @@ func (b SourceBudget) ContentLimit() int {
 }
 
 type Source interface {
-	BuildParts(ctx stdcontext.Context, view PromptView, budget SourceBudget) ([]Part, error)
+	BuildParts(ctx context.Context, view PromptView, budget SourceBudget) ([]Part, error)
 }
 
-type SourceFunc func(ctx stdcontext.Context, view PromptView, budget SourceBudget) ([]Part, error)
+type SourceFunc func(ctx context.Context, view PromptView, budget SourceBudget) ([]Part, error)
 
-func (f SourceFunc) BuildParts(ctx stdcontext.Context, view PromptView, budget SourceBudget) ([]Part, error) {
+func (f SourceFunc) BuildParts(ctx context.Context, view PromptView, budget SourceBudget) ([]Part, error) {
 	return f(ctx, view, budget)
 }
 
@@ -133,16 +133,16 @@ type BuildTraceEntry struct {
 }
 
 type PromptBuilder interface {
-	BuildPrompt(ctx stdcontext.Context, conv Conversation) (ai.Prompt, error)
+	BuildPrompt(ctx context.Context, conv Conversation) (ai.Prompt, error)
 }
 
 type IncrementalPromptBuilder interface {
-	StartPrompt(ctx stdcontext.Context) (PromptSession, error)
+	StartPrompt(ctx context.Context) (PromptSession, error)
 }
 
 type PromptSession interface {
 	Prompt() ai.Prompt
-	AppendMessages(ctx stdcontext.Context, messages []Message) (ai.Prompt, error)
+	AppendMessages(ctx context.Context, messages []Message) (ai.Prompt, error)
 }
 
 type Builder struct {
@@ -292,12 +292,12 @@ func (b *Builder) LastTrace() BuildTrace {
 	return cloneTrace(b.trace)
 }
 
-func (b *Builder) BuildPrompt(ctx stdcontext.Context, conv Conversation) (ai.Prompt, error) {
+func (b *Builder) BuildPrompt(ctx context.Context, conv Conversation) (ai.Prompt, error) {
 	prompt, _, err := b.buildPrompt(ctx, conv, 0)
 	return prompt, err
 }
 
-func (b *Builder) StartPrompt(ctx stdcontext.Context) (PromptSession, error) {
+func (b *Builder) StartPrompt(ctx context.Context) (PromptSession, error) {
 	reserveTokens := 0
 	if b != nil && b.budget != nil {
 		reserveTokens = b.budget.ConversationReserveTokens
@@ -316,7 +316,7 @@ func (b *Builder) StartPrompt(ctx stdcontext.Context) (PromptSession, error) {
 	}, nil
 }
 
-func (b *Builder) buildPrompt(ctx stdcontext.Context, conv Conversation, reserveTokens int) (ai.Prompt, promptBuildState, error) {
+func (b *Builder) buildPrompt(ctx context.Context, conv Conversation, reserveTokens int) (ai.Prompt, promptBuildState, error) {
 	if b == nil {
 		return ai.Prompt{}, promptBuildState{}, ErrPromptBuilderNil
 	}
@@ -436,7 +436,7 @@ func (s *builderPromptSession) Prompt() ai.Prompt {
 	return s.prompt
 }
 
-func (s *builderPromptSession) AppendMessages(ctx stdcontext.Context, messages []Message) (ai.Prompt, error) {
+func (s *builderPromptSession) AppendMessages(ctx context.Context, messages []Message) (ai.Prompt, error) {
 	if s == nil || s.builder == nil {
 		return ai.Prompt{}, ErrPromptBuilderNil
 	}
@@ -473,7 +473,7 @@ func (s *builderPromptSession) AppendMessages(ctx stdcontext.Context, messages [
 	return s.prompt, nil
 }
 
-func (s *builderPromptSession) rebuildBase(ctx stdcontext.Context, reserveTokens int) error {
+func (s *builderPromptSession) rebuildBase(ctx context.Context, reserveTokens int) error {
 	if reserveTokens < s.baseReserve {
 		reserveTokens = s.baseReserve
 	}
@@ -561,7 +561,7 @@ type entryAdmissionOptions struct {
 	includeDroppedParts bool
 }
 
-func (b *Builder) failEntry(ctx stdcontext.Context, state *promptBuildState, event string, entry BuildTraceEntry, err error) error {
+func (b *Builder) failEntry(ctx context.Context, state *promptBuildState, event string, entry BuildTraceEntry, err error) error {
 	entry.Err = err
 	entry.Status = "error"
 	state.record(entry)
@@ -570,7 +570,7 @@ func (b *Builder) failEntry(ctx stdcontext.Context, state *promptBuildState, eve
 	return err
 }
 
-func (b *Builder) admitEntryParts(ctx stdcontext.Context, state *promptBuildState, entry builderEntry, traceEntry BuildTraceEntry, entryParts []Part, opts entryAdmissionOptions) error {
+func (b *Builder) admitEntryParts(ctx context.Context, state *promptBuildState, entry builderEntry, traceEntry BuildTraceEntry, entryParts []Part, opts entryAdmissionOptions) error {
 	var err error
 	entryParts, err = b.normalizeMissingPartTokens(ctx, entryParts)
 	if err != nil {
@@ -660,7 +660,7 @@ func (b *Builder) admitEntryParts(ctx stdcontext.Context, state *promptBuildStat
 	return nil
 }
 
-func (b *Builder) normalizeMissingPartTokens(ctx stdcontext.Context, parts []Part) ([]Part, error) {
+func (b *Builder) normalizeMissingPartTokens(ctx context.Context, parts []Part) ([]Part, error) {
 	if b.budget == nil || b.budget.Tokenizer == nil {
 		return parts, nil
 	}
@@ -673,7 +673,7 @@ func (b *Builder) normalizeMissingPartTokens(ctx stdcontext.Context, parts []Par
 	return normalized, nil
 }
 
-func (b *Builder) normalizePartTokens(ctx stdcontext.Context, part *Part) error {
+func (b *Builder) normalizePartTokens(ctx context.Context, part *Part) error {
 	childTokens := 0
 	for i := range part.Children {
 		if err := b.normalizePartTokens(ctx, &part.Children[i]); err != nil {
@@ -832,7 +832,7 @@ func (b *Builder) partsFitAfterDroppingOptionalContext(parts map[Section][]Part,
 	return candidate, count <= limit, count, limit, nil
 }
 
-func (b *Builder) summarizeOptionalPart(ctx stdcontext.Context, parts map[Section][]Part, entry builderEntry, part Part, usedTokens int, reserveTokens int) (Part, bool, int, int, int, error) {
+func (b *Builder) summarizeOptionalPart(ctx context.Context, parts map[Section][]Part, entry builderEntry, part Part, usedTokens int, reserveTokens int) (Part, bool, int, int, int, error) {
 	if b.budget == nil || b.budget.Summarizer == nil || b.budget.Tokenizer == nil || entry.required {
 		return Part{}, false, 0, 0, 0, nil
 	}
@@ -917,7 +917,7 @@ func setTraceTokens(entry *BuildTraceEntry, entryTokens, promptTokens int) {
 	entry.PromptTokens = promptTokens
 }
 
-func (b *Builder) emitEntry(ctx stdcontext.Context, name string, entry BuildTraceEntry) {
+func (b *Builder) emitEntry(ctx context.Context, name string, entry BuildTraceEntry) {
 	fields := map[string]any{
 		"id":               entry.ID,
 		"section":          string(entry.Section),
@@ -942,7 +942,7 @@ func (b *Builder) emitEntry(ctx stdcontext.Context, name string, entry BuildTrac
 	b.emit(ctx, name, fields, entry.Err)
 }
 
-func (b *Builder) emit(ctx stdcontext.Context, name string, fields map[string]any, err error) {
+func (b *Builder) emit(ctx context.Context, name string, fields map[string]any, err error) {
 	if b.debug == nil {
 		return
 	}
