@@ -86,10 +86,10 @@ func (s *RAGSource) BuildParts(ctx stdcontext.Context, view PromptView, budget S
 			go func(docID, tokens int) {
 				innerCtx, cancel := stdcontext.WithTimeout(ctx, 5*time.Second)
 				defer cancel()
-				s.store.UpdateDocumentTokens(innerCtx, docID, budget.Tokenizer.ID(), tokens)
+				err := s.store.UpdateDocumentTokens(innerCtx, docID, budget.Tokenizer.ID(), tokens)
 				if err != nil {
 					if s.debug != nil {
-						s.debug.Emit(ctx, gai.DebugEvent{
+						s.debug.Emit(innerCtx, gai.DebugEvent{
 							Name:   "Rag-Source",
 							Source: "token_count_update_error",
 							Fields: map[string]any{
@@ -101,9 +101,7 @@ func (s *RAGSource) BuildParts(ctx stdcontext.Context, view PromptView, budget S
 						})
 					}
 				}
-			}(doc.ID, tokens)
-			go func() {
-			}()
+			}(doc.ID, docTokens)
 		}
 		if tokens+docTokens > limit {
 			if minOverflowTokens == 0 || docTokens < minOverflowTokens {
