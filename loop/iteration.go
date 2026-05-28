@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"github.com/lace-ai/gai/ai"
-	aicontext "github.com/lace-ai/gai/context"
+	gaictx "github.com/lace-ai/gai/context"
 )
 
 type IterationType string
@@ -86,53 +86,64 @@ func BuildIterationsString(builder *strings.Builder, iterations []Iteration) {
 	}
 }
 
-func (i *Iteration) Messages() []aicontext.Message {
+func (i *Iteration) Messages() []gaictx.Message {
 	if i == nil {
 		return nil
 	}
-	var msgs []aicontext.Message
+	var msgs []gaictx.Message
 
 	if i.Count == 1 {
 		if i.Request != nil {
-			msgs = append(msgs, aicontext.Message{
-				Role:    aicontext.RoleUser,
-				Content: aicontext.NewTextContent(i.Request.Prompt.Prompt),
+			msgs = append(msgs, gaictx.Message{
+				Role:    gaictx.RoleUser,
+				Content: gaictx.NewTextContent(i.Request.Prompt.Prompt),
 			})
 		}
 	}
 
+	return append(msgs, i.partMessages()...)
+}
+
+func (i *Iteration) DeltaMessages() []gaictx.Message {
+	if i == nil {
+		return nil
+	}
+	return i.partMessages()
+}
+
+func (i *Iteration) partMessages() []gaictx.Message {
+	var msgs []gaictx.Message
 	for _, part := range i.Parts {
 		switch part.Type {
 		case IterationTypeToolCall, IterationTypeToolError:
 			if part.ToolReq != nil {
-				msgs = append(msgs, aicontext.Message{
-					Role:    aicontext.RoleAssistant,
-					Content: aicontext.NewToolCallContent(part.ToolReq.Name, string(part.ToolReq.Args)),
+				msgs = append(msgs, gaictx.Message{
+					Role:    gaictx.RoleAssistant,
+					Content: gaictx.NewToolCallContent(part.ToolReq.Name, string(part.ToolReq.Args)),
 				})
 				if part.ToolResp != nil {
 					if part.ToolResp.Err != nil {
-						msgs = append(msgs, aicontext.Message{
-							Role:    aicontext.RoleTool,
-							Content: aicontext.NewToolResultErrContent(part.ToolReq.Name, part.ToolResp.Err.Error()),
+						msgs = append(msgs, gaictx.Message{
+							Role:    gaictx.RoleTool,
+							Content: gaictx.NewToolResultErrContent(part.ToolReq.Name, part.ToolResp.Err.Error()),
 						})
 					} else {
-						msgs = append(msgs, aicontext.Message{
-							Role:    aicontext.RoleTool,
-							Content: aicontext.NewToolResultContent(part.ToolReq.Name, part.ToolResp.Text, false, ""),
+						msgs = append(msgs, gaictx.Message{
+							Role:    gaictx.RoleTool,
+							Content: gaictx.NewToolResultContent(part.ToolReq.Name, part.ToolResp.Text, false, ""),
 						})
 					}
 				}
 			}
 		case IterationTypeResponse:
 			if part.Response != nil {
-				msgs = append(msgs, aicontext.Message{
-					Role:    aicontext.RoleAssistant,
-					Content: aicontext.NewTextContent(part.Response.Text),
+				msgs = append(msgs, gaictx.Message{
+					Role:    gaictx.RoleAssistant,
+					Content: gaictx.NewTextContent(part.Response.Text),
 				})
 			}
 		}
 	}
-
 	return msgs
 }
 

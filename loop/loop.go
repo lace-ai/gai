@@ -6,7 +6,7 @@ import (
 	"sync"
 
 	"github.com/lace-ai/gai/ai"
-	aicontext "github.com/lace-ai/gai/context"
+	gaictx "github.com/lace-ai/gai/context"
 )
 
 const (
@@ -23,8 +23,9 @@ type Loop struct {
 	Model             ai.Model
 	Tools             []Tool
 	MaxLoopIterations int
+	MaxTokens         int
 	RetryCount        int
-	PromptBuilder     aicontext.PromptBuilder
+	PromptBuilder     gaictx.PromptBuilder
 	PreProcessToolRes ToolResPreProcessor
 }
 
@@ -44,7 +45,7 @@ func (a *Loop) Validate() error {
 	return nil
 }
 
-func New(model ai.Model, tools []Tool, promptBuilder aicontext.PromptBuilder, toolResPreProcessor ToolResPreProcessor) *Loop {
+func New(model ai.Model, tools []Tool, promptBuilder gaictx.PromptBuilder, toolResPreProcessor ToolResPreProcessor) *Loop {
 	agent := &Loop{
 		Model:             model,
 		Tools:             tools,
@@ -81,6 +82,20 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInfor
 
 		retryCount := 0
 		completedToolCalls := map[string]struct{}{}
+		var promptSession gaictx.PromptSession
+		var currentPrompt ai.Prompt
+		incrementalPrompt := false
+
+		if builder, ok := a.PromptBuilder.(gaictx.IncrementalPromptBuilder); ok {
+			session, err := builder.StartPrompt(ctx)
+			if err != nil {
+				errCh <- fmt.Errorf("%w: %w", ErrBuildPrompt, err)
+				return
+			}
+			promptSession = session
+			currentPrompt = session.Prompt()
+			incrementalPrompt = true
+		}
 
 		var iteration Iteration
 		for i := range a.MaxLoopIterations {
@@ -89,15 +104,20 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInfor
 
 			iterCtx, cancel := context.WithCancel(ctx)
 
-			prompt, err := a.PromptBuilder.BuildPrompt(iterCtx, a)
-			if err != nil {
-				errCh <- fmt.Errorf("%w: %w", ErrBuildPrompt, err)
-				cancel()
-				return
+			prompt := currentPrompt
+			if !incrementalPrompt {
+				var err error
+				prompt, err = a.PromptBuilder.BuildPrompt(iterCtx, a)
+				if err != nil {
+					errCh <- fmt.Errorf("%w: %w", ErrBuildPrompt, err)
+					cancel()
+					return
+				}
 			}
 
 			request := ai.AIRequest{
-				Prompt: prompt,
+				Prompt:    prompt,
+				MaxTokens: a.MaxTokens,
 			}
 			iteration.Request = &request
 
@@ -197,6 +217,15 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInfor
 				cancel()
 				return
 			}
+			if incrementalPrompt {
+				var err error
+				currentPrompt, err = promptSession.AppendMessages(iterCtx, iteration.DeltaMessages())
+				if err != nil {
+					errCh <- fmt.Errorf("%w: %w", ErrBuildPrompt, err)
+					cancel()
+					return
+				}
+			}
 			cancel()
 		}
 
@@ -206,8 +235,8 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInfor
 	return tokenCh, statusCh, errCh
 }
 
-func (a *Loop) Messages() []aicontext.Message {
-	var msgs []aicontext.Message
+func (a *Loop) Messages() []gaictx.Message {
+	var msgs []gaictx.Message
 
 	for _, i := range a.Iterations {
 		msgs = append(msgs, i.Messages()...)

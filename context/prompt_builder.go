@@ -1,9 +1,10 @@
 package context
 
 import (
-	stdcontext "context"
-	"encoding/xml"
+	"context"
 	"fmt"
+	"maps"
+	"math"
 	"strings"
 
 	"github.com/lace-ai/gai"
@@ -25,22 +26,73 @@ const (
 	EntryKindSource EntryKind = "source"
 )
 
+const unlimitedTokens = math.MaxInt
+
 type Part struct {
 	ID       string
 	Text     string
 	Tokens   int
 	Required bool
 	Meta     map[string]any
+	Children []Part
+}
+
+func (p Part) tokenCount() int {
+	if p.Tokens > 0 {
+		return p.Tokens
+	}
+	tokens := 0
+	for _, child := range p.Children {
+		tokens += child.tokenCount()
+	}
+	return tokens
+}
+
+type PromptBudget struct {
+	Tokenizer                  ai.Tokenizer
+	ContextWindowTokens        int
+	ReservedOutputTokens       int
+	ConversationReserveTokens  int
+	RenderOverheadReserveRatio float64
+	Summarizer                 Summarizer
+}
+
+func (b PromptBudget) promptLimit() int {
+	limit := b.ContextWindowTokens - b.ReservedOutputTokens
+	if limit < 0 {
+		return 0
+	}
+	return limit
+}
+
+type SourceBudget struct {
+	Tokenizer                  ai.Tokenizer
+	MaxTokens                  int
+	RemainingPromptTokens      int
+	Required                   bool
+	RenderOverheadReserveRatio float64
+	Summarizer                 Summarizer
+}
+
+func (b SourceBudget) ContentLimit() int {
+	if b.MaxTokens == unlimitedTokens {
+		return unlimitedTokens
+	}
+	limit := b.MaxTokens - renderOverheadTokens(b.MaxTokens, b.RenderOverheadReserveRatio)
+	if limit < 0 {
+		return 0
+	}
+	return limit
 }
 
 type Source interface {
-	BuildParts(ctx stdcontext.Context, view PromptView) ([]Part, error)
+	BuildParts(ctx context.Context, view PromptView, budget SourceBudget) ([]Part, error)
 }
 
-type SourceFunc func(ctx stdcontext.Context, view PromptView) ([]Part, error)
+type SourceFunc func(ctx context.Context, view PromptView, budget SourceBudget) ([]Part, error)
 
-func (f SourceFunc) BuildParts(ctx stdcontext.Context, view PromptView) ([]Part, error) {
-	return f(ctx, view)
+func (f SourceFunc) BuildParts(ctx context.Context, view PromptView, budget SourceBudget) ([]Part, error) {
+	return f(ctx, view, budget)
 }
 
 type PromptView interface {
@@ -51,13 +103,14 @@ type PromptView interface {
 }
 
 type EntryView struct {
-	ID       string
-	Section  Section
-	Kind     EntryKind
-	Required bool
-	Tokens   int
-	Text     string
-	Meta     map[string]any
+	ID        string
+	Section   Section
+	Kind      EntryKind
+	Required  bool
+	Tokens    int
+	SourceCap int
+	Text      string
+	Meta      map[string]any
 }
 
 type BuildTrace struct {
@@ -66,75 +119,51 @@ type BuildTrace struct {
 }
 
 type BuildTraceEntry struct {
-	ID       string
-	Section  Section
-	Kind     EntryKind
-	Status   string
-	Required bool
-	Parts    []Part
-	Err      error
-}
-
-type Renderer interface {
-	Render(section Section, parts []Part) string
-}
-
-type XMLRenderer struct{}
-
-func (r XMLRenderer) Render(section Section, parts []Part) string {
-	if len(parts) == 0 {
-		return ""
-	}
-
-	var builder strings.Builder
-	builder.WriteString("<")
-	builder.WriteString(string(section))
-	builder.WriteString(">\n")
-	for _, part := range parts {
-		builder.WriteString(`<part id="`)
-		writeEscaped(&builder, part.ID)
-		builder.WriteString(`">`)
-		if part.Text != "" {
-			builder.WriteString("\n")
-			writeEscaped(&builder, part.Text)
-			builder.WriteString("\n")
-		}
-		builder.WriteString("</part>\n")
-	}
-	builder.WriteString("</")
-	builder.WriteString(string(section))
-	builder.WriteString(">\n")
-
-	return builder.String()
-}
-
-func writeEscaped(builder *strings.Builder, text string) {
-	if text == "" {
-		return
-	}
-	_ = xml.EscapeText(builder, []byte(text))
+	ID              string
+	Section         Section
+	Kind            EntryKind
+	Status          string
+	Reason          string
+	Required        bool
+	Parts           []Part
+	EntryTokens     int
+	PromptTokens    int
+	AvailableTokens int
+	Err             error
 }
 
 type PromptBuilder interface {
-	BuildPrompt(ctx stdcontext.Context, conv Conversation) (ai.Prompt, error)
+	BuildPrompt(ctx context.Context, conv Conversation) (ai.Prompt, error)
+}
+
+type IncrementalPromptBuilder interface {
+	StartPrompt(ctx context.Context) (PromptSession, error)
+}
+
+type PromptSession interface {
+	Prompt() ai.Prompt
+	AppendMessages(ctx context.Context, messages []Message) (ai.Prompt, error)
 }
 
 type Builder struct {
 	renderer Renderer
 	debug    gai.DebugSink
+	budget   *PromptBudget
 	entries  []builderEntry
 	trace    BuildTrace
 }
 
 type builderEntry struct {
-	id       string
-	section  Section
-	kind     EntryKind
-	required bool
-	tokens   int
-	text     string
-	meta     map[string]any
-	source   Source
+	id           string
+	section      Section
+	kind         EntryKind
+	required     bool
+	tokens       int
+	sourceCap    int
+	hasSourceCap bool
+	text         string
+	meta         map[string]any
+	source       Source
 }
 
 type EntryOption func(*builderEntry)
@@ -155,6 +184,13 @@ func Optional() EntryOption {
 func Tokens(tokens int) EntryOption {
 	return func(entry *builderEntry) {
 		entry.tokens = tokens
+	}
+}
+
+func SourceTokenCap(tokens int) EntryOption {
+	return func(entry *builderEntry) {
+		entry.sourceCap = tokens
+		entry.hasSourceCap = true
 	}
 }
 
@@ -183,6 +219,22 @@ func NewPart(id, text string, opts ...EntryOption) Part {
 	return entry.part()
 }
 
+func NewPartGroup(id string, children []Part, opts ...EntryOption) Part {
+	entry := builderEntry{
+		id:   id,
+		kind: EntryKindPart,
+	}
+	applyOptions(&entry, opts)
+	part := entry.part()
+	part.Children = cloneParts(children)
+	if part.Tokens == 0 {
+		for _, child := range children {
+			part.Tokens += child.tokenCount()
+		}
+	}
+	return part
+}
+
 func (b *Builder) Renderer(renderer Renderer) *Builder {
 	if renderer != nil {
 		b.renderer = renderer
@@ -192,6 +244,11 @@ func (b *Builder) Renderer(renderer Renderer) *Builder {
 
 func (b *Builder) Debug(debug gai.DebugSink) *Builder {
 	b.debug = debug
+	return b
+}
+
+func (b *Builder) Budget(budget PromptBudget) *Builder {
+	b.budget = &budget
 	return b
 }
 
@@ -235,9 +292,33 @@ func (b *Builder) LastTrace() BuildTrace {
 	return cloneTrace(b.trace)
 }
 
-func (b *Builder) BuildPrompt(ctx stdcontext.Context, conv Conversation) (ai.Prompt, error) {
+func (b *Builder) BuildPrompt(ctx context.Context, conv Conversation) (ai.Prompt, error) {
+	prompt, _, err := b.buildPrompt(ctx, conv, 0)
+	return prompt, err
+}
+
+func (b *Builder) StartPrompt(ctx context.Context) (PromptSession, error) {
+	reserveTokens := 0
+	if b != nil && b.budget != nil {
+		reserveTokens = b.budget.ConversationReserveTokens
+	}
+	prompt, state, err := b.buildPrompt(ctx, nil, reserveTokens)
+	if err != nil {
+		return nil, err
+	}
+	return &builderPromptSession{
+		builder:       b,
+		basePrompt:    prompt,
+		prompt:        prompt,
+		baseReserve:   reserveTokens,
+		activeReserve: reserveTokens,
+		baseTokens:    state.promptTokens,
+	}, nil
+}
+
+func (b *Builder) buildPrompt(ctx context.Context, conv Conversation, reserveTokens int) (ai.Prompt, promptBuildState, error) {
 	if b == nil {
-		return ai.Prompt{}, ErrPromptBuilderNil
+		return ai.Prompt{}, promptBuildState{}, ErrPromptBuilderNil
 	}
 	renderer := b.renderer
 	if renderer == nil {
@@ -246,20 +327,14 @@ func (b *Builder) BuildPrompt(ctx stdcontext.Context, conv Conversation) (ai.Pro
 	if err := b.validate(); err != nil {
 		b.trace = BuildTrace{}
 		b.emit(ctx, "prompt_build_failed", map[string]any{"error": err.Error()}, err)
-		return ai.Prompt{}, err
+		return ai.Prompt{}, promptBuildState{}, err
 	}
 
 	view := newBuilderView(conv, b.entries)
-	trace := BuildTrace{Parts: map[Section][]Part{}}
-	parts := map[Section][]Part{
-		SectionSystem:  {},
-		SectionContext: {},
-		SectionUser:    {},
-	}
-	partIDs := map[string]Section{}
+	state := newPromptBuildState(renderer, reserveTokens)
 
 	b.emit(ctx, "prompt_build_started", map[string]any{"entries": len(b.entries)}, nil)
-	for _, entry := range b.entries {
+	for _, entry := range orderedEntries(b.entries) {
 		traceEntry := BuildTraceEntry{
 			ID:       entry.id,
 			Section:  entry.section,
@@ -270,94 +345,355 @@ func (b *Builder) BuildPrompt(ctx stdcontext.Context, conv Conversation) (ai.Pro
 		switch entry.kind {
 		case EntryKindPart:
 			part := entry.part()
-			if err := validatePartIDs(partIDs, entry.section, []Part{part}); err != nil {
-				traceEntry.Err = err
-				traceEntry.Status = "error"
-				trace.Entries = append(trace.Entries, traceEntry)
-				b.trace = finalizeTrace(trace, parts)
-				b.emitEntry(ctx, "prompt_entry_error", traceEntry)
-				return ai.Prompt{}, err
+			if err := b.admitEntryParts(ctx, &state, entry, traceEntry, []Part{part}, entryAdmissionOptions{
+				eventPrefix:       "prompt_entry",
+				summarizeOptional: true,
+			}); err != nil {
+				return ai.Prompt{}, state, err
 			}
-			parts[entry.section] = append(parts[entry.section], part)
-			traceEntry.Status = "emitted"
-			traceEntry.Parts = []Part{part}
-			b.emitEntry(ctx, "prompt_entry_emitted", traceEntry)
 		case EntryKindSource:
 			if entry.source == nil {
 				err := fmt.Errorf("%w: section %s source %q is nil", ErrPromptSource, entry.section, entry.id)
 				traceEntry.Err = err
 				if entry.required {
-					traceEntry.Status = "error"
-					trace.Entries = append(trace.Entries, traceEntry)
-					b.trace = finalizeTrace(trace, parts)
-					b.emitEntry(ctx, "prompt_source_error", traceEntry)
-					return ai.Prompt{}, err
+					return ai.Prompt{}, state, b.failEntry(ctx, &state, "prompt_source_error", traceEntry, err)
 				}
 				traceEntry.Status = "skipped"
-				trace.Entries = append(trace.Entries, traceEntry)
+				traceEntry.Reason = "nil_source"
+				state.record(traceEntry)
 				b.emitEntry(ctx, "prompt_source_skipped", traceEntry)
 				continue
 			}
 
-			sourceParts, err := entry.source.BuildParts(ctx, view)
+			sourceBudget := b.sourceBudget(state.promptTokens, state.reserveTokens, entry)
+			traceEntry.AvailableTokens = sourceBudget.MaxTokens
+			sourceParts, err := entry.source.BuildParts(ctx, view, sourceBudget)
 			if err != nil {
 				traceEntry.Err = err
 				if entry.required {
 					wrapped := fmt.Errorf("%w: section %s source %q: %w", ErrPromptSource, entry.section, entry.id, err)
 					traceEntry.Err = wrapped
-					traceEntry.Status = "error"
-					trace.Entries = append(trace.Entries, traceEntry)
-					b.trace = finalizeTrace(trace, parts)
-					b.emitEntry(ctx, "prompt_source_error", traceEntry)
-					return ai.Prompt{}, wrapped
+					return ai.Prompt{}, state, b.failEntry(ctx, &state, "prompt_source_error", traceEntry, wrapped)
 				}
 				traceEntry.Status = "skipped"
-				trace.Entries = append(trace.Entries, traceEntry)
+				traceEntry.Reason = "optional_source_error"
+				state.record(traceEntry)
 				b.emitEntry(ctx, "prompt_source_skipped", traceEntry)
 				continue
 			}
 			if entry.required {
-				for i := range sourceParts {
-					sourceParts[i].Required = true
-				}
+				markRequired(sourceParts)
 			}
-			if err := validatePartIDs(partIDs, entry.section, sourceParts); err != nil {
-				traceEntry.Err = err
-				if entry.required {
-					traceEntry.Status = "error"
-					trace.Entries = append(trace.Entries, traceEntry)
-					b.trace = finalizeTrace(trace, parts)
-					b.emitEntry(ctx, "prompt_source_error", traceEntry)
-					return ai.Prompt{}, err
-				}
-				traceEntry.Status = "skipped"
-				trace.Entries = append(trace.Entries, traceEntry)
-				b.emitEntry(ctx, "prompt_source_skipped", traceEntry)
-				continue
+			if err := b.admitEntryParts(ctx, &state, entry, traceEntry, sourceParts, entryAdmissionOptions{
+				eventPrefix:         "prompt_source",
+				optionalIDConflict:  true,
+				includeDroppedParts: true,
+			}); err != nil {
+				return ai.Prompt{}, state, err
 			}
-			parts[entry.section] = append(parts[entry.section], sourceParts...)
-			traceEntry.Status = "emitted"
-			traceEntry.Parts = cloneParts(sourceParts)
-			b.emitEntry(ctx, "prompt_source_emitted", traceEntry)
 		}
-
-		trace.Entries = append(trace.Entries, traceEntry)
 	}
 
-	trace = finalizeTrace(trace, parts)
+	trace := state.finalTrace()
 	b.trace = trace
-	prompt := ai.Prompt{
-		System:  renderer.Render(SectionSystem, parts[SectionSystem]),
-		Context: renderer.Render(SectionContext, parts[SectionContext]),
-		Prompt:  renderer.Render(SectionUser, parts[SectionUser]),
+	prompt := renderPrompt(renderer, state.parts)
+	if b.budget != nil {
+		if state.promptTokens > b.promptLimit(reserveTokens) {
+			err := promptBudgetError("prompt", state.promptTokens, b.promptLimit(reserveTokens))
+			b.emit(ctx, "prompt_build_failed", map[string]any{
+				"error":            err.Error(),
+				"prompt_tokens":    state.promptTokens,
+				"available_tokens": b.promptLimit(reserveTokens),
+			}, err)
+			return ai.Prompt{}, state, err
+		}
 	}
 	b.emit(ctx, "prompt_build_completed", map[string]any{
-		"system_parts":  len(parts[SectionSystem]),
-		"context_parts": len(parts[SectionContext]),
-		"user_parts":    len(parts[SectionUser]),
+		"system_parts":  len(state.parts[SectionSystem]),
+		"context_parts": len(state.parts[SectionContext]),
+		"user_parts":    len(state.parts[SectionUser]),
 	}, nil)
 
-	return prompt, nil
+	return prompt, state, nil
+}
+
+type builderPromptSession struct {
+	builder       *Builder
+	basePrompt    ai.Prompt
+	prompt        ai.Prompt
+	baseReserve   int
+	activeReserve int
+	baseTokens    int
+	deltaMessages []Message
+	deltaText     string
+	deltaTokens   int
+}
+
+func (s *builderPromptSession) Prompt() ai.Prompt {
+	if s == nil {
+		return ai.Prompt{}
+	}
+	return s.prompt
+}
+
+func (s *builderPromptSession) AppendMessages(ctx context.Context, messages []Message) (ai.Prompt, error) {
+	if s == nil || s.builder == nil {
+		return ai.Prompt{}, ErrPromptBuilderNil
+	}
+	if len(messages) == 0 {
+		return s.prompt, nil
+	}
+
+	rendered := renderMessages(messages)
+	if rendered == "" {
+		return s.prompt, nil
+	}
+
+	messageTokens := 0
+	if s.builder.budget != nil {
+		tokens, err := countMessageContentTokens(ctx, s.builder.budget.Tokenizer, messages)
+		if err != nil {
+			return ai.Prompt{}, err
+		}
+		messageTokens = tokens
+	}
+
+	s.deltaMessages = append(s.deltaMessages, cloneMessages(messages)...)
+	s.deltaText = appendPromptText(s.deltaText, rendered)
+	s.deltaTokens += messageTokens
+
+	if s.builder.budget != nil && s.deltaTokens > s.activeReserve {
+		if err := s.rebuildBase(ctx, s.deltaTokens); err != nil {
+			return ai.Prompt{}, err
+		}
+	}
+
+	s.prompt = s.basePrompt
+	s.prompt.Prompt = appendPromptText(s.basePrompt.Prompt, s.deltaText)
+	return s.prompt, nil
+}
+
+func (s *builderPromptSession) rebuildBase(ctx context.Context, reserveTokens int) error {
+	if reserveTokens < s.baseReserve {
+		reserveTokens = s.baseReserve
+	}
+	prompt, state, err := s.builder.buildPrompt(ctx, nil, reserveTokens)
+	if err != nil {
+		return err
+	}
+	s.basePrompt = prompt
+	s.activeReserve = reserveTokens
+	s.baseTokens = state.promptTokens
+	return nil
+}
+
+func appendPromptText(base, next string) string {
+	if base == "" {
+		return next
+	}
+	if next == "" {
+		return base
+	}
+	return base + "\n" + next
+}
+
+func cloneMessages(messages []Message) []Message {
+	cloned := make([]Message, len(messages))
+	for i, message := range messages {
+		cloned[i] = message
+		cloned[i].TokenCount = maps.Clone(message.TokenCount)
+	}
+	return cloned
+}
+
+type promptBuildState struct {
+	renderer      Renderer
+	trace         BuildTrace
+	parts         map[Section][]Part
+	partIDs       map[string]Section
+	promptTokens  int
+	reserveTokens int
+}
+
+func newPromptBuildState(renderer Renderer, reserveTokens int) promptBuildState {
+	return promptBuildState{
+		renderer: renderer,
+		trace:    BuildTrace{Parts: map[Section][]Part{}},
+		parts: map[Section][]Part{
+			SectionSystem:  {},
+			SectionContext: {},
+			SectionUser:    {},
+		},
+		partIDs:       map[string]Section{},
+		reserveTokens: reserveTokens,
+	}
+}
+
+func (s *promptBuildState) finalTrace() BuildTrace {
+	return finalizeTrace(s.trace, s.parts)
+}
+
+func (s *promptBuildState) record(entry BuildTraceEntry) {
+	s.trace.Entries = append(s.trace.Entries, entry)
+}
+
+func (s *promptBuildState) nextParts(section Section, parts []Part) []Part {
+	return append(cloneParts(s.parts[section]), parts...)
+}
+
+func (s *promptBuildState) appendParts(section Section, parts []Part, partIDs map[string]Section, promptTokens int) {
+	s.parts[section] = parts
+	s.partIDs = partIDs
+	s.promptTokens = promptTokens
+}
+
+func (s *promptBuildState) dropOptionalContextFor(parts map[Section][]Part, promptTokens int) {
+	s.parts = parts
+	s.partIDs = rebuildPartIDs(s.parts)
+	s.promptTokens = promptTokens
+	s.trace.Entries = markDroppedOptionalContextEntries(s.trace.Entries)
+}
+
+type entryAdmissionOptions struct {
+	eventPrefix         string
+	summarizeOptional   bool
+	optionalIDConflict  bool
+	includeDroppedParts bool
+}
+
+func (b *Builder) failEntry(ctx context.Context, state *promptBuildState, event string, entry BuildTraceEntry, err error) error {
+	entry.Err = err
+	entry.Status = "error"
+	state.record(entry)
+	b.trace = state.finalTrace()
+	b.emitEntry(ctx, event, entry)
+	return err
+}
+
+func (b *Builder) admitEntryParts(ctx context.Context, state *promptBuildState, entry builderEntry, traceEntry BuildTraceEntry, entryParts []Part, opts entryAdmissionOptions) error {
+	var err error
+	entryParts, err = b.normalizeMissingPartTokens(ctx, entryParts)
+	if err != nil {
+		return b.failEntry(ctx, state, opts.eventPrefix+"_error", traceEntry, err)
+	}
+
+	nextPartIDs := clonePartIDMap(state.partIDs)
+	if err := validatePartIDs(nextPartIDs, entry.section, entryParts); err != nil {
+		traceEntry.Err = err
+		if opts.optionalIDConflict && !entry.required {
+			traceEntry.Status = "skipped"
+			traceEntry.Reason = "duplicate_part_id"
+			state.record(traceEntry)
+			b.emitEntry(ctx, opts.eventPrefix+"_skipped", traceEntry)
+			return nil
+		}
+		return b.failEntry(ctx, state, opts.eventPrefix+"_error", traceEntry, err)
+	}
+
+	next := state.nextParts(entry.section, entryParts)
+	ok, count, available, err := b.partsFit(state.parts, entry.section, next, state.reserveTokens)
+	if err != nil {
+		return b.failEntry(ctx, state, opts.eventPrefix+"_error", traceEntry, err)
+	}
+	if ok {
+		state.appendParts(entry.section, next, nextPartIDs, count)
+		traceEntry.Status = "emitted"
+		traceEntry.Parts = cloneParts(entryParts)
+		setTraceTokens(&traceEntry, partsTokenCount(entryParts), count)
+		state.record(traceEntry)
+		b.emitEntry(ctx, opts.eventPrefix+"_emitted", traceEntry)
+		return nil
+	}
+
+	entryTokens := partsTokenCount(entryParts)
+	setTraceTokens(&traceEntry, entryTokens, count)
+	traceEntry.AvailableTokens = available
+	if entry.required {
+		cleanedParts, ok, retryCount, retryAvailable, err := b.partsFitAfterDroppingOptionalContext(state.parts, entry.section, next, state.reserveTokens)
+		if err != nil {
+			return b.failEntry(ctx, state, opts.eventPrefix+"_error", traceEntry, err)
+		}
+		if ok {
+			state.dropOptionalContextFor(cleanedParts, retryCount)
+			traceEntry.Reason = "dropped_optional_context"
+			traceEntry.Status = "emitted"
+			traceEntry.Parts = cloneParts(entryParts)
+			setTraceTokens(&traceEntry, entryTokens, retryCount)
+			traceEntry.AvailableTokens = retryAvailable
+			state.record(traceEntry)
+			b.emitEntry(ctx, opts.eventPrefix+"_emitted", traceEntry)
+			return nil
+		}
+		err = promptBudgetError(entry.id, count, available)
+		traceEntry.Reason = "required_over_budget"
+		return b.failEntry(ctx, state, opts.eventPrefix+"_error", traceEntry, err)
+	}
+
+	traceEntry.Status = "dropped"
+	traceEntry.Reason = "optional_over_budget"
+	if opts.summarizeOptional && len(entryParts) == 1 {
+		summarizedPart, ok, summaryCount, summaryPromptCount, summaryAvailable, err := b.summarizeOptionalPart(ctx, state.parts, entry, entryParts[0], state.promptTokens, state.reserveTokens)
+		if err != nil {
+			return b.failEntry(ctx, state, opts.eventPrefix+"_error", traceEntry, err)
+		}
+		if ok {
+			nextSummaryPartIDs := clonePartIDMap(state.partIDs)
+			if err := validatePartIDs(nextSummaryPartIDs, entry.section, []Part{summarizedPart}); err != nil {
+				return b.failEntry(ctx, state, opts.eventPrefix+"_error", traceEntry, err)
+			}
+			state.appendParts(entry.section, state.nextParts(entry.section, []Part{summarizedPart}), nextSummaryPartIDs, summaryPromptCount)
+			traceEntry.Status = "summarized"
+			traceEntry.Reason = "optional_summarized"
+			traceEntry.Parts = []Part{summarizedPart}
+			setTraceTokens(&traceEntry, summaryCount, summaryPromptCount)
+			traceEntry.AvailableTokens = summaryAvailable
+			state.record(traceEntry)
+			b.emitEntry(ctx, opts.eventPrefix+"_summarized", traceEntry)
+			return nil
+		}
+	}
+	if opts.includeDroppedParts {
+		traceEntry.Parts = cloneParts(entryParts)
+	}
+	state.record(traceEntry)
+	b.emitEntry(ctx, opts.eventPrefix+"_dropped", traceEntry)
+	return nil
+}
+
+func (b *Builder) normalizeMissingPartTokens(ctx context.Context, parts []Part) ([]Part, error) {
+	if b.budget == nil || b.budget.Tokenizer == nil {
+		return parts, nil
+	}
+	normalized := cloneParts(parts)
+	for i := range normalized {
+		if err := b.normalizePartTokens(ctx, &normalized[i]); err != nil {
+			return nil, err
+		}
+	}
+	return normalized, nil
+}
+
+func (b *Builder) normalizePartTokens(ctx context.Context, part *Part) error {
+	childTokens := 0
+	for i := range part.Children {
+		if err := b.normalizePartTokens(ctx, &part.Children[i]); err != nil {
+			return err
+		}
+		childTokens += part.Children[i].tokenCount()
+	}
+	if part.Tokens > 0 {
+		return nil
+	}
+	if part.Text != "" {
+		tokens, err := b.budget.Tokenizer.CountTokens(ctx, part.Text)
+		if err != nil {
+			return err
+		}
+		part.Tokens = tokens + childTokens
+		return nil
+	}
+	part.Tokens = childTokens
+	return nil
 }
 
 func (b *Builder) validate() error {
@@ -372,15 +708,42 @@ func (b *Builder) validate() error {
 		if section, ok := seen[entry.id]; ok {
 			return fmt.Errorf("%w: duplicate entry ID %q in sections %s and %s", ErrPromptEntryID, entry.id, section, entry.section)
 		}
+		if entry.hasSourceCap && entry.sourceCap < 0 {
+			return fmt.Errorf("%w: source %q has negative token cap", ErrPromptBudget, entry.id)
+		}
 		seen[entry.id] = entry.section
 	}
+	if b.budget != nil {
+		if b.budget.Tokenizer == nil {
+			return ErrTokenizerNotFound
+		}
+		if b.budget.promptLimit() <= 0 {
+			return fmt.Errorf("%w: prompt token limit must be positive", ErrPromptBudget)
+		}
+	}
 	return nil
+}
+
+func orderedEntries(entries []builderEntry) []builderEntry {
+	ordered := make([]builderEntry, 0, len(entries))
+	for _, entry := range entries {
+		if entry.required {
+			ordered = append(ordered, entry)
+		}
+	}
+	for _, entry := range entries {
+		if !entry.required {
+			ordered = append(ordered, entry)
+		}
+	}
+	return ordered
 }
 
 func validatePartIDs(seen map[string]Section, section Section, parts []Part) error {
 	pending := make([]string, 0, len(parts))
 	local := map[string]struct{}{}
-	for _, part := range parts {
+	var visit func(Part) error
+	visit = func(part Part) error {
 		if strings.TrimSpace(part.ID) == "" {
 			return fmt.Errorf("%w: emitted part ID is empty in section %s", ErrPromptEntryID, section)
 		}
@@ -392,6 +755,17 @@ func validatePartIDs(seen map[string]Section, section Section, parts []Part) err
 		}
 		local[part.ID] = struct{}{}
 		pending = append(pending, part.ID)
+		for _, child := range part.Children {
+			if err := visit(child); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	for _, part := range parts {
+		if err := visit(part); err != nil {
+			return err
+		}
 	}
 	for _, id := range pending {
 		seen[id] = section
@@ -408,14 +782,156 @@ func validSection(section Section) bool {
 	}
 }
 
-func (b *Builder) emitEntry(ctx stdcontext.Context, name string, entry BuildTraceEntry) {
+func (b *Builder) sourceBudget(usedTokens int, reserveTokens int, entry builderEntry) SourceBudget {
+	if b.budget == nil {
+		return SourceBudget{
+			MaxTokens:             unlimitedTokens,
+			RemainingPromptTokens: unlimitedTokens,
+			Required:              entry.required,
+		}
+	}
+	remaining := max(b.promptLimit(reserveTokens)-usedTokens, 0)
+	maxTokens := remaining
+	if entry.hasSourceCap && entry.sourceCap < maxTokens {
+		maxTokens = entry.sourceCap
+	}
+	return SourceBudget{
+		Tokenizer:                  b.budget.Tokenizer,
+		MaxTokens:                  maxTokens,
+		RemainingPromptTokens:      remaining,
+		Required:                   entry.required,
+		RenderOverheadReserveRatio: b.budget.RenderOverheadReserveRatio,
+		Summarizer:                 b.budget.Summarizer,
+	}
+}
+
+func (b *Builder) partsFit(parts map[Section][]Part, section Section, next []Part, reserveTokens int) (bool, int, int, error) {
+	if b.budget == nil {
+		return true, 0, unlimitedTokens, nil
+	}
+	candidate := clonePartsMap(parts)
+	candidate[section] = cloneParts(next)
+	count := b.countPrompt(candidate)
+	limit := b.promptLimit(reserveTokens)
+	return count <= limit, count, limit, nil
+}
+
+func (b *Builder) partsFitAfterDroppingOptionalContext(parts map[Section][]Part, section Section, next []Part, reserveTokens int) (map[Section][]Part, bool, int, int, error) {
+	if b.budget == nil {
+		return parts, true, 0, unlimitedTokens, nil
+	}
+	candidate := clonePartsMap(parts)
+	candidate[SectionContext] = keepRequiredParts(candidate[SectionContext])
+	if section == SectionContext {
+		candidate[SectionContext] = keepRequiredParts(next)
+	} else {
+		candidate[section] = cloneParts(next)
+	}
+	count := b.countPrompt(candidate)
+	limit := b.promptLimit(reserveTokens)
+	return candidate, count <= limit, count, limit, nil
+}
+
+func (b *Builder) summarizeOptionalPart(ctx context.Context, parts map[Section][]Part, entry builderEntry, part Part, usedTokens int, reserveTokens int) (Part, bool, int, int, int, error) {
+	if b.budget == nil || b.budget.Summarizer == nil || b.budget.Tokenizer == nil || entry.required {
+		return Part{}, false, 0, 0, 0, nil
+	}
+	remaining := b.promptLimit(reserveTokens) - usedTokens
+	if remaining <= 0 {
+		return Part{}, false, 0, 0, b.promptLimit(reserveTokens), nil
+	}
+	summary, err := b.budget.Summarizer.Summarize(ctx, SummaryRequest{
+		ID:        entry.id,
+		Text:      part.Text,
+		MaxTokens: remaining,
+		Required:  false,
+		Meta:      cloneMeta(part.Meta),
+	})
+	if err != nil {
+		return Part{}, false, 0, 0, remaining, nil
+	}
+	summaryTokens, err := b.budget.Tokenizer.CountTokens(ctx, summary)
+	if err != nil {
+		return Part{}, false, 0, 0, remaining, err
+	}
+	summarized := Part{
+		ID:       part.ID,
+		Text:     summary,
+		Tokens:   summaryTokens,
+		Required: false,
+		Meta:     cloneMeta(part.Meta),
+	}
+	next := append(cloneParts(parts[entry.section]), summarized)
+	ok, count, available, err := b.partsFit(parts, entry.section, next, reserveTokens)
+	if !ok || err != nil {
+		return Part{}, false, 0, count, available, err
+	}
+	return summarized, true, summaryTokens, count, available, nil
+}
+
+func (b *Builder) countPrompt(parts map[Section][]Part) int {
+	var count int
+	for _, section := range parts {
+		for _, part := range section {
+			count += part.tokenCount()
+		}
+	}
+	return count + renderOverheadTokens(count, b.budget.RenderOverheadReserveRatio)
+}
+
+func (b *Builder) promptLimit(reserveTokens int) int {
+	if b.budget == nil {
+		return unlimitedTokens
+	}
+	return max(b.budget.promptLimit()-reserveTokens, 0)
+}
+
+func renderOverheadTokens(tokens int, ratio float64) int {
+	if tokens <= 0 || ratio <= 0 {
+		return 0
+	}
+	return int(math.Ceil(float64(tokens) * ratio))
+}
+
+func promptBudgetError(id string, used, available int) error {
+	return fmt.Errorf("%w: prompt with %q would use %d tokens, only %d available", ErrPromptBudget, id, used, available)
+}
+
+func markRequired(parts []Part) {
+	for i := range parts {
+		parts[i].Required = true
+		markRequired(parts[i].Children)
+	}
+}
+
+func partsTokenCount(parts []Part) int {
+	tokens := 0
+	for _, part := range parts {
+		tokens += part.tokenCount()
+	}
+	return tokens
+}
+
+func setTraceTokens(entry *BuildTraceEntry, entryTokens, promptTokens int) {
+	entry.EntryTokens = entryTokens
+	entry.PromptTokens = promptTokens
+}
+
+func (b *Builder) emitEntry(ctx context.Context, name string, entry BuildTraceEntry) {
 	fields := map[string]any{
-		"id":       entry.ID,
-		"section":  string(entry.Section),
-		"kind":     string(entry.Kind),
-		"status":   entry.Status,
-		"required": entry.Required,
-		"parts":    len(entry.Parts),
+		"id":               entry.ID,
+		"section":          string(entry.Section),
+		"kind":             string(entry.Kind),
+		"status":           entry.Status,
+		"required":         entry.Required,
+		"parts":            len(entry.Parts),
+		"entry_tokens":     entry.EntryTokens,
+		"prompt_tokens":    entry.PromptTokens,
+		"token_count":      entry.EntryTokens,
+		"available_tokens": entry.AvailableTokens,
+	}
+	if entry.Reason != "" {
+		fields["reason"] = entry.Reason
 	}
 	if entry.Err != nil {
 		fields["error"] = entry.Err.Error()
@@ -426,7 +942,7 @@ func (b *Builder) emitEntry(ctx stdcontext.Context, name string, entry BuildTrac
 	b.emit(ctx, name, fields, entry.Err)
 }
 
-func (b *Builder) emit(ctx stdcontext.Context, name string, fields map[string]any, err error) {
+func (b *Builder) emit(ctx context.Context, name string, fields map[string]any, err error) {
 	if b.debug == nil {
 		return
 	}
@@ -458,13 +974,14 @@ func (e builderEntry) part() Part {
 
 func (e builderEntry) view() EntryView {
 	return EntryView{
-		ID:       e.id,
-		Section:  e.section,
-		Kind:     e.kind,
-		Required: e.required,
-		Tokens:   e.tokens,
-		Text:     e.text,
-		Meta:     cloneMeta(e.meta),
+		ID:        e.id,
+		Section:   e.section,
+		Kind:      e.kind,
+		Required:  e.required,
+		Tokens:    e.tokens,
+		SourceCap: e.sourceCap,
+		Text:      e.text,
+		Meta:      cloneMeta(e.meta),
 	}
 }
 
@@ -551,11 +1068,61 @@ func cloneEntryViews(entries []EntryView) []EntryView {
 	return cloned
 }
 
+func clonePartsMap(parts map[Section][]Part) map[Section][]Part {
+	cloned := map[Section][]Part{}
+	for section, sectionParts := range parts {
+		cloned[section] = cloneParts(sectionParts)
+	}
+	return cloned
+}
+
+func clonePartIDMap(seen map[string]Section) map[string]Section {
+	cloned := make(map[string]Section, len(seen))
+	maps.Copy(cloned, seen)
+	return cloned
+}
+
+func rebuildPartIDs(parts map[Section][]Part) map[string]Section {
+	ids := map[string]Section{}
+	for section, sectionParts := range parts {
+		addPartIDs(ids, section, sectionParts)
+	}
+	return ids
+}
+
+func addPartIDs(ids map[string]Section, section Section, parts []Part) {
+	for _, part := range parts {
+		ids[part.ID] = section
+		addPartIDs(ids, section, part.Children)
+	}
+}
+
+func keepRequiredParts(parts []Part) []Part {
+	kept := make([]Part, 0, len(parts))
+	for _, part := range parts {
+		if part.Required {
+			kept = append(kept, part)
+		}
+	}
+	return kept
+}
+
+func markDroppedOptionalContextEntries(entries []BuildTraceEntry) []BuildTraceEntry {
+	for i := range entries {
+		if entries[i].Section == SectionContext && !entries[i].Required && entries[i].Status == "emitted" {
+			entries[i].Status = "dropped"
+			entries[i].Reason = "dropped_for_required_content"
+		}
+	}
+	return entries
+}
+
 func cloneParts(parts []Part) []Part {
 	cloned := make([]Part, len(parts))
 	for i, part := range parts {
 		cloned[i] = part
 		cloned[i].Meta = cloneMeta(part.Meta)
+		cloned[i].Children = cloneParts(part.Children)
 	}
 	return cloned
 }
@@ -565,8 +1132,6 @@ func cloneMeta(meta map[string]any) map[string]any {
 		return nil
 	}
 	cloned := make(map[string]any, len(meta))
-	for key, value := range meta {
-		cloned[key] = value
-	}
+	maps.Copy(cloned, meta)
 	return cloned
 }

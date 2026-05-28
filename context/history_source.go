@@ -1,58 +1,51 @@
 package context
 
 import (
-	stdcontext "context"
+	"context"
 	"strconv"
+	"time"
 
+	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
 )
 
 type HistorySource struct {
-	store      SessionStore
-	id         int
-	tokenLimit int
-	tokenizer  ai.Tokenizer
+	store SessionStore
+	id    int
+	debug gai.DebugSink
 }
 
-func History(store SessionStore, id, tokenLimit int, tokenizer ai.Tokenizer) Source {
+func History(store SessionStore, id int) Source {
 	return &HistorySource{
-		store:      store,
-		id:         id,
-		tokenLimit: tokenLimit,
-		tokenizer:  tokenizer,
+		store: store,
+		id:    id,
 	}
 }
 
-func (s *HistorySource) BuildParts(ctx stdcontext.Context, view PromptView) ([]Part, error) {
+func (s *HistorySource) DebugSink(debug gai.DebugSink) {
+	s.debug = debug
+}
+
+func (s *HistorySource) BuildParts(ctx context.Context, view PromptView, budget SourceBudget) ([]Part, error) {
 	if s == nil || s.store == nil {
 		return nil, ErrSessionStoreNotFound
 	}
-	if s.tokenizer == nil {
+	if budget.Tokenizer == nil {
 		return nil, ErrTokenizerNotFound
 	}
 
+	limit := budget.ContentLimit()
+	if limit == unlimitedTokens {
+		limit = budget.RemainingPromptTokens
+	}
+	if limit < 0 {
+		limit = 0
+	}
+
 	tokens := 0
-
-	convParts := []Part{}
-	var conv Conversation
-	if view != nil {
-		conv = view.Conversation()
-	}
-	if conv != nil {
-		renderedConv := renderMessages(conv.Messages())
-		if renderedConv != "" {
-			convTokens, err := s.tokenizer.CountTokens(ctx, renderedConv)
-			if err != nil {
-				return nil, err
-			}
-			tokens += convTokens
-			convParts = append(convParts, NewPart("current-loop", renderedConv, Required(), Tokens(convTokens)))
-		}
-	}
-
 	parts := []Part{}
 	historyOffset := 0
-	for tokens < s.tokenLimit {
+	for tokens < limit {
 		messages, err := s.store.GetMessages(ctx, s.id, 1, historyOffset)
 		if err != nil {
 			return nil, err
@@ -63,19 +56,85 @@ func (s *HistorySource) BuildParts(ctx stdcontext.Context, view PromptView) ([]P
 		historyOffset += len(messages)
 
 		rendered := renderMessages(messages)
-		messageTokens, err := s.tokenizer.CountTokens(ctx, rendered)
+		messageTokens, err := s.countRenderedMessages(ctx, s.store, budget.Tokenizer, messages)
 		if err != nil {
 			return nil, err
 		}
-		if tokens+messageTokens > s.tokenLimit {
+		if tokens+messageTokens > limit {
 			break
 		}
 
 		tokens += messageTokens
-		part := NewPart("history-"+strconv.Itoa(len(parts)), rendered, Required(), Tokens(messageTokens))
+		part := newHistoryPart("history-"+strconv.Itoa(len(parts)), rendered, messageTokens, budget.Required)
 		parts = append(parts, part)
 	}
 
-	parts = append(parts, convParts...)
 	return parts, nil
+}
+
+func (s *HistorySource) countRenderedMessages(ctx context.Context, store SessionStore, tokenizer ai.Tokenizer, messages []Message) (int, error) {
+	if tokens, ok := storedMessageTokens(messages, tokenizer.ID()); ok {
+		return tokens, nil
+	}
+	var totalTokens int
+	for _, message := range messages {
+		tokens, err := countMessageContentTokens(ctx, tokenizer, []Message{message})
+		if err != nil {
+			return 0, err
+		}
+		go func(message Message, tokens int) {
+			detachedCtx := context.WithoutCancel(ctx)
+			innerCtx, cancel := context.WithTimeout(detachedCtx, 5*time.Second)
+			defer cancel()
+			err := store.UpdateMessageTokens(innerCtx, message.ID, tokenizer.ID(), tokens)
+			if err != nil {
+				if s.debug != nil {
+					s.debug.Emit(innerCtx, gai.DebugEvent{
+						Name:   "HistorySource",
+						Source: "token_count_update_error",
+						Fields: map[string]any{
+							"message_id":   message.ID,
+							"tokenizer_id": tokenizer.ID(),
+							"error":        err.Error(),
+						},
+						Err: err,
+					})
+				}
+			}
+		}(message, tokens)
+		totalTokens += tokens
+	}
+	return totalTokens, nil
+}
+
+func countMessageContentTokens(ctx context.Context, tokenizer ai.Tokenizer, messages []Message) (int, error) {
+	var totalTokens int
+	for _, message := range messages {
+		tokens, err := tokenizer.CountTokens(ctx, message.Content.String())
+		if err != nil {
+			return 0, err
+		}
+		totalTokens += tokens
+	}
+	return totalTokens, nil
+}
+
+func storedMessageTokens(messages []Message, tokenizerID string) (int, bool) {
+	tokens := 0
+	for _, message := range messages {
+		messageTokens, ok := message.TokenCount[tokenizerID]
+		if !ok || messageTokens < 0 {
+			return 0, false
+		}
+		tokens += messageTokens
+	}
+	return tokens, true
+}
+
+func newHistoryPart(id, text string, tokens int, required bool) Part {
+	opts := []EntryOption{Tokens(tokens)}
+	if required {
+		opts = append(opts, Required())
+	}
+	return NewPart(id, text, opts...)
 }

@@ -3,6 +3,7 @@ package mocks
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/lace-ai/gai/ai"
 )
@@ -63,24 +64,41 @@ func (m *MockModel) Tokenizer() ai.Tokenizer {
 	if m.TokenizerValue != nil {
 		return m.TokenizerValue
 	}
-	return MockTokenizer{}
+	return &MockTokenizer{}
 }
 
 type MockTokenizer struct {
-	Count int
-	Err   error
+	IDValue    string
+	Count      int
+	CountCalls int
+	Err        error
 }
 
-func (t MockTokenizer) Tokenize(ctx context.Context, text string) ([]string, error) {
+func (t *MockTokenizer) ID() string {
+	if t.IDValue != "" {
+		return t.IDValue
+	}
+	return "mock.tokenizer"
+}
+
+func (t *MockTokenizer) Tokenize(ctx context.Context, text string) ([]string, error) {
 	if t.Err != nil {
 		return nil, t.Err
 	}
-	return nil, nil
+	return strings.Fields(text), nil
 }
 
-func (t MockTokenizer) CountTokens(ctx context.Context, text string) (int, error) {
+func (t *MockTokenizer) CountTokens(ctx context.Context, text string) (int, error) {
+	t.CountCalls++
 	if t.Err != nil {
 		return 0, t.Err
 	}
-	return t.Count, nil
+	if t.Count > 0 {
+		return t.Count, nil
+	}
+	tokens, err := t.Tokenize(ctx, text)
+	if err != nil {
+		return 0, err
+	}
+	return len(tokens), nil
 }
