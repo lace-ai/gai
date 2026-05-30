@@ -18,4 +18,6 @@ var (
 	ErrPromptBudget      = errors.New("prompt budget exceeded")
 	ErrUserPromptEmpty   = errors.New("user prompt is empty")
 	ErrTokenizerNotFound = errors.New("tokenizer not found")
+
+	ErrMessageNotFound = errors.New("message not found")
 )
