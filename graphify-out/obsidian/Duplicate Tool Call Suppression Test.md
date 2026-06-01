@@ -1,0 +1,16 @@
+---
+source_file: "loop/loop_test.go"
+type: "code"
+community: "Tool Loop Iteration"
+tags:
+  - graphify/code
+  - graphify/EXTRACTED
+  - community/Tool_Loop_Iteration
+---
+
+# Duplicate Tool Call Suppression Test
+
+## Connections
+- [[Completed Tool Call Deduplication]] - `rationale_for` [EXTRACTED]
+
+#graphify/code #graphify/EXTRACTED #community/Tool_Loop_Iteration
