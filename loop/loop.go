@@ -175,7 +175,7 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInfor
 				go func(tc iterationToolCall) {
 					defer wg.Done()
 
-					toolRes := CallTool(&tc.toolCall, a.Tools)
+					toolRes := CallTool(iterCtx, &tc.toolCall, a.Tools)
 					if a.PreProcessToolRes != nil {
 						if err := a.PreProcessToolRes.Process(tc.toolCall, toolRes); err != nil {
 							errCh <- fmt.Errorf("pre-processing tool response failed: %w", err)

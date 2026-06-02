@@ -1,6 +1,7 @@
 package loop
 
 import (
+	"context"
 	"strings"
 
 	"github.com/lace-ai/gai/ai"
@@ -28,7 +29,7 @@ type echoArgs struct {
 	Text string `json:"text"`
 }
 
-func (t *EchoTool) Function(req *ai.ToolCall) *ToolResponse {
+func (t *EchoTool) Function(ctx context.Context, req *ai.ToolCall) *ToolResponse {
 	var args echoArgs
 	if err := DecodeToolArgs(req, &args); err != nil {
 		return &ToolResponse{Err: err}
