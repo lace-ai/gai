@@ -1,0 +1,931 @@
+{
+  "nodes": [
+    {
+      "id": "rag_source_test_RAGSourceBudgeting",
+      "label": "RAG Source Document Budgeting Tests",
+      "file_type": "code",
+      "source_file": "context/rag_source_test.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "rag_source_test_XMLRendererGroupRendering",
+      "label": "XML Renderer Group Rendering Test",
+      "file_type": "code",
+      "source_file": "context/rag_source_test.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "rag_source_test_fakeRAGStore",
+      "label": "Fake RAG Store",
+      "file_type": "code",
+      "source_file": "context/rag_source_test.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "renderer_Renderer",
+      "label": "Renderer Interface",
+      "file_type": "code",
+      "source_file": "context/renderer.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "renderer_XMLRenderer",
+      "label": "XML Renderer",
+      "file_type": "code",
+      "source_file": "context/renderer.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "renderer_writeXMLPart",
+      "label": "Write XML Part",
+      "file_type": "code",
+      "source_file": "context/renderer.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "renderer_renderPrompt",
+      "label": "Render Prompt",
+      "file_type": "code",
+      "source_file": "context/renderer.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "store_SessionStore",
+      "label": "Session Store Interface",
+      "file_type": "code",
+      "source_file": "context/store.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "store_RAGStore",
+      "label": "RAG Store Interface",
+      "file_type": "code",
+      "source_file": "context/store.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "summarize_SummaryRequest",
+      "label": "Summary Request",
+      "file_type": "code",
+      "source_file": "context/summarize.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "summarize_Summarizer",
+      "label": "Summarizer Interface",
+      "file_type": "code",
+      "source_file": "context/summarize.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "doc_AgenticLoopPackage",
+      "label": "Agentic Loop Package",
+      "file_type": "code",
+      "source_file": "loop/doc.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "echo_tool_EchoTool",
+      "label": "Echo Tool",
+      "file_type": "code",
+      "source_file": "loop/echo_tool.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "errors_LoopErrors",
+      "label": "Loop Error Sentinels",
+      "file_type": "code",
+      "source_file": "loop/errors.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "iteration_Iteration",
+      "label": "Iteration",
+      "file_type": "code",
+      "source_file": "loop/iteration.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "iteration_IterationPart",
+      "label": "Iteration Part",
+      "file_type": "code",
+      "source_file": "loop/iteration.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "iteration_IterationMessages",
+      "label": "Iteration Message Conversion",
+      "file_type": "code",
+      "source_file": "loop/iteration.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "iteration_AppendToken",
+      "label": "Append Token To Iteration",
+      "file_type": "code",
+      "source_file": "loop/iteration.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "loop_Loop",
+      "label": "Loop Agent",
+      "file_type": "code",
+      "source_file": "loop/loop.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "loop_ToolExecutionPipeline",
+      "label": "Tool Execution Pipeline",
+      "file_type": "code",
+      "source_file": "loop/loop.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "loop_IncrementalPromptSession",
+      "label": "Incremental Prompt Session",
+      "file_type": "code",
+      "source_file": "loop/loop.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "loop_CompletedToolCalls",
+      "label": "Completed Tool Call Deduplication",
+      "file_type": "code",
+      "source_file": "loop/loop.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "tool_Tool",
+      "label": "Tool Interface",
+      "file_type": "code",
+      "source_file": "loop/tool.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "tool_CallTool",
+      "label": "Call Tool",
+      "file_type": "code",
+      "source_file": "loop/tool.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "tool_DecodeToolArgs",
+      "label": "Decode Tool Args",
+      "file_type": "code",
+      "source_file": "loop/tool.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "tool_RenderToolSignatures",
+      "label": "Render Tool Signatures",
+      "file_type": "code",
+      "source_file": "loop/tool.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "tool_toolCallSignature",
+      "label": "Tool Call Signature",
+      "file_type": "code",
+      "source_file": "loop/tool.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "loop_test_LoopScenarios",
+      "label": "Loop Scenario Tests",
+      "file_type": "code",
+      "source_file": "loop/loop_test.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "loop_test_ManyToolCalls",
+      "label": "Many Tool Calls Test",
+      "file_type": "code",
+      "source_file": "loop/loop_test.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "loop_test_DuplicateSuppression",
+      "label": "Duplicate Tool Call Suppression Test",
+      "file_type": "code",
+      "source_file": "loop/loop_test.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "loop_test_IncrementalPrompt",
+      "label": "Incremental Prompt Loop Test",
+      "file_type": "code",
+      "source_file": "loop/loop_test.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "loop_test_scriptedStreamModel",
+      "label": "Scripted Stream Model",
+      "file_type": "code",
+      "source_file": "loop/loop_test.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "tool_test_DecodeToolArgs",
+      "label": "Decode Tool Args Tests",
+      "file_type": "code",
+      "source_file": "loop/tool_test.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "session_manager_test_HistorySource",
+      "label": "History Source Tests",
+      "file_type": "code",
+      "source_file": "context/session_manager_test.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "session_manager_test_HistoryBudget",
+      "label": "History Budget Helper",
+      "file_type": "code",
+      "source_file": "context/session_manager_test.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "model_MockModel",
+      "label": "Mock Model",
+      "file_type": "code",
+      "source_file": "testutil/mocks/model.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "model_MockTokenizer",
+      "label": "Mock Tokenizer",
+      "file_type": "code",
+      "source_file": "testutil/mocks/model.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "provider_MockProvider",
+      "label": "Mock Provider",
+      "file_type": "code",
+      "source_file": "testutil/mocks/provider.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "session_store_MockSessionStore",
+      "label": "Mock Session Store",
+      "file_type": "code",
+      "source_file": "testutil/mocks/session_store.go",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    }
+  ],
+  "edges": [
+    {
+      "source": "renderer_XMLRenderer",
+      "target": "renderer_Renderer",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "context/renderer.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "renderer_XMLRenderer",
+      "target": "renderer_writeXMLPart",
+      "relation": "calls",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "context/renderer.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "renderer_renderPrompt",
+      "target": "renderer_Renderer",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "context/renderer.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "renderer_renderPrompt",
+      "target": "renderer_XMLRenderer",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "context/renderer.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "summarize_Summarizer",
+      "target": "summarize_SummaryRequest",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "context/summarize.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "rag_source_test_fakeRAGStore",
+      "target": "store_RAGStore",
+      "relation": "implements",
+      "confidence": "INFERRED",
+      "confidence_score": 0.9,
+      "source_file": "context/rag_source_test.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "rag_source_test_RAGSourceBudgeting",
+      "target": "store_RAGStore",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "context/rag_source_test.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "rag_source_test_XMLRendererGroupRendering",
+      "target": "renderer_XMLRenderer",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "context/rag_source_test.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "session_manager_test_HistorySource",
+      "target": "store_SessionStore",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "context/session_manager_test.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "session_manager_test_HistorySource",
+      "target": "session_store_MockSessionStore",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "context/session_manager_test.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "session_manager_test_HistorySource",
+      "target": "model_MockTokenizer",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "context/session_manager_test.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "session_manager_test_HistoryBudget",
+      "target": "session_manager_test_HistorySource",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "context/session_manager_test.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "echo_tool_EchoTool",
+      "target": "tool_Tool",
+      "relation": "implements",
+      "confidence": "INFERRED",
+      "confidence_score": 0.95,
+      "source_file": "loop/echo_tool.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "echo_tool_EchoTool",
+      "target": "tool_DecodeToolArgs",
+      "relation": "calls",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "loop/echo_tool.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "tool_CallTool",
+      "target": "tool_Tool",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "loop/tool.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "tool_CallTool",
+      "target": "errors_LoopErrors",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "loop/tool.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "tool_DecodeToolArgs",
+      "target": "errors_LoopErrors",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "loop/tool.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "tool_RenderToolSignatures",
+      "target": "tool_Tool",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "loop/tool.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "loop_Loop",
+      "target": "errors_LoopErrors",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "loop/loop.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "loop_Loop",
+      "target": "renderer_renderPrompt",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.65,
+      "source_file": "loop/loop.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "loop_Loop",
+      "target": "loop_IncrementalPromptSession",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "loop/loop.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "loop_Loop",
+      "target": "loop_ToolExecutionPipeline",
+      "relation": "calls",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "loop/loop.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "loop_ToolExecutionPipeline",
+      "target": "tool_CallTool",
+      "relation": "calls",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "loop/loop.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "loop_ToolExecutionPipeline",
+      "target": "tool_Tool",
+      "relation": "shares_data_with",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "loop/loop.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "loop_ToolExecutionPipeline",
+      "target": "loop_CompletedToolCalls",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "loop/loop.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "loop_CompletedToolCalls",
+      "target": "tool_toolCallSignature",
+      "relation": "calls",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "loop/loop.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "loop_IncrementalPromptSession",
+      "target": "iteration_IterationMessages",
+      "relation": "shares_data_with",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "loop/loop.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "loop_Loop",
+      "target": "iteration_AppendToken",
+      "relation": "calls",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "loop/loop.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "loop_Loop",
+      "target": "iteration_Iteration",
+      "relation": "shares_data_with",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "loop/loop.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "iteration_AppendToken",
+      "target": "iteration_IterationPart",
+      "relation": "shares_data_with",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "loop/iteration.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "iteration_IterationMessages",
+      "target": "iteration_IterationPart",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "loop/iteration.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "iteration_IterationMessages",
+      "target": "loop_ToolExecutionPipeline",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.75,
+      "source_file": "loop/iteration.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "loop_test_LoopScenarios",
+      "target": "loop_Loop",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "loop/loop_test.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "loop_test_LoopScenarios",
+      "target": "model_MockModel",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "loop/loop_test.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "loop_test_ManyToolCalls",
+      "target": "loop_ToolExecutionPipeline",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "loop/loop_test.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "loop_test_DuplicateSuppression",
+      "target": "loop_CompletedToolCalls",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "loop/loop_test.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "loop_test_IncrementalPrompt",
+      "target": "loop_IncrementalPromptSession",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "loop/loop_test.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "loop_test_scriptedStreamModel",
+      "target": "loop_Loop",
+      "relation": "shares_data_with",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "loop/loop_test.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "tool_test_DecodeToolArgs",
+      "target": "tool_DecodeToolArgs",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "loop/tool_test.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "model_MockModel",
+      "target": "model_MockTokenizer",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "testutil/mocks/model.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "provider_MockProvider",
+      "target": "model_MockModel",
+      "relation": "shares_data_with",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "testutil/mocks/provider.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "session_store_MockSessionStore",
+      "target": "store_SessionStore",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "testutil/mocks/session_store.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "session_store_MockSessionStore",
+      "target": "session_manager_test_HistorySource",
+      "relation": "shares_data_with",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "testutil/mocks/session_store.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "model_MockTokenizer",
+      "target": "session_manager_test_HistorySource",
+      "relation": "shares_data_with",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "testutil/mocks/model.go",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "doc_AgenticLoopPackage",
+      "target": "loop_Loop",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "loop/doc.go",
+      "source_location": null,
+      "weight": 1.0
+    }
+  ],
+  "hyperedges": [
+    {
+      "id": "prompt_rendering_and_loop_execution",
+      "label": "Prompt Rendering And Loop Execution",
+      "nodes": [
+        "renderer_renderPrompt",
+        "loop_Loop",
+        "loop_IncrementalPromptSession"
+      ],
+      "relation": "participate_in",
+      "confidence": "INFERRED",
+      "confidence_score": 0.75,
+      "source_file": "loop/loop.go"
+    },
+    {
+      "id": "tool_call_lifecycle",
+      "label": "Tool Call Lifecycle",
+      "nodes": [
+        "iteration_AppendToken",
+        "loop_ToolExecutionPipeline",
+        "tool_CallTool",
+        "echo_tool_EchoTool"
+      ],
+      "relation": "form",
+      "confidence": "EXTRACTED",
+      "confidence_score": 0.95,
+      "source_file": "loop/loop.go"
+    },
+    {
+      "id": "test_mocks_support_loop_and_history",
+      "label": "Test Mocks Support Loop And History",
+      "nodes": [
+        "model_MockModel",
+        "model_MockTokenizer",
+        "session_store_MockSessionStore",
+        "loop_test_LoopScenarios",
+        "session_manager_test_HistorySource"
+      ],
+      "relation": "participate_in",
+      "confidence": "EXTRACTED",
+      "confidence_score": 0.9,
+      "source_file": "loop/loop_test.go"
+    }
+  ],
+  "input_tokens": 0,
+  "output_tokens": 0
+}

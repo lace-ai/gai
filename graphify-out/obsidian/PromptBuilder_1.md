@@ -1,0 +1,18 @@
+---
+source_file: "loop/loop.go"
+type: "code"
+community: "Loop Tool ToolCall"
+location: "L28"
+tags:
+  - graphify/code
+  - graphify/EXTRACTED
+  - community/Loop_Tool_ToolCall
+---
+
+# PromptBuilder
+
+## Connections
+- [[Loop_1]] - `references` [EXTRACTED]
+- [[New()_3]] - `references` [EXTRACTED]
+
+#graphify/code #graphify/EXTRACTED #community/Loop_Tool_ToolCall
