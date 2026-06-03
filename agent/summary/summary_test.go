@@ -188,7 +188,7 @@ func (t staticTool) Params() string {
 	return "{}"
 }
 
-func (t staticTool) Function(*ai.ToolCall) *loop.ToolResponse {
+func (t staticTool) Function(context.Context, *ai.ToolCall) *loop.ToolResponse {
 	return &loop.ToolResponse{Text: "ok"}
 }
 

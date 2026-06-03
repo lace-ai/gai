@@ -2,6 +2,7 @@ package loop
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -24,17 +25,17 @@ type Tool interface {
 	Name() string
 	Description() string
 	Params() string
-	Function(req *ai.ToolCall) *ToolResponse
+	Function(ctx context.Context, req *ai.ToolCall) *ToolResponse
 }
 
-func CallTool(req *ai.ToolCall, tools []Tool) *ToolResponse {
+func CallTool(ctx context.Context, req *ai.ToolCall, tools []Tool) *ToolResponse {
 	if err := req.Validate(); err != nil {
 		return &ToolResponse{Err: err}
 	}
 
 	for _, tool := range tools {
 		if tool.Name() == req.Name {
-			res := tool.Function(req)
+			res := tool.Function(ctx, req)
 			if res == nil {
 				return &ToolResponse{Err: fmt.Errorf("tool %s returned nil response", req.Name)}
 			}
