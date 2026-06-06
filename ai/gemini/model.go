@@ -9,9 +9,12 @@ import (
 
 	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
+	"go.opentelemetry.io/otel/attribute"
 	"google.golang.org/genai"
 	genaitokenizer "google.golang.org/genai/tokenizer"
 )
+
+const geminiTracerName = "github.com/lace-ai/gai/ai/gemini"
 
 type Model struct {
 	name   string
@@ -43,12 +46,32 @@ func (m *Model) Close() error {
 
 func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.Token {
 	out := make(chan ai.Token, 1)
+	prompt := req.Prompt.CombinedPrompt()
 
 	go func() {
+		ctx, span := gai.StartOperationSpan(ctx, geminiTracerName, "ai.gemini", "ai.operation", "model.generate_stream",
+			attribute.String("ai.provider", "gemini"),
+			attribute.String("ai.model", m.name),
+			attribute.Int("ai.max_tokens", req.MaxTokens),
+			attribute.Int("ai.prompt_length", len(prompt)),
+		)
+		var streamErr error
+		textTokenCount := 0
+		thoughtTokenCount := 0
+		toolCallCount := 0
+		defer func() {
+			span.SetAttributes(
+				attribute.Int("ai.text_token_count", textTokenCount),
+				attribute.Int("ai.thought_token_count", thoughtTokenCount),
+				attribute.Int("ai.tool_call_count", toolCallCount),
+			)
+			gai.EndSpan(span, streamErr)
+		}()
 		defer close(out)
 
 		client, err := m.getClient(ctx)
 		if err != nil {
+			streamErr = err
 			if m.debug != nil {
 				m.debug.Emit(ctx, gai.DebugEvent{
 					Name:   "gemini_get_client_failed",
@@ -70,11 +93,11 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			}
 		}
 
-		contents := genai.Text(req.Prompt.CombinedPrompt())
+		contents := genai.Text(prompt)
 
 		for resp, err := range client.Models.GenerateContentStream(ctx, m.name, contents, config) {
 			if err != nil {
-				streamErr := fmt.Errorf("error generating content stream: %w", err)
+				streamErr = fmt.Errorf("error generating content stream: %w", err)
 				if m.debug != nil {
 					m.debug.Emit(ctx, gai.DebugEvent{
 						Name:   "gemini_stream_generation_failed",
@@ -100,11 +123,19 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 
 				switch {
 				case part.Text != "":
-					out <- buildTextToken(part)
+					token := buildTextToken(part)
+					switch token.Type {
+					case ai.TokenTypeThought:
+						thoughtTokenCount++
+					default:
+						textTokenCount++
+					}
+					out <- token
 				case part.FunctionCall != nil:
 					rawPart, err := json.Marshal(part)
 					if err != nil {
 						encodeErr := fmt.Errorf("error encoding part: %w", err)
+						streamErr = encodeErr
 						if m.debug != nil {
 							fields := map[string]any{
 								"error": err.Error(),
@@ -125,6 +156,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 					toolCall, err := mapFunctionCall(part.FunctionCall)
 					if err != nil {
 						mapErr := fmt.Errorf("error mapping function call: %w", err)
+						streamErr = mapErr
 						if m.debug != nil {
 							fields := map[string]any{
 								"error": err.Error(),
@@ -160,6 +192,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 						Data:     rawPart,
 						ToolCall: toolCall,
 					}
+					toolCallCount++
 				}
 			}
 		}
@@ -168,7 +201,16 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 	return out
 }
 
-func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (*ai.AIResponse, error) {
+func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AIResponse, err error) {
+	prompt := req.Prompt.CombinedPrompt()
+	ctx, span := gai.StartOperationSpan(ctx, geminiTracerName, "ai.gemini", "ai.operation", "model.generate",
+		attribute.String("ai.provider", "gemini"),
+		attribute.String("ai.model", m.name),
+		attribute.Int("ai.max_tokens", req.MaxTokens),
+		attribute.Int("ai.prompt_length", len(prompt)),
+	)
+	defer func() { gai.EndSpan(span, err) }()
+
 	client, err := m.getClient(ctx)
 	if err != nil {
 		if m.debug != nil {
@@ -187,7 +229,7 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (*ai.AIResponse,
 	result, err := client.Models.GenerateContent(
 		ctx,
 		m.name,
-		genai.Text(req.Prompt.CombinedPrompt()),
+		genai.Text(prompt),
 		nil,
 	)
 	if err != nil {
@@ -210,6 +252,10 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (*ai.AIResponse,
 		inputTokens = int(result.UsageMetadata.PromptTokenCount)
 		outputTokens = int(result.UsageMetadata.CandidatesTokenCount)
 	}
+	span.SetAttributes(
+		attribute.Int("ai.input_tokens", inputTokens),
+		attribute.Int("ai.output_tokens", outputTokens),
+	)
 
 	if m.debug != nil {
 		m.debug.Emit(ctx, gai.DebugEvent{
@@ -301,7 +347,18 @@ func (t *Tokenizer) ID() string {
 	return "gemini." + t.modelName
 }
 
-func (t *Tokenizer) CountTokens(ctx context.Context, text string) (int, error) {
+func (t *Tokenizer) CountTokens(ctx context.Context, text string) (tokens int, err error) {
+	ctx, span := gai.StartOperationSpan(ctx, geminiTracerName, "ai.gemini", "ai.operation", "tokenizer.count_tokens",
+		attribute.String("ai.provider", "gemini"),
+		attribute.String("ai.model", t.modelName),
+		attribute.String("ai.tokenizer", t.ID()),
+		attribute.Int("ai.input_length", len(text)),
+	)
+	defer func() {
+		span.SetAttributes(attribute.Int("ai.input_tokens", tokens))
+		gai.EndSpan(span, err)
+	}()
+
 	local, err := t.getLocal()
 	if err != nil {
 		return 0, err
@@ -314,7 +371,18 @@ func (t *Tokenizer) CountTokens(ctx context.Context, text string) (int, error) {
 	return int(result.TotalTokens), nil
 }
 
-func (t *Tokenizer) Tokenize(ctx context.Context, text string) ([]string, error) {
+func (t *Tokenizer) Tokenize(ctx context.Context, text string) (tokens []string, err error) {
+	ctx, span := gai.StartOperationSpan(ctx, geminiTracerName, "ai.gemini", "ai.operation", "tokenizer.tokenize",
+		attribute.String("ai.provider", "gemini"),
+		attribute.String("ai.model", t.modelName),
+		attribute.String("ai.tokenizer", t.ID()),
+		attribute.Int("ai.input_length", len(text)),
+	)
+	defer func() {
+		span.SetAttributes(attribute.Int("ai.input_tokens", len(tokens)))
+		gai.EndSpan(span, err)
+	}()
+
 	local, err := t.getLocal()
 	if err != nil {
 		return nil, err
@@ -325,7 +393,6 @@ func (t *Tokenizer) Tokenize(ctx context.Context, text string) ([]string, error)
 		return nil, err
 	}
 
-	var tokens []string
 	for _, info := range result.TokensInfo {
 		for _, token := range info.Tokens {
 			tokens = append(tokens, string(token))

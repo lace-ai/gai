@@ -13,7 +13,10 @@ import (
 
 	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
+	"go.opentelemetry.io/otel/attribute"
 )
+
+const mistralTracerName = "github.com/lace-ai/gai/ai/mistral"
 
 type Model struct {
 	name   string
@@ -73,11 +76,30 @@ func (t *Tokenizer) ID() string {
 	return "mistral." + t.modelName
 }
 
-func (t *Tokenizer) Tokenize(ctx context.Context, text string) ([]string, error) {
-	return nil, ai.ErrTokenizerUnsupported
+func (t *Tokenizer) Tokenize(ctx context.Context, text string) (tokens []string, err error) {
+	_, span := gai.StartOperationSpan(ctx, mistralTracerName, "ai.mistral", "ai.operation", "tokenizer.tokenize",
+		attribute.String("ai.provider", "mistral"),
+		attribute.String("ai.model", t.modelName),
+		attribute.String("ai.tokenizer", t.ID()),
+		attribute.Int("ai.input_length", len(text)),
+	)
+	err = ai.ErrTokenizerUnsupported
+	defer func() { gai.EndSpan(span, err) }()
+	return nil, err
 }
 
-func (t *Tokenizer) CountTokens(ctx context.Context, text string) (int, error) {
+func (t *Tokenizer) CountTokens(ctx context.Context, text string) (tokens int, err error) {
+	ctx, span := gai.StartOperationSpan(ctx, mistralTracerName, "ai.mistral", "ai.operation", "tokenizer.count_tokens",
+		attribute.String("ai.provider", "mistral"),
+		attribute.String("ai.model", t.modelName),
+		attribute.String("ai.tokenizer", t.ID()),
+		attribute.Int("ai.input_length", len(text)),
+	)
+	defer func() {
+		span.SetAttributes(attribute.Int("ai.input_tokens", tokens))
+		gai.EndSpan(span, err)
+	}()
+
 	const maxTokensForTokenCount = 1
 	payload := chatCompletionRequest{
 		Model: t.modelName,
@@ -130,6 +152,7 @@ func (t *Tokenizer) CountTokens(ctx context.Context, text string) (int, error) {
 	}
 
 	if res.StatusCode >= http.StatusMultipleChoices {
+		span.SetAttributes(attribute.Int("http.response.status_code", res.StatusCode))
 		if t.debug != nil {
 			fields := map[string]any{
 				"status_code": res.StatusCode,
@@ -145,6 +168,7 @@ func (t *Tokenizer) CountTokens(ctx context.Context, text string) (int, error) {
 		}
 		return 0, fmt.Errorf("mistral token count failed (status %d): %s", res.StatusCode, string(resBody))
 	}
+	span.SetAttributes(attribute.Int("http.response.status_code", res.StatusCode))
 
 	var parsed chatCompletionResponse
 	if err := json.Unmarshal(resBody, &parsed); err != nil {
@@ -269,9 +293,26 @@ func (a *mistralToolCallAccumulator) ready(final bool) []ai.ToolCall {
 }
 
 func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.Token {
+	prompt := req.Prompt.CombinedPrompt()
+	ctx, span := gai.StartOperationSpan(ctx, mistralTracerName, "ai.mistral", "ai.operation", "model.generate_stream",
+		attribute.String("ai.provider", "mistral"),
+		attribute.String("ai.model", m.name),
+		attribute.Int("ai.max_tokens", req.MaxTokens),
+		attribute.Int("ai.prompt_length", len(prompt)),
+	)
 	raw := make(chan ai.Token, 1)
 
 	go func() {
+		var streamErr error
+		textTokenCount := 0
+		toolCallCount := 0
+		defer func() {
+			span.SetAttributes(
+				attribute.Int("ai.text_token_count", textTokenCount),
+				attribute.Int("ai.tool_call_count", toolCallCount),
+			)
+			gai.EndSpan(span, streamErr)
+		}()
 		defer close(raw)
 
 		payload := chatCompletionRequest{
@@ -279,7 +320,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			Messages: []chatMessageRequest{
 				{
 					Role:    "user",
-					Content: req.Prompt.CombinedPrompt(),
+					Content: prompt,
 				},
 			},
 			Stream: true,
@@ -290,6 +331,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 
 		body, err := json.Marshal(payload)
 		if err != nil {
+			streamErr = err
 			if m.debug != nil {
 				fields := map[string]any{
 					"error": err.Error(),
@@ -315,6 +357,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			bytes.NewReader(body),
 		)
 		if err != nil {
+			streamErr = err
 			if m.debug != nil {
 				m.debug.Emit(ctx, gai.DebugEvent{
 					Name:   "mistral_stream_request_creation_failed",
@@ -334,6 +377,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 
 		res, err := m.client.httpClient.Do(httpReq)
 		if err != nil {
+			streamErr = err
 			if m.debug != nil {
 				m.debug.Emit(ctx, gai.DebugEvent{
 					Name:   "mistral_stream_request_failed",
@@ -348,6 +392,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			return
 		}
 		defer res.Body.Close()
+		span.SetAttributes(attribute.Int("http.response.status_code", res.StatusCode))
 
 		if res.StatusCode >= http.StatusMultipleChoices {
 			const maxResponseBody = 1 << 20 // 1MB
@@ -368,6 +413,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 					Err:  fmt.Errorf("mistral chat stream failed (status %d): %w", res.StatusCode, readErr),
 					Type: ai.TokenTypeErr,
 				}
+				streamErr = readErr
 				return
 			}
 			if m.debug != nil {
@@ -383,8 +429,9 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 					Fields: fields,
 				})
 			}
+			streamErr = fmt.Errorf("mistral chat stream failed (status %d): %s", res.StatusCode, string(resBody))
 			raw <- ai.Token{
-				Err:  fmt.Errorf("mistral chat stream failed (status %d): %s", res.StatusCode, string(resBody)),
+				Err:  streamErr,
 				Type: ai.TokenTypeErr,
 			}
 			return
@@ -425,6 +472,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			}
 			if text != "" {
 				raw <- ai.Token{Type: ai.TokenTypeText, Text: text, Data: []byte(text)}
+				textTokenCount++
 			}
 
 			finalToolCalls := chunk.Choices[0].FinishReason == "tool_calls"
@@ -446,7 +494,8 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 							Err:    mapErr,
 						})
 					}
-					return fmt.Errorf("map tool_calls: %w", mapErr)
+					streamErr = fmt.Errorf("map tool_calls: %w", mapErr)
+					return streamErr
 				}
 				if m.debug != nil {
 					fields := map[string]any{}
@@ -466,6 +515,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 						Data:     append([]byte(nil), tc.Args...),
 						ToolCall: &tcCopy,
 					}
+					toolCallCount++
 				}
 			}
 
@@ -485,7 +535,8 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 						Err: err,
 					})
 				}
-				raw <- ai.Token{Err: fmt.Errorf("read stream: %w", err), Type: ai.TokenTypeErr}
+				streamErr = fmt.Errorf("read stream: %w", err)
+				raw <- ai.Token{Err: streamErr, Type: ai.TokenTypeErr}
 				return
 			}
 
@@ -512,6 +563,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 							Err: flushErr,
 						})
 					}
+					streamErr = flushErr
 					raw <- ai.Token{Err: flushErr, Type: ai.TokenTypeErr}
 					return
 				}
@@ -541,6 +593,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 							Err: flushErr,
 						})
 					}
+					streamErr = flushErr
 					raw <- ai.Token{Err: flushErr, Type: ai.TokenTypeErr}
 				}
 				return
@@ -585,13 +638,22 @@ func intPtr(v int) *int {
 	return &v
 }
 
-func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (*ai.AIResponse, error) {
+func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AIResponse, err error) {
+	prompt := req.Prompt.CombinedPrompt()
+	ctx, span := gai.StartOperationSpan(ctx, mistralTracerName, "ai.mistral", "ai.operation", "model.generate",
+		attribute.String("ai.provider", "mistral"),
+		attribute.String("ai.model", m.name),
+		attribute.Int("ai.max_tokens", req.MaxTokens),
+		attribute.Int("ai.prompt_length", len(prompt)),
+	)
+	defer func() { gai.EndSpan(span, err) }()
+
 	payload := chatCompletionRequest{
 		Model: m.name,
 		Messages: []chatMessageRequest{
 			{
 				Role:    "user",
-				Content: req.Prompt.CombinedPrompt(),
+				Content: prompt,
 			},
 		},
 	}
@@ -629,8 +691,10 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (*ai.AIResponse,
 	}
 
 	if res.StatusCode >= http.StatusMultipleChoices {
+		span.SetAttributes(attribute.Int("http.response.status_code", res.StatusCode))
 		return nil, fmt.Errorf("mistral chat completion failed (status %d): %s", res.StatusCode, string(resBody))
 	}
+	span.SetAttributes(attribute.Int("http.response.status_code", res.StatusCode))
 
 	var parsed chatCompletionResponse
 	if err := json.Unmarshal(resBody, &parsed); err != nil {
@@ -639,6 +703,10 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (*ai.AIResponse,
 	if len(parsed.Choices) == 0 {
 		return nil, ErrNoChoices
 	}
+	span.SetAttributes(
+		attribute.Int("ai.input_tokens", parsed.Usage.PromptTokens),
+		attribute.Int("ai.output_tokens", parsed.Usage.CompletionTokens),
+	)
 
 	return &ai.AIResponse{
 		Text:         parsed.Choices[0].Message.Content,
