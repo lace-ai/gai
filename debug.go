@@ -18,7 +18,7 @@ type DebugSinkFunc func(ctx context.Context, e DebugEvent)
 
 func (f DebugSinkFunc) Emit(ctx context.Context, e DebugEvent) {
 	if f != nil {
-		f(ctx, e)
+		f(ctx, EnrichDebugEvent(ctx, e))
 	}
 }
 
@@ -30,10 +30,26 @@ type SensitiveDebugSinkFunc func(ctx context.Context, e DebugEvent)
 
 func (f SensitiveDebugSinkFunc) Emit(ctx context.Context, e DebugEvent) {
 	if f != nil {
-		f(ctx, e)
+		f(ctx, EnrichDebugEvent(ctx, e))
 	}
 }
 
 func (f SensitiveDebugSinkFunc) IncludeSensitiveData() bool {
 	return true
+}
+
+func EnrichDebugEvent(ctx context.Context, e DebugEvent) DebugEvent {
+	traceID, spanID, err := SpanContextIDs(ctx)
+	if err != nil {
+		return e
+	}
+
+	fields := make(map[string]any, len(e.Fields)+2)
+	for key, value := range e.Fields {
+		fields[key] = value
+	}
+	fields["trace_id"] = traceID
+	fields["span_id"] = spanID
+	e.Fields = fields
+	return e
 }
