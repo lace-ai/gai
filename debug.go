@@ -1,6 +1,9 @@
 package gai
 
-import "context"
+import (
+	"context"
+	"math"
+)
 
 type DebugEvent struct {
 	Name   string
@@ -48,7 +51,11 @@ func EnrichDebugEvent(ctx context.Context, e DebugEvent) DebugEvent {
 		return e
 	}
 
-	fields := make(map[string]any, len(e.Fields)+2)
+	capHint := 0
+	if len(e.Fields) <= math.MaxInt-2 {
+		capHint = len(e.Fields) + 2
+	}
+	fields := make(map[string]any, capHint)
 	for key, value := range e.Fields {
 		fields[key] = value
 	}
