@@ -56,6 +56,17 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			attribute.Int("ai.prompt_length", len(prompt)),
 		)
 		var streamErr error
+		if m.debug != nil && m.debug.IncludeSensitiveData() {
+			m.debug.Emit(ctx, gai.DebugEvent{
+				Name:   "gemini_stream_request",
+				Source: "ai:gemini.Model.GenerateStream",
+				Fields: map[string]any{
+					"prompt":          req.Prompt,
+					"combined_prompt": prompt,
+					"max_tokens":      req.MaxTokens,
+				},
+			})
+		}
 		textTokenCount := 0
 		thoughtTokenCount := 0
 		toolCallCount := 0
@@ -210,6 +221,17 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 		attribute.Int("ai.prompt_length", len(prompt)),
 	)
 	defer func() { gai.EndSpan(span, err) }()
+	if m.debug != nil && m.debug.IncludeSensitiveData() {
+		m.debug.Emit(ctx, gai.DebugEvent{
+			Name:   "gemini_generate_request",
+			Source: "ai:gemini.Model.Generate",
+			Fields: map[string]any{
+				"prompt":          req.Prompt,
+				"combined_prompt": prompt,
+				"max_tokens":      req.MaxTokens,
+			},
+		})
+	}
 
 	client, err := m.getClient(ctx)
 	if err != nil {
@@ -258,13 +280,17 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 	)
 
 	if m.debug != nil {
+		fields := map[string]any{
+			"input_tokens":  inputTokens,
+			"output_tokens": outputTokens,
+		}
+		if m.debug.IncludeSensitiveData() {
+			fields["response_text"] = result.Text()
+		}
 		m.debug.Emit(ctx, gai.DebugEvent{
 			Name:   "gemini_generate_content_success",
 			Source: "ai:gemini.Model.Generate",
-			Fields: map[string]any{
-				"input_tokens":  inputTokens,
-				"output_tokens": outputTokens,
-			},
+			Fields: fields,
 		})
 	}
 

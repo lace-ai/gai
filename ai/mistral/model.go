@@ -304,6 +304,17 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 
 	go func() {
 		var streamErr error
+		if m.debug != nil && m.debug.IncludeSensitiveData() {
+			m.debug.Emit(ctx, gai.DebugEvent{
+				Name:   "mistral_stream_request",
+				Source: "ai:mistral.Model.GenerateStream",
+				Fields: map[string]any{
+					"prompt":          req.Prompt,
+					"combined_prompt": prompt,
+					"max_tokens":      req.MaxTokens,
+				},
+			})
+		}
 		textTokenCount := 0
 		toolCallCount := 0
 		defer func() {
@@ -647,6 +658,17 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 		attribute.Int("ai.prompt_length", len(prompt)),
 	)
 	defer func() { gai.EndSpan(span, err) }()
+	if m.debug != nil && m.debug.IncludeSensitiveData() {
+		m.debug.Emit(ctx, gai.DebugEvent{
+			Name:   "mistral_generate_request",
+			Source: "ai:mistral.Model.Generate",
+			Fields: map[string]any{
+				"prompt":          req.Prompt,
+				"combined_prompt": prompt,
+				"max_tokens":      req.MaxTokens,
+			},
+		})
+	}
 
 	payload := chatCompletionRequest{
 		Model: m.name,
@@ -707,6 +729,18 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 		attribute.Int("ai.input_tokens", parsed.Usage.PromptTokens),
 		attribute.Int("ai.output_tokens", parsed.Usage.CompletionTokens),
 	)
+	if m.debug != nil && m.debug.IncludeSensitiveData() {
+		m.debug.Emit(ctx, gai.DebugEvent{
+			Name:   "mistral_generate_response",
+			Source: "ai:mistral.Model.Generate",
+			Fields: map[string]any{
+				"response":      parsed,
+				"response_text": parsed.Choices[0].Message.Content,
+				"input_tokens":  parsed.Usage.PromptTokens,
+				"output_tokens": parsed.Usage.CompletionTokens,
+			},
+		})
+	}
 
 	return &ai.AIResponse{
 		Text:         parsed.Choices[0].Message.Content,

@@ -2,7 +2,9 @@ package gai
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -49,4 +51,51 @@ func SpanContextIDs(ctx context.Context) (traceID string, spanID string, err err
 	}
 
 	return sc.TraceID().String(), sc.SpanID().String(), nil
+}
+
+func RecordDebugEvent(ctx context.Context, e DebugEvent) {
+	span := trace.SpanFromContext(ctx)
+	if !span.SpanContext().IsValid() {
+		return
+	}
+	if e.Err != nil {
+		RecordSpanError(span, e.Err)
+	}
+	span.AddEvent("debug."+e.Name, trace.WithAttributes(debugEventAttributes(e)...))
+}
+
+func debugEventAttributes(e DebugEvent) []attribute.KeyValue {
+	attrs := []attribute.KeyValue{
+		attribute.String("debug.name", e.Name),
+		attribute.String("debug.source", e.Source),
+	}
+	if e.Err != nil {
+		attrs = append(attrs, attribute.String("error", e.Err.Error()))
+	}
+	for key, value := range e.Fields {
+		attrs = append(attrs, debugFieldAttribute("debug."+key, value))
+	}
+	return attrs
+}
+
+func debugFieldAttribute(key string, value any) attribute.KeyValue {
+	switch v := value.(type) {
+	case nil:
+		return attribute.String(key, "")
+	case string:
+		return attribute.String(key, v)
+	case bool:
+		return attribute.Bool(key, v)
+	case int:
+		return attribute.Int(key, v)
+	case int64:
+		return attribute.Int64(key, v)
+	case float64:
+		return attribute.Float64(key, v)
+	default:
+		if raw, err := json.Marshal(v); err == nil {
+			return attribute.String(key, string(raw))
+		}
+		return attribute.String(key, fmt.Sprint(v))
+	}
 }

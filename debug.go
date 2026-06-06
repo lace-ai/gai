@@ -18,7 +18,9 @@ type DebugSinkFunc func(ctx context.Context, e DebugEvent)
 
 func (f DebugSinkFunc) Emit(ctx context.Context, e DebugEvent) {
 	if f != nil {
-		f(ctx, EnrichDebugEvent(ctx, e))
+		event := EnrichDebugEvent(ctx, e)
+		RecordDebugEvent(ctx, event)
+		f(ctx, event)
 	}
 }
 
@@ -30,7 +32,9 @@ type SensitiveDebugSinkFunc func(ctx context.Context, e DebugEvent)
 
 func (f SensitiveDebugSinkFunc) Emit(ctx context.Context, e DebugEvent) {
 	if f != nil {
-		f(ctx, EnrichDebugEvent(ctx, e))
+		event := EnrichDebugEvent(ctx, e)
+		RecordDebugEvent(ctx, event)
+		f(ctx, event)
 	}
 }
 

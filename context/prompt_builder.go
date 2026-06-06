@@ -357,7 +357,11 @@ func (b *Builder) buildPrompt(ctx context.Context, conv Conversation, reserveTok
 	view := newBuilderView(conv, b.entries)
 	state = newPromptBuildState(renderer, reserveTokens)
 
-	b.emit(ctx, "prompt_build_started", map[string]any{"entries": len(b.entries)}, nil)
+	startFields := map[string]any{"entries": len(b.entries)}
+	if b.debug != nil && b.debug.IncludeSensitiveData() {
+		startFields["entry_plan"] = debugBuilderEntries(b.entries)
+	}
+	b.emit(ctx, "prompt_build_started", startFields, nil)
 	for _, entry := range orderedEntries(b.entries) {
 		traceEntry := BuildTraceEntry{
 			ID:       entry.id,
@@ -432,11 +436,17 @@ func (b *Builder) buildPrompt(ctx context.Context, conv Conversation, reserveTok
 			return ai.Prompt{}, state, err
 		}
 	}
-	b.emit(ctx, "prompt_build_completed", map[string]any{
+	completedFields := map[string]any{
 		"system_parts":  len(state.parts[SectionSystem]),
 		"context_parts": len(state.parts[SectionContext]),
 		"user_parts":    len(state.parts[SectionUser]),
-	}, nil)
+	}
+	if b.debug != nil && b.debug.IncludeSensitiveData() {
+		completedFields["prompt"] = prompt
+		completedFields["combined_prompt"] = prompt.CombinedPrompt()
+		completedFields["build_trace"] = trace
+	}
+	b.emit(ctx, "prompt_build_completed", completedFields, nil)
 
 	return prompt, state, nil
 }
@@ -510,6 +520,15 @@ func (s *builderPromptSession) AppendMessages(ctx context.Context, messages []Me
 
 	s.prompt = s.basePrompt
 	s.prompt.Prompt = appendPromptText(s.basePrompt.Prompt, s.deltaText)
+	if s.builder.debug != nil && s.builder.debug.IncludeSensitiveData() {
+		s.builder.emit(ctx, "prompt_session_messages_appended", map[string]any{
+			"messages":        cloneMessages(messages),
+			"rendered_delta":  rendered,
+			"delta_text":      s.deltaText,
+			"prompt":          s.prompt,
+			"combined_prompt": s.prompt.CombinedPrompt(),
+		}, nil)
+	}
 	return s.prompt, nil
 }
 
@@ -955,6 +974,28 @@ func partsTokenCount(parts []Part) int {
 func setTraceTokens(entry *BuildTraceEntry, entryTokens, promptTokens int) {
 	entry.EntryTokens = entryTokens
 	entry.PromptTokens = promptTokens
+}
+
+func debugBuilderEntries(entries []builderEntry) []map[string]any {
+	result := make([]map[string]any, 0, len(entries))
+	for _, entry := range entries {
+		fields := map[string]any{
+			"id":        entry.id,
+			"section":   string(entry.section),
+			"kind":      string(entry.kind),
+			"required":  entry.required,
+			"tokens":    entry.tokens,
+			"source":    entry.source != nil,
+			"text":      entry.text,
+			"meta":      cloneMeta(entry.meta),
+			"sourceCap": entry.sourceCap,
+		}
+		if !entry.hasSourceCap {
+			delete(fields, "sourceCap")
+		}
+		result = append(result, fields)
+	}
+	return result
 }
 
 func (b *Builder) emitEntry(ctx context.Context, name string, entry BuildTraceEntry) {
