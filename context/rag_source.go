@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/lace-ai/gai"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 type RAGQueryFunc func(ctx context.Context, view PromptView) (string, error)
@@ -37,7 +38,36 @@ func (s *RAGSource) DebugSink(debug gai.DebugSink) {
 	s.debug = debug
 }
 
-func (s *RAGSource) BuildParts(ctx context.Context, view PromptView, budget SourceBudget) ([]Part, error) {
+func (s *RAGSource) BuildParts(ctx context.Context, view PromptView, budget SourceBudget) (parts []Part, err error) {
+	sourceLimit := 0
+	if s != nil {
+		sourceLimit = s.limit
+	}
+	ctx, span := gai.StartOperationSpan(ctx, contextTracerName, "context", "context.operation", "source.rag.build_parts",
+		attribute.Int("source.document_limit", sourceLimit),
+		attribute.Int("source.max_tokens", budget.MaxTokens),
+		attribute.Int("source.remaining_prompt_tokens", budget.RemainingPromptTokens),
+		attribute.Bool("source.required", budget.Required),
+	)
+	queryLength := 0
+	documentCount := 0
+	includedDocumentCount := 0
+	overflowDocumentCount := 0
+	totalTokens := 0
+	summarizedOverflow := false
+	defer func() {
+		span.SetAttributes(
+			attribute.Int("source.query_length", queryLength),
+			attribute.Int("source.document_count", documentCount),
+			attribute.Int("source.included_document_count", includedDocumentCount),
+			attribute.Int("source.overflow_document_count", overflowDocumentCount),
+			attribute.Int("source.tokens", totalTokens),
+			attribute.Bool("source.summarized_overflow", summarizedOverflow),
+			attribute.Int("source.part_count", len(parts)),
+		)
+		gai.EndSpan(span, err)
+	}()
+
 	if s == nil || s.store == nil {
 		return nil, ErrRAGStoreNotFound
 	}
@@ -52,6 +82,7 @@ func (s *RAGSource) BuildParts(ctx context.Context, view PromptView, budget Sour
 	if err != nil {
 		return nil, err
 	}
+	queryLength = len(query)
 	if strings.TrimSpace(query) == "" {
 		return nil, nil
 	}
@@ -60,6 +91,7 @@ func (s *RAGSource) BuildParts(ctx context.Context, view PromptView, budget Sour
 	if err != nil {
 		return nil, err
 	}
+	documentCount = len(docs)
 
 	limit := budget.ContentLimit()
 	if limit == unlimitedTokens {
@@ -109,9 +141,12 @@ func (s *RAGSource) BuildParts(ctx context.Context, view PromptView, budget Sour
 				minOverflowTokens = docTokens
 			}
 			overflow = append(overflow, doc.Content)
+			overflowDocumentCount++
 			continue
 		}
 		tokens += docTokens
+		totalTokens = tokens
+		includedDocumentCount++
 		children = append(children, NewPart("rag-doc-"+strconv.Itoa(i)+"-"+strconv.Itoa(doc.ID), doc.Content, Tokens(docTokens), Meta("document_id", doc.ID)))
 	}
 
@@ -137,6 +172,8 @@ func (s *RAGSource) BuildParts(ctx context.Context, view PromptView, budget Sour
 			}
 			if tokens+summaryTokens <= limit {
 				tokens += summaryTokens
+				totalTokens = tokens
+				summarizedOverflow = true
 				children = append(children, NewPart("rag-summary", summary, Tokens(summaryTokens), Meta("summarized", true)))
 			} else if budget.Required {
 				return nil, promptBudgetError("rag-summary", tokens+summaryTokens, limit)
@@ -151,7 +188,8 @@ func (s *RAGSource) BuildParts(ctx context.Context, view PromptView, budget Sour
 		return nil, nil
 	}
 
-	return []Part{
+	parts = []Part{
 		NewPartGroup("rag", children, Tokens(tokens)),
-	}, nil
+	}
+	return parts, nil
 }

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/lace-ai/gai"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 type ToolCall struct {
@@ -113,9 +114,21 @@ func DetectToolCallsInStream(ctx context.Context, in <-chan Token, debug gai.Deb
 	out := make(chan Token, 8)
 
 	go func() {
+		ctx, span := gai.StartOperationSpan(ctx, aiTracerName, "ai", "ai.operation", "tool_call.detect_stream")
+		defer span.End()
 		defer close(out)
 
 		var pending []Token
+		inputTokenCount := 0
+		outputTokenCount := 0
+		detectedToolCallCount := 0
+		defer func() {
+			span.SetAttributes(
+				attribute.Int("ai.input_token_events", inputTokenCount),
+				attribute.Int("ai.output_token_events", outputTokenCount),
+				attribute.Int("ai.tool_call_count", detectedToolCallCount),
+			)
+		}()
 
 		// JSON tracking state
 		seenNonWS := false
@@ -138,6 +151,7 @@ func DetectToolCallsInStream(ctx context.Context, in <-chan Token, debug gai.Deb
 
 		flushPending := func() {
 			for _, t := range pending {
+				outputTokenCount++
 				out <- t
 			}
 			resetTracking()
@@ -208,6 +222,8 @@ func DetectToolCallsInStream(ctx context.Context, in <-chan Token, debug gai.Deb
 					Data:     payload,
 					ToolCall: tc,
 				}
+				outputTokenCount++
+				detectedToolCallCount++
 				resetTracking()
 			} else {
 				if debug != nil {
@@ -231,6 +247,7 @@ func DetectToolCallsInStream(ctx context.Context, in <-chan Token, debug gai.Deb
 		}
 
 		for t := range in {
+			inputTokenCount++
 			// non-text tokens: passthrough.
 			if t.Type != TokenTypeText {
 				pending = append(pending, t)

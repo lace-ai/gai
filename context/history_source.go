@@ -7,6 +7,7 @@ import (
 
 	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 type HistorySource struct {
@@ -26,7 +27,28 @@ func (s *HistorySource) DebugSink(debug gai.DebugSink) {
 	s.debug = debug
 }
 
-func (s *HistorySource) BuildParts(ctx context.Context, view PromptView, budget SourceBudget) ([]Part, error) {
+func (s *HistorySource) BuildParts(ctx context.Context, view PromptView, budget SourceBudget) (parts []Part, err error) {
+	sessionID := 0
+	if s != nil {
+		sessionID = s.id
+	}
+	ctx, span := gai.StartOperationSpan(ctx, contextTracerName, "context", "context.operation", "source.history.build_parts",
+		attribute.Int("session.id", sessionID),
+		attribute.Int("source.max_tokens", budget.MaxTokens),
+		attribute.Int("source.remaining_prompt_tokens", budget.RemainingPromptTokens),
+		attribute.Bool("source.required", budget.Required),
+	)
+	messageCount := 0
+	totalTokens := 0
+	defer func() {
+		span.SetAttributes(
+			attribute.Int("source.part_count", len(parts)),
+			attribute.Int("source.message_count", messageCount),
+			attribute.Int("source.tokens", totalTokens),
+		)
+		gai.EndSpan(span, err)
+	}()
+
 	if s == nil || s.store == nil {
 		return nil, ErrSessionStoreNotFound
 	}
@@ -43,7 +65,7 @@ func (s *HistorySource) BuildParts(ctx context.Context, view PromptView, budget 
 	}
 
 	tokens := 0
-	parts := []Part{}
+	parts = []Part{}
 	historyOffset := 0
 	for tokens < limit {
 		messages, err := s.store.GetMessages(ctx, s.id, 1, historyOffset)
@@ -53,6 +75,7 @@ func (s *HistorySource) BuildParts(ctx context.Context, view PromptView, budget 
 		if len(messages) == 0 {
 			break
 		}
+		messageCount += len(messages)
 		historyOffset += len(messages)
 
 		rendered := renderMessages(messages)
@@ -65,6 +88,7 @@ func (s *HistorySource) BuildParts(ctx context.Context, view PromptView, budget 
 		}
 
 		tokens += messageTokens
+		totalTokens = tokens
 		part := newHistoryPart("history-"+strconv.Itoa(len(parts)), rendered, messageTokens, budget.Required)
 		parts = append(parts, part)
 	}
