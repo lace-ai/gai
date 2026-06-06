@@ -5,14 +5,18 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
 	gaictx "github.com/lace-ai/gai/context"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 const (
 	defaultMaxLoopIterations = 8
 	defaultRetryCount        = 3
 )
+
+const loopTracerName = "github.com/lace-ai/gai/loop"
 
 type ToolResPreProcessor interface {
 	Process(req ai.ToolCall, res *ToolResponse) error
@@ -76,6 +80,27 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInfor
 	}
 
 	go func() {
+		ctx, loopSpan := gai.StartOperationSpan(ctx, loopTracerName, "loop", "loop.operation", "run",
+			attribute.Int("loop.max_iterations", a.MaxLoopIterations),
+			attribute.Int("loop.retry_limit", a.RetryCount),
+			attribute.Int("loop.max_tokens", a.MaxTokens),
+			attribute.Int("loop.tool_count", len(a.Tools)),
+			attribute.String("ai.model", a.Model.Name()),
+		)
+		var loopErr error
+		iterationCount := 0
+		totalTokenCount := 0
+		totalToolCallCount := 0
+		incrementalPrompt := false
+		defer func() {
+			loopSpan.SetAttributes(
+				attribute.Int("loop.iteration_count", iterationCount),
+				attribute.Int("loop.token_count", totalTokenCount),
+				attribute.Int("loop.tool_call_count", totalToolCallCount),
+				attribute.Bool("loop.incremental_prompt", incrementalPrompt),
+			)
+			gai.EndSpan(loopSpan, loopErr)
+		}()
 		defer close(errCh)
 		defer close(tokenCh)
 		defer close(statusCh)
@@ -84,12 +109,12 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInfor
 		completedToolCalls := map[string]struct{}{}
 		var promptSession gaictx.PromptSession
 		var currentPrompt ai.Prompt
-		incrementalPrompt := false
 
 		if builder, ok := a.PromptBuilder.(gaictx.IncrementalPromptBuilder); ok {
 			session, err := builder.StartPrompt(ctx)
 			if err != nil {
-				errCh <- fmt.Errorf("%w: %w", ErrBuildPrompt, err)
+				loopErr = fmt.Errorf("%w: %w", ErrBuildPrompt, err)
+				errCh <- loopErr
 				return
 			}
 			promptSession = session
@@ -100,17 +125,26 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInfor
 		var iteration Iteration
 		for i := range a.MaxLoopIterations {
 			iteration = Iteration{Count: i + 1}
+			iterationCount = iteration.Count
 			var toolCalls []iterationToolCall
 
-			iterCtx, cancel := context.WithCancel(ctx)
+			iterCtx, iterationSpan := gai.StartOperationSpan(ctx, loopTracerName, "loop", "loop.operation", "iteration",
+				attribute.Int("loop.iteration", iteration.Count),
+				attribute.Bool("loop.incremental_prompt", incrementalPrompt),
+			)
+			iterCtx, cancel := context.WithCancel(iterCtx)
+			var iterationErr error
 
 			prompt := currentPrompt
 			if !incrementalPrompt {
 				var err error
 				prompt, err = a.PromptBuilder.BuildPrompt(iterCtx, a)
 				if err != nil {
-					errCh <- fmt.Errorf("%w: %w", ErrBuildPrompt, err)
+					iterationErr = fmt.Errorf("%w: %w", ErrBuildPrompt, err)
+					loopErr = iterationErr
+					errCh <- iterationErr
 					cancel()
+					gai.EndSpan(iterationSpan, iterationErr)
 					return
 				}
 			}
@@ -130,8 +164,11 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInfor
 						retrying = true
 						break
 					} else {
-						errCh <- fmt.Errorf("%w limit:%v error: %v", ErrMaxRetries, a.RetryCount, t.Err)
+						iterationErr = fmt.Errorf("%w limit:%v error: %v", ErrMaxRetries, a.RetryCount, t.Err)
+						loopErr = iterationErr
+						errCh <- iterationErr
 						cancel()
+						gai.EndSpan(iterationSpan, iterationErr)
 						return
 					}
 				}
@@ -144,6 +181,7 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInfor
 
 					iteration.AppendToken(t)
 					tokenCh <- t
+					totalTokenCount++
 
 					toolReq := t.ToolCall
 					partIdx := len(iteration.Parts) - 1
@@ -152,9 +190,11 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInfor
 						id:       partIdx,
 						toolCall: *toolReq,
 					})
+					totalToolCallCount++
 				} else {
 					iteration.AppendToken(t)
 					tokenCh <- t
+					totalTokenCount++
 				}
 			}
 
@@ -166,10 +206,19 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInfor
 					RetryCount:     retryCount,
 				}
 				cancel()
+				iterationSpan.SetAttributes(
+					attribute.Bool("loop.retrying", true),
+					attribute.Int("loop.part_count", len(iteration.Parts)),
+					attribute.Int("loop.retry_count", retryCount),
+					attribute.Int("loop.tool_call_count", len(toolCalls)),
+				)
+				gai.EndSpan(iterationSpan, nil)
 				continue
 			}
 
 			wg := sync.WaitGroup{}
+			var preProcessErr error
+			var preProcessErrMu sync.Mutex
 			for _, tc := range toolCalls {
 				wg.Add(1)
 				go func(tc iterationToolCall) {
@@ -178,7 +227,11 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInfor
 					toolRes := CallTool(&tc.toolCall, a.Tools)
 					if a.PreProcessToolRes != nil {
 						if err := a.PreProcessToolRes.Process(tc.toolCall, toolRes); err != nil {
-							errCh <- fmt.Errorf("pre-processing tool response failed: %w", err)
+							preProcessErrMu.Lock()
+							if preProcessErr == nil {
+								preProcessErr = fmt.Errorf("pre-processing tool response failed: %w", err)
+							}
+							preProcessErrMu.Unlock()
 							return
 						}
 					}
@@ -187,11 +240,25 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInfor
 				}(tc)
 			}
 			wg.Wait()
+			if preProcessErr != nil {
+				iterationErr = preProcessErr
+				loopErr = iterationErr
+				errCh <- iterationErr
+				cancel()
+				gai.EndSpan(iterationSpan, iterationErr)
+				return
+			}
 
 			for _, tc := range toolCalls {
 				part := iteration.Parts[tc.id]
 				if part.ToolResp != nil {
 					completedToolCalls[toolCallSignature(tc.toolCall)] = struct{}{}
+				}
+			}
+			toolErrorCount := 0
+			for _, part := range iteration.Parts {
+				if part.ToolResp != nil && part.ToolResp.Err != nil {
+					toolErrorCount++
 				}
 			}
 
@@ -203,6 +270,14 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInfor
 					RetryCount:     retryCount,
 				}
 				cancel()
+				iterationSpan.SetAttributes(
+					attribute.Bool("loop.retrying", true),
+					attribute.Int("loop.part_count", len(iteration.Parts)),
+					attribute.Int("loop.retry_count", retryCount),
+					attribute.Int("loop.tool_call_count", len(toolCalls)),
+					attribute.Int("loop.tool_error_count", toolErrorCount),
+				)
+				gai.EndSpan(iterationSpan, iterationErr)
 				continue
 			}
 			retryCount = 0
@@ -215,21 +290,40 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInfor
 			}
 			if len(toolCalls) == 0 && !retrying {
 				cancel()
+				iterationSpan.SetAttributes(
+					attribute.Bool("loop.final_iteration", true),
+					attribute.Int("loop.part_count", len(iteration.Parts)),
+					attribute.Int("loop.retry_count", retryCount),
+					attribute.Int("loop.tool_call_count", len(toolCalls)),
+					attribute.Int("loop.tool_error_count", toolErrorCount),
+				)
+				gai.EndSpan(iterationSpan, nil)
 				return
 			}
 			if incrementalPrompt {
 				var err error
 				currentPrompt, err = promptSession.AppendMessages(iterCtx, iteration.DeltaMessages())
 				if err != nil {
-					errCh <- fmt.Errorf("%w: %w", ErrBuildPrompt, err)
+					iterationErr = fmt.Errorf("%w: %w", ErrBuildPrompt, err)
+					loopErr = iterationErr
+					errCh <- iterationErr
 					cancel()
+					gai.EndSpan(iterationSpan, iterationErr)
 					return
 				}
 			}
 			cancel()
+			iterationSpan.SetAttributes(
+				attribute.Int("loop.part_count", len(iteration.Parts)),
+				attribute.Int("loop.retry_count", retryCount),
+				attribute.Int("loop.tool_call_count", len(toolCalls)),
+				attribute.Int("loop.tool_error_count", toolErrorCount),
+			)
+			gai.EndSpan(iterationSpan, iterationErr)
 		}
 
-		errCh <- fmt.Errorf("%w: limit=%d", ErrMaxIterations, a.MaxLoopIterations)
+		loopErr = fmt.Errorf("%w: limit=%d", ErrMaxIterations, a.MaxLoopIterations)
+		errCh <- loopErr
 	}()
 
 	return tokenCh, statusCh, errCh

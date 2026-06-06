@@ -9,7 +9,10 @@ import (
 
 	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
+	"go.opentelemetry.io/otel/attribute"
 )
+
+const contextTracerName = "github.com/lace-ai/gai/context"
 
 type Section string
 
@@ -316,7 +319,28 @@ func (b *Builder) StartPrompt(ctx context.Context) (PromptSession, error) {
 	}, nil
 }
 
-func (b *Builder) buildPrompt(ctx context.Context, conv Conversation, reserveTokens int) (ai.Prompt, promptBuildState, error) {
+func (b *Builder) buildPrompt(ctx context.Context, conv Conversation, reserveTokens int) (prompt ai.Prompt, state promptBuildState, err error) {
+	entryCount := 0
+	hasBudget := false
+	if b != nil {
+		entryCount = len(b.entries)
+		hasBudget = b.budget != nil
+	}
+	ctx, span := gai.StartOperationSpan(ctx, contextTracerName, "context", "context.operation", "prompt.build",
+		attribute.Int("prompt.entry_count", entryCount),
+		attribute.Int("prompt.reserve_tokens", reserveTokens),
+		attribute.Bool("prompt.has_budget", hasBudget),
+	)
+	defer func() {
+		span.SetAttributes(
+			attribute.Int("prompt.tokens", state.promptTokens),
+			attribute.Int("prompt.system_parts", len(state.parts[SectionSystem])),
+			attribute.Int("prompt.context_parts", len(state.parts[SectionContext])),
+			attribute.Int("prompt.user_parts", len(state.parts[SectionUser])),
+		)
+		gai.EndSpan(span, err)
+	}()
+
 	if b == nil {
 		return ai.Prompt{}, promptBuildState{}, ErrPromptBuilderNil
 	}
@@ -331,7 +355,7 @@ func (b *Builder) buildPrompt(ctx context.Context, conv Conversation, reserveTok
 	}
 
 	view := newBuilderView(conv, b.entries)
-	state := newPromptBuildState(renderer, reserveTokens)
+	state = newPromptBuildState(renderer, reserveTokens)
 
 	b.emit(ctx, "prompt_build_started", map[string]any{"entries": len(b.entries)}, nil)
 	for _, entry := range orderedEntries(b.entries) {
@@ -396,7 +420,7 @@ func (b *Builder) buildPrompt(ctx context.Context, conv Conversation, reserveTok
 
 	trace := state.finalTrace()
 	b.trace = trace
-	prompt := renderPrompt(renderer, state.parts)
+	prompt = renderPrompt(renderer, state.parts)
 	if b.budget != nil {
 		if state.promptTokens > b.promptLimit(reserveTokens) {
 			err := promptBudgetError("prompt", state.promptTokens, b.promptLimit(reserveTokens))
@@ -436,13 +460,28 @@ func (s *builderPromptSession) Prompt() ai.Prompt {
 	return s.prompt
 }
 
-func (s *builderPromptSession) AppendMessages(ctx context.Context, messages []Message) (ai.Prompt, error) {
+func (s *builderPromptSession) AppendMessages(ctx context.Context, messages []Message) (prompt ai.Prompt, err error) {
 	if s == nil || s.builder == nil {
 		return ai.Prompt{}, ErrPromptBuilderNil
 	}
 	if len(messages) == 0 {
 		return s.prompt, nil
 	}
+
+	ctx, span := gai.StartOperationSpan(ctx, contextTracerName, "context", "context.operation", "prompt_session.append_messages",
+		attribute.Int("message.count", len(messages)),
+		attribute.Int("prompt_session.active_reserve_tokens", s.activeReserve),
+		attribute.Int("prompt_session.delta_tokens_before", s.deltaTokens),
+	)
+	rebuildBase := false
+	defer func() {
+		span.SetAttributes(
+			attribute.Int("prompt_session.delta_tokens", s.deltaTokens),
+			attribute.Int("prompt_session.active_reserve_tokens", s.activeReserve),
+			attribute.Bool("prompt_session.rebuilt_base", rebuildBase),
+		)
+		gai.EndSpan(span, err)
+	}()
 
 	rendered := renderMessages(messages)
 	if rendered == "" {
@@ -463,6 +502,7 @@ func (s *builderPromptSession) AppendMessages(ctx context.Context, messages []Me
 	s.deltaTokens += messageTokens
 
 	if s.builder.budget != nil && s.deltaTokens > s.activeReserve {
+		rebuildBase = true
 		if err := s.rebuildBase(ctx, s.deltaTokens); err != nil {
 			return ai.Prompt{}, err
 		}
