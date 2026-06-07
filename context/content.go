@@ -208,6 +208,20 @@ func NewContentFromType(contentType string, data []byte) (Content, error) {
 			return nil, fmt.Errorf("failed to unmarshal content type %q: %w", contentType, err)
 		}
 		return toolResultErrContent, nil
+	case ContentTypeTool:
+		var toolContent ToolContent
+		err := json.Unmarshal(data, &toolContent)
+		if err != nil {
+			return nil, fmt.Errorf("failed to unmarshal content type %q: %w", contentType, err)
+		}
+		return toolContent, nil
+	case ContentTypeAgent:
+		var agentContent AgentContent
+		err := json.Unmarshal(data, &agentContent)
+		if err != nil {
+			return nil, fmt.Errorf("failed to unmarshal content type %q: %w", contentType, err)
+		}
+		return agentContent, nil
 	default:
 		return nil, fmt.Errorf("unknown content type: %s", contentType)
 	}

@@ -2,6 +2,7 @@ package context_test
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -56,6 +57,38 @@ func TestNewContentFromType(t *testing.T) {
 			want:        gaictx.ToolResultErrContent{ToolName: "search", Err: "failed"},
 			wantString:  "search error: failed",
 		},
+		{
+			name:        "Tool content",
+			contentType: gaictx.ContentTypeTool,
+			input: gaictx.ToolContent{
+				Call:    gaictx.ToolCallContent{ToolName: "search", Args: `{"query":"docs"}`},
+				Success: true,
+				Result: &gaictx.ToolResultContent{
+					ToolName:          "search",
+					Result:            "found",
+					Precomputed:       false,
+					PrecomputedResult: "",
+				},
+			},
+			want: gaictx.ToolContent{
+				Call:    gaictx.ToolCallContent{ToolName: "search", Args: `{"query":"docs"}`},
+				Success: true,
+				Result: &gaictx.ToolResultContent{
+					ToolName:          "search",
+					Result:            "found",
+					Precomputed:       false,
+					PrecomputedResult: "",
+				},
+			},
+			wantString: `search({"query":"docs"}) -> search result: found`,
+		},
+		{
+			name:        "Agent content",
+			contentType: gaictx.ContentTypeAgent,
+			input:       gaictx.AgentContent{Response: "done", ToolCalls: []gaictx.ToolCallContent{{ToolName: "search", Args: `{"query":"docs"}`}}},
+			want:        gaictx.AgentContent{Response: "done", ToolCalls: []gaictx.ToolCallContent{{ToolName: "search", Args: `{"query":"docs"}`}}},
+			wantString:  "Agent response: done",
+		},
 	}
 
 	for _, tt := range tests {
@@ -72,7 +105,7 @@ func TestNewContentFromType(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewContentFromType failed: %v", err)
 			}
-			if got != tt.want {
+			if !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("content = %#v, want %#v", got, tt.want)
 			}
 			if got.Type() != tt.contentType {
@@ -123,6 +156,24 @@ func TestContentMarshalRoundTrip(t *testing.T) {
 			content: gaictx.ToolResultErrContent{ToolName: "search", Err: "failed"},
 			want:    gaictx.ToolResultErrContent{ToolName: "search", Err: "failed"},
 		},
+		{
+			name: "Tool content",
+			content: gaictx.ToolContent{
+				Call:    gaictx.ToolCallContent{ToolName: "search", Args: `{"query":"docs"}`},
+				Success: false,
+				Err:     &gaictx.ToolResultErrContent{ToolName: "search", Err: "failed"},
+			},
+			want: gaictx.ToolContent{
+				Call:    gaictx.ToolCallContent{ToolName: "search", Args: `{"query":"docs"}`},
+				Success: false,
+				Err:     &gaictx.ToolResultErrContent{ToolName: "search", Err: "failed"},
+			},
+		},
+		{
+			name:    "Agent content",
+			content: gaictx.AgentContent{Response: "done", ToolCalls: []gaictx.ToolCallContent{{ToolName: "search", Args: `{"query":"docs"}`}}},
+			want:    gaictx.AgentContent{Response: "done", ToolCalls: []gaictx.ToolCallContent{{ToolName: "search", Args: `{"query":"docs"}`}}},
+		},
 	}
 
 	for _, tt := range tests {
@@ -139,7 +190,7 @@ func TestContentMarshalRoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewContentFromType failed: %v", err)
 			}
-			if got != tt.want {
+			if !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("content = %#v, want %#v", got, tt.want)
 			}
 		})
