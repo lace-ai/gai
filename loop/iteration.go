@@ -26,7 +26,7 @@ type IterationInformation struct {
 type Iteration struct {
 	Count   int
 	Parts   []IterationPart
-	Request string
+	Request []string
 }
 
 type IterationPart struct {
@@ -93,10 +93,10 @@ func (i *Iteration) Messages() []gaictx.Message {
 	var msgs []gaictx.Message
 
 	if i.Count == 1 {
-		if i.Request != "" {
+		if len(i.Request) > 0 {
 			msgs = append(msgs, gaictx.Message{
 				Role:    gaictx.RoleUser,
-				Content: gaictx.NewTextContent(i.Request),
+				Content: gaictx.NewTextContent(strings.Join(i.Request, "\n")),
 			})
 		}
 	}
