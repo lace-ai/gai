@@ -153,7 +153,7 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInfor
 				Prompt:    prompt,
 				MaxTokens: a.MaxTokens,
 			}
-			iteration.Request = &request
+			iteration.Request = a.PromptBuilder.GetUserPrompt(iterCtx)
 
 			tokens := a.Model.GenerateStream(iterCtx, request)
 
