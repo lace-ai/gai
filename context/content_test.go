@@ -2,6 +2,7 @@ package context_test
 
 import (
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -204,6 +205,9 @@ func TestNewContentFromTypeRejectsInvalidJSON(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected invalid JSON error")
 	}
+	if !errors.Is(err, gaictx.ErrContentUnmarshal) {
+		t.Fatalf("expected ErrContentUnmarshal, got %v", err)
+	}
 }
 
 func TestNewContentFromTypeRejectsUnknownType(t *testing.T) {
@@ -212,6 +216,9 @@ func TestNewContentFromTypeRejectsUnknownType(t *testing.T) {
 	_, err := gaictx.NewContentFromType("unknown", []byte(`{}`))
 	if err == nil {
 		t.Fatal("expected unknown content type error")
+	}
+	if !errors.Is(err, gaictx.ErrUnknownContentType) {
+		t.Fatalf("expected ErrUnknownContentType, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "unknown content type: unknown") {
 		t.Fatalf("unexpected error: %v", err)
