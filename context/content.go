@@ -17,8 +17,6 @@ const (
 	ContentTypeToolCall      = "tool_call"
 	ContentTypeToolResult    = "tool_result"
 	ContentTypeToolResultErr = "tool_result_err"
-	ContentTypeTool          = "tool"
-	ContentTypeAgent         = "agent"
 )
 
 // TextContent is a generic content type
@@ -121,63 +119,6 @@ func NewToolResultErrContent(toolName, err string) ToolResultErrContent {
 	}
 }
 
-// ToolContent represents the content of a tool call, including the call itself, whether it was successful, and the result or error
-type ToolContent struct {
-	Call    ToolCallContent
-	Success bool
-	Result  *ToolResultContent
-	Err     *ToolResultErrContent
-}
-
-func (c ToolContent) String() string {
-	if c.Success {
-		return c.Call.String() + " -> " + c.Result.String()
-	}
-	return c.Call.String() + " -> " + c.Err.String()
-}
-
-func (c ToolContent) Type() string {
-	return ContentTypeTool
-}
-
-func (c ToolContent) Marshal() ([]byte, error) {
-	return json.Marshal(c)
-}
-
-func NewToolContent(call ToolCallContent, success bool, result *ToolResultContent, err *ToolResultErrContent) ToolContent {
-	return ToolContent{
-		Call:    call,
-		Success: success,
-		Result:  result,
-		Err:     err,
-	}
-}
-
-// AgentContent represents the content of an agent response, including the response text and any tool calls made by the agent
-type AgentContent struct {
-	Response  string
-	ToolCalls []ToolCallContent
-}
-
-func (c AgentContent) String() string {
-	return "Agent response: " + c.Response
-}
-
-func (c AgentContent) Type() string {
-	return ContentTypeAgent
-}
-
-func (c AgentContent) Marshal() ([]byte, error) {
-	return json.Marshal(c)
-}
-
-func NewAgentContent(response string, toolCalls []ToolCallContent) AgentContent {
-	return AgentContent{
-		Response:  response,
-		ToolCalls: toolCalls,
-	}
-}
-
 func NewContentFromType(contentType string, data []byte) (Content, error) {
 	switch contentType {
 	case ContentTypeText:
@@ -208,20 +149,6 @@ func NewContentFromType(contentType string, data []byte) (Content, error) {
 			return nil, fmt.Errorf("%w %q: %w", ErrContentUnmarshal, contentType, err)
 		}
 		return toolResultErrContent, nil
-	case ContentTypeTool:
-		var toolContent ToolContent
-		err := json.Unmarshal(data, &toolContent)
-		if err != nil {
-			return nil, fmt.Errorf("%w %q: %w", ErrContentUnmarshal, contentType, err)
-		}
-		return toolContent, nil
-	case ContentTypeAgent:
-		var agentContent AgentContent
-		err := json.Unmarshal(data, &agentContent)
-		if err != nil {
-			return nil, fmt.Errorf("%w %q: %w", ErrContentUnmarshal, contentType, err)
-		}
-		return agentContent, nil
 	default:
 		return nil, fmt.Errorf("%w: %s", ErrUnknownContentType, contentType)
 	}
