@@ -16,9 +16,10 @@ const (
 )
 
 type Message struct {
-	ID      int
-	Role    Role
-	Content Content
+	ID        int
+	SessionID int
+	Role      Role
+	Content   Content
 	// TokenCount key: tokenizer.ID, value: token count for content
 	TokenCount map[string]int
 	CreatedAt  time.Time
