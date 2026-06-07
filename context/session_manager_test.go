@@ -301,7 +301,6 @@ func (v testPromptView) Entry(id string) (gaictx.EntryView, bool) {
 func sessionMessage(id int, role gaictx.Role, text string) gaictx.Message {
 	return gaictx.Message{
 		ID:        id,
-		SessionID: 7,
 		CreatedAt: time.Now(),
 		Role:      role,
 		Content:   gaictx.NewTextContent(text),
