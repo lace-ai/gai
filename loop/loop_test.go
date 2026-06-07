@@ -41,6 +41,10 @@ func (b *countingPromptBuilder) BuildPrompt(ctx context.Context, conv gaictx.Con
 	return ai.Prompt{Prompt: fmt.Sprintf("prompt-%d", count)}, nil
 }
 
+func (b *countingPromptBuilder) GetUserPrompt(ctx context.Context) []string {
+	return []string{"Initial prompt"}
+}
+
 func (m *scriptedStreamModel) Name() string {
 	return "scripted-stream-model"
 }

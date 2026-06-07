@@ -137,6 +137,7 @@ type BuildTraceEntry struct {
 
 type PromptBuilder interface {
 	BuildPrompt(ctx context.Context, conv Conversation) (ai.Prompt, error)
+	GetUserPrompt(ctx context.Context) []string
 }
 
 type IncrementalPromptBuilder interface {
@@ -317,6 +318,19 @@ func (b *Builder) StartPrompt(ctx context.Context) (PromptSession, error) {
 		activeReserve: reserveTokens,
 		baseTokens:    state.promptTokens,
 	}, nil
+}
+
+func (b *Builder) GetUserPrompt(ctx context.Context) []string {
+	if b == nil {
+		return nil
+	}
+	var parts []string
+	for _, entry := range b.entries {
+		if entry.section == SectionUser && entry.kind == EntryKindPart {
+			parts = append(parts, entry.text)
+		}
+	}
+	return parts
 }
 
 func (b *Builder) buildPrompt(ctx context.Context, conv Conversation, reserveTokens int) (prompt ai.Prompt, state promptBuildState, err error) {

@@ -19,5 +19,7 @@ var (
 	ErrUserPromptEmpty   = errors.New("user prompt is empty")
 	ErrTokenizerNotFound = errors.New("tokenizer not found")
 
-	ErrMessageNotFound = errors.New("message not found")
+	ErrMessageNotFound      = errors.New("message not found")
+	ErrContentUnmarshal     = errors.New("failed to unmarshal content type")
+	ErrUnknownContentType   = errors.New("unknown content type")
 )

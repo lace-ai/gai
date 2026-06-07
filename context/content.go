@@ -125,31 +125,31 @@ func NewContentFromType(contentType string, data []byte) (Content, error) {
 		var textContent TextContent
 		err := json.Unmarshal(data, &textContent)
 		if err != nil {
-			return nil, fmt.Errorf("failed to unmarshal content type %q: %w", contentType, err)
+			return nil, fmt.Errorf("%w %q: %w", ErrContentUnmarshal, contentType, err)
 		}
 		return textContent, nil
 	case ContentTypeToolCall:
 		var toolCallContent ToolCallContent
 		err := json.Unmarshal(data, &toolCallContent)
 		if err != nil {
-			return nil, fmt.Errorf("failed to unmarshal content type %q: %w", contentType, err)
+			return nil, fmt.Errorf("%w %q: %w", ErrContentUnmarshal, contentType, err)
 		}
 		return toolCallContent, nil
 	case ContentTypeToolResult:
 		var toolResultContent ToolResultContent
 		err := json.Unmarshal(data, &toolResultContent)
 		if err != nil {
-			return nil, fmt.Errorf("failed to unmarshal content type %q: %w", contentType, err)
+			return nil, fmt.Errorf("%w %q: %w", ErrContentUnmarshal, contentType, err)
 		}
 		return toolResultContent, nil
 	case ContentTypeToolResultErr:
 		var toolResultErrContent ToolResultErrContent
 		err := json.Unmarshal(data, &toolResultErrContent)
 		if err != nil {
-			return nil, fmt.Errorf("failed to unmarshal content type %q: %w", contentType, err)
+			return nil, fmt.Errorf("%w %q: %w", ErrContentUnmarshal, contentType, err)
 		}
 		return toolResultErrContent, nil
 	default:
-		return nil, fmt.Errorf("unknown content type: %s", contentType)
+		return nil, fmt.Errorf("%w: %s", ErrUnknownContentType, contentType)
 	}
 }

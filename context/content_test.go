@@ -2,6 +2,8 @@ package context_test
 
 import (
 	"encoding/json"
+	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -72,7 +74,7 @@ func TestNewContentFromType(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewContentFromType failed: %v", err)
 			}
-			if got != tt.want {
+			if !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("content = %#v, want %#v", got, tt.want)
 			}
 			if got.Type() != tt.contentType {
@@ -139,7 +141,7 @@ func TestContentMarshalRoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewContentFromType failed: %v", err)
 			}
-			if got != tt.want {
+			if !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("content = %#v, want %#v", got, tt.want)
 			}
 		})
@@ -153,6 +155,9 @@ func TestNewContentFromTypeRejectsInvalidJSON(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected invalid JSON error")
 	}
+	if !errors.Is(err, gaictx.ErrContentUnmarshal) {
+		t.Fatalf("expected ErrContentUnmarshal, got %v", err)
+	}
 }
 
 func TestNewContentFromTypeRejectsUnknownType(t *testing.T) {
@@ -161,6 +166,9 @@ func TestNewContentFromTypeRejectsUnknownType(t *testing.T) {
 	_, err := gaictx.NewContentFromType("unknown", []byte(`{}`))
 	if err == nil {
 		t.Fatal("expected unknown content type error")
+	}
+	if !errors.Is(err, gaictx.ErrUnknownContentType) {
+		t.Fatalf("expected ErrUnknownContentType, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "unknown content type: unknown") {
 		t.Fatalf("unexpected error: %v", err)
