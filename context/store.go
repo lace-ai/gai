@@ -11,10 +11,3 @@ type SessionStore interface {
 	AddMessage(ctx context.Context, sessionID string, message Message) (Message, error)
 	UpdateMessageTokens(ctx context.Context, messageID string, tokenizer string, tokens int) error
 }
-
-type RAGStore interface {
-	// GetRelevantDocuments returns relevant documents for a query, ordered by relevance desc
-	GetRelevantDocuments(ctx context.Context, query string, limit int) ([]Document, error)
-	AddDocument(ctx context.Context, content string) (string, error)
-	UpdateDocumentTokens(ctx context.Context, documentID string, tokenizer string, tokens int) error
-}
