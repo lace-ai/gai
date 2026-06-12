@@ -31,6 +31,15 @@ type TokenBudget interface {
 	GetRemainingTokens() (int, error)
 }
 
+type Definition struct {
+	Renderer           Renderer
+	SystemInstructions []Part
+	ContextSources     []ContextSource
+	UserPrompt         string
+	TokenBudget        int
+	DebugSink          gai.DebugSinkFunc
+}
+
 type Builder struct {
 	SystemInstructions []Part
 	ContextSources     []ContextSource
@@ -42,14 +51,28 @@ type Builder struct {
 	userPrompt         string
 }
 
-func NewBuilder(renderer Renderer, tokenBudget int) *Builder {
-	return &Builder{
-		SystemInstructions: []Part{},
-		ContextSources:     []ContextSource{},
-		Iteration:          []Part{},
-		TokenBudget:        tokenBudget,
-		Renderer:           renderer,
+func New(def Definition) *Builder {
+	renderer := def.Renderer
+	if renderer == nil {
+		renderer = XMLRenderer{}
 	}
+	return &Builder{
+		SystemInstructions: append([]Part{}, def.SystemInstructions...),
+		ContextSources:     append([]ContextSource{}, def.ContextSources...),
+		ContextParts:       []Part{},
+		Iteration:          []Part{},
+		TokenBudget:        def.TokenBudget,
+		Renderer:           renderer,
+		debugSink:          def.DebugSink,
+		userPrompt:         def.UserPrompt,
+	}
+}
+
+func NewBuilder(renderer Renderer, tokenBudget int) *Builder {
+	return New(Definition{
+		Renderer:    renderer,
+		TokenBudget: tokenBudget,
+	})
 }
 
 func (b *Builder) SetDebugSink(debugSink gai.DebugSinkFunc) {

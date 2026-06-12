@@ -71,13 +71,12 @@ func Definition(model ai.Model, opts ...Option) agent.Definition {
 		Model: model,
 		Tools: config.Tools,
 		Prompt: func(input agent.RunInput) gaictx.PromptBuilder {
-			renderer := gaictx.XMLRenderer{}
-			builder := gaictx.NewBuilder(renderer, -1)
-			part := gaictx.NewTextPart(systemPrompt)
-
-			builder.AppendSystemInstructions(context.Background(), part)
-			builder.SetUserPrompt(input.Text)
-			return builder
+			return gaictx.New(gaictx.Definition{
+				Renderer:           gaictx.XMLRenderer{},
+				SystemInstructions: []gaictx.Part{gaictx.NewTextPart(systemPrompt)},
+				UserPrompt:         input.Text,
+				TokenBudget:        -1,
+			})
 		},
 		Limits: agent.Limits{
 			MaxLoopIterations: config.MaxLoopIterations,
