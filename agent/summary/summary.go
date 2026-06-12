@@ -18,11 +18,9 @@ var DefaultSystemPrompt string
 type Config struct {
 	SystemPrompt      string
 	Tools             []loop.Tool
-	PreProcessToolRes loop.ToolResPreProcessor
 	MaxLoopIterations int
 	RetryCount        int
 	MaxTokens         int
-	PromptBudget      *gaictx.PromptBudget
 }
 
 type Option func(*Config)
@@ -36,12 +34,6 @@ func WithSystemPrompt(prompt string) Option {
 func WithTools(tools ...loop.Tool) Option {
 	return func(config *Config) {
 		config.Tools = tools
-	}
-}
-
-func WithPreProcessor(preProcessor loop.ToolResPreProcessor) Option {
-	return func(config *Config) {
-		config.PreProcessToolRes = preProcessor
 	}
 }
 
@@ -63,12 +55,6 @@ func WithMaxTokens(maxTokens int) Option {
 	}
 }
 
-func WithPromptBudget(budget gaictx.PromptBudget) Option {
-	return func(config *Config) {
-		config.PromptBudget = &budget
-	}
-}
-
 func Definition(model ai.Model, opts ...Option) agent.Definition {
 	config := Config{
 		SystemPrompt:      DefaultSystemPrompt,
@@ -81,20 +67,22 @@ func Definition(model ai.Model, opts ...Option) agent.Definition {
 	}
 	systemPrompt := strings.TrimSpace(config.SystemPrompt)
 	return agent.Definition{
-		Model:             model,
-		Tools:             config.Tools,
-		PreProcessToolRes: config.PreProcessToolRes,
-		MaxLoopIterations: config.MaxLoopIterations,
-		RetryCount:        config.RetryCount,
-		MaxTokens:         config.MaxTokens,
-		PromptBuilderFactory: func(input agent.RunInput) gaictx.PromptBuilder {
-			builder := gaictx.NewPromptBuilder()
-			if config.PromptBudget != nil {
-				builder.Budget(*config.PromptBudget)
-			}
-			return builder.
-				System("summary-system", systemPrompt, gaictx.Required()).
-				User("summary-request", input.Text, gaictx.Required())
+		Name:  "summary",
+		Model: model,
+		Tools: config.Tools,
+		Prompt: func(input agent.RunInput) gaictx.PromptBuilder {
+			renderer := gaictx.XMLRenderer{}
+			builder := gaictx.NewBuilder(renderer, -1)
+			part := gaictx.NewTextPart(systemPrompt)
+
+			builder.AppendSystemInstructions(context.Background(), part)
+			builder.SetUserPrompt(input.Text)
+			return builder
+		},
+		Limits: agent.Limits{
+			MaxLoopIterations: config.MaxLoopIterations,
+			RetryCount:        config.RetryCount,
+			MaxTokens:         config.MaxTokens,
 		},
 	}
 }
@@ -116,8 +104,8 @@ func (s Summarizer) Summarize(ctx context.Context, req gaictx.SummaryRequest) (s
 		return "", fmt.Errorf("%w: recursive summary agent call", gaictx.ErrPromptSource)
 	}
 	def := s.Definition
-	if def.MaxLoopIterations == 0 {
-		def.MaxLoopIterations = 1
+	if def.Limits.MaxLoopIterations == 0 {
+		def.Limits.MaxLoopIterations = 1
 	}
 	input := agent.RunInput{
 		ID:        req.ID,
@@ -125,7 +113,7 @@ func (s Summarizer) Summarize(ctx context.Context, req gaictx.SummaryRequest) (s
 		MaxTokens: req.MaxTokens,
 		Meta:      req.Meta,
 	}
-	l, err := agent.NewLoop(def, input)
+	l, err := agent.New(def).NewRun(input)
 	if err != nil {
 		return "", err
 	}

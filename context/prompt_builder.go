@@ -23,6 +23,7 @@ type PromptBuilder interface {
 	BuildContext(ctx context.Context) ([]Part, error)
 	BuildPrompt(ctx context.Context, conv Conversation) (string, error)
 	GetUserPrompt() string
+	SetUserPrompt(prompt string)
 }
 
 type TokenBudget interface {
@@ -76,7 +77,6 @@ func (b *Builder) AppendSystemInstructions(ctx context.Context, instructions ...
 
 func (b *Builder) BuildContext(ctx context.Context) ([]Part, error) {
 	var contextParts []Part
-	contextParts = append(contextParts, b.SystemInstructions...)
 	for _, source := range b.ContextSources {
 		part, err := source.Function(ctx, b.TokenBudget)
 		if err != nil {
@@ -92,6 +92,9 @@ func (b *Builder) BuildPrompt(ctx context.Context, conv Conversation) (string, e
 	var parts []Part
 	parts = append(parts, b.SystemInstructions...)
 	parts = append(parts, b.ContextParts...)
+	if b.userPrompt != "" {
+		parts = append(parts, NewTextPart(b.userPrompt))
+	}
 	for _, message := range conv.Messages() {
 		parts = append(parts, message)
 	}
@@ -108,4 +111,8 @@ func (b *Builder) SetTokenLimit(limit int) error {
 	}
 	b.TokenBudget = limit
 	return nil
+}
+
+func (b *Builder) SetUserPrompt(prompt string) {
+	b.userPrompt = prompt
 }

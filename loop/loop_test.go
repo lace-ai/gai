@@ -61,6 +61,9 @@ func (b *countingPromptBuilder) GetUserPrompt() string {
 	return "Initial prompt"
 }
 
+func (b *countingPromptBuilder) SetUserPrompt(prompt string) {
+}
+
 type stubPromptBuilder struct {
 	systemPrompt string
 	userPrompt   string
@@ -107,6 +110,10 @@ func (b *stubPromptBuilder) BuildPrompt(ctx context.Context, conv gaictx.Convers
 
 func (b *stubPromptBuilder) GetUserPrompt() string {
 	return b.userPrompt
+}
+
+func (b *stubPromptBuilder) SetUserPrompt(prompt string) {
+	b.userPrompt = prompt
 }
 
 func (m *scriptedStreamModel) Name() string {

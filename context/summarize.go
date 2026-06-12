@@ -8,3 +8,11 @@ type Summary struct {
 	Content        TextContent
 	TokenCount     map[string]int
 }
+
+type SummaryRequest struct {
+	ID        string
+	Text      string
+	MaxTokens int
+	Required  bool
+	Meta      map[string]any
+}

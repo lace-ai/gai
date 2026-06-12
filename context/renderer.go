@@ -12,9 +12,9 @@ type Renderer interface {
 
 type XMLRenderer struct{}
 
-func (r XMLRenderer) Render(ctx context.Context, parts []Part) string {
+func (r XMLRenderer) Render(ctx context.Context, parts []Part) (string, error) {
 	if len(parts) == 0 {
-		return ""
+		return "", nil
 	}
 
 	var builder strings.Builder
@@ -22,7 +22,7 @@ func (r XMLRenderer) Render(ctx context.Context, parts []Part) string {
 		writeXMLPart(ctx, &builder, part)
 	}
 
-	return builder.String()
+	return builder.String(), nil
 }
 
 func writeXMLPart(ctx context.Context, builder *strings.Builder, part Part) {
