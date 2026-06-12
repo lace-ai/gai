@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/lace-ai/gai"
+	"github.com/lace-ai/gai/ai"
 )
 
 type HistoryState struct {
@@ -17,9 +18,10 @@ type HistoryStateStore interface {
 }
 
 type HistorySource struct {
-	store SessionStore
-	id    string
-	debug gai.DebugSink
+	store     SessionStore
+	id        string
+	debug     gai.DebugSink
+	tokenizer ai.Tokenizer
 }
 
 func NewHistory(store SessionStore, id string) *HistorySource {
@@ -29,10 +31,14 @@ func NewHistory(store SessionStore, id string) *HistorySource {
 	}
 }
 
-func (s *HistorySource) DebugSink(debug gai.DebugSink) {
+func (s *HistorySource) SetTokenizer(tokenizer ai.Tokenizer) {
+	s.tokenizer = tokenizer
+}
+
+func (s *HistorySource) DebugSink(debug gai.DebugSink, conv Conversation) {
 	s.debug = debug
 }
 
-func (s *HistorySource) BuildParts(ctx context.Context) (parts []Part, err error) {
-	return parts, nil
+func (s *HistorySource) BuildParts(ctx context.Context) ([]Part, error) {
+	return nil, nil
 }
