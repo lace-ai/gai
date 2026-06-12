@@ -68,3 +68,7 @@ func (m Message) Tokens(ctx context.Context, tokenizer ai.Tokenizer) int {
 func (m Message) Marshal(ctx context.Context) ([]byte, error) {
 	return m.Content.Marshal()
 }
+
+func (m Message) Name() string {
+	return string(m.Role)
+}

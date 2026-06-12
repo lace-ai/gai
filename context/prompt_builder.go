@@ -8,6 +8,7 @@ import (
 )
 
 type Part interface {
+	Name() string
 	Tokens(ctx context.Context, tokenizer ai.Tokenizer) int
 	Marshal(ctx context.Context) ([]byte, error)
 }
@@ -25,10 +26,6 @@ type PromptBuilder interface {
 	BuildPrompt(ctx context.Context, conv Conversation) (string, error)
 }
 
-type PromptRenderer interface {
-	RenderPrompt(ctx context.Context, contextParts []Part) (string, error)
-}
-
 type TokenBudget interface {
 	SetTokenLimit(limit int) error
 	GetRemainingTokens() (int, error)
@@ -39,11 +36,11 @@ type Builder struct {
 	ContextSources     []ContextSource
 	Iteration          []Part
 	TokenBudget        int
-	Renderer           PromptRenderer
+	Renderer           Renderer
 	debugSink          gai.DebugSinkFunc
 }
 
-func NewBuilder(renderer PromptRenderer, tokenBudget int) *Builder {
+func NewBuilder(renderer Renderer, tokenBudget int) *Builder {
 	return &Builder{
 		SystemInstructions: []Part{},
 		ContextSources:     []ContextSource{},
@@ -100,5 +97,5 @@ func (b *Builder) BuildPrompt(ctx context.Context, conv Conversation) (string, e
 	for _, message := range conv.Messages() {
 		parts = append(parts, message)
 	}
-	return b.Renderer.RenderPrompt(ctx, parts)
+	return b.Renderer.Render(ctx, parts)
 }
