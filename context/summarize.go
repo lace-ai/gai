@@ -5,6 +5,6 @@ type Summary struct {
 	EndTurnID      string
 	StartTurnCount int
 	EndTurnCount   int
-	Content        string
+	Content        TextContent
 	TokenCount     map[string]int
 }
