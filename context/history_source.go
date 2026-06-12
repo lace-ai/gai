@@ -12,22 +12,23 @@ type HistoryState struct {
 	Summary *Summary
 }
 
-type HistoryStateStore interface {
-	GetHistoryState(ctx context.Context, turnID string) (*HistoryState, error)
+type HistoryStore interface {
+	GetLastHistoryState(ctx context.Context, sessionID string) (*HistoryState, error)
 	SaveHistoyrState(ctx context.Context, endTurnCount int, summary Summary) error
 }
 
 type HistorySource struct {
-	store     SessionStore
-	id        string
+	historyStateStore HistoryStore
+	sessionID         string
+
 	debug     gai.DebugSink
 	tokenizer ai.Tokenizer
 }
 
-func NewHistory(store SessionStore, id string) *HistorySource {
+func NewHistory(sessionId string, historyStateStore HistoryStore) *HistorySource {
 	return &HistorySource{
-		store: store,
-		id:    id,
+		historyStateStore: historyStateStore,
+		sessionID:         sessionId,
 	}
 }
 
@@ -39,6 +40,14 @@ func (s *HistorySource) DebugSink(debug gai.DebugSink, conv Conversation) {
 	s.debug = debug
 }
 
-func (s *HistorySource) BuildParts(ctx context.Context) ([]Part, error) {
+type HistoryPart struct{}
+
+func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (Part, error) {
+	lastHistoryState, err := s.historyStateStore.GetLastHistoryState(ctx, s.sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if lastHistoryState != nil {
+	}
 	return nil, nil
 }
