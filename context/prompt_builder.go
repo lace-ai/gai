@@ -45,7 +45,6 @@ func (t TextPart) Tokens(ctx context.Context, tokenizer ai.Tokenizer) (int, erro
 }
 
 func (t TextPart) Marshal(ctx context.Context) ([]byte, error) {
-	_ = ctx
 	return []byte(t.Content), nil
 }
 

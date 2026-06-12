@@ -2,7 +2,6 @@ package context
 
 import (
 	"context"
-	"time"
 
 	"github.com/lace-ai/gai/ai"
 )
@@ -16,14 +15,23 @@ const (
 	RoleTool      Role = "tool"
 )
 
+type Turn struct {
+	ID           int
+	Count        int
+	UserMessage  *Message
+	Messages     []Message
+	HistoryState *HistoryState
+	TokenCount   map[string]int
+}
+
 type Message struct {
 	ID        int
 	SessionID int
+	TurnID    int
 	Role      Role
 	Content   Content
 	// TokenCount key: tokenizer.ID, value: token count for content
 	TokenCount map[string]int
-	CreatedAt  time.Time
 }
 
 func IsValidRole(role Role) bool {
