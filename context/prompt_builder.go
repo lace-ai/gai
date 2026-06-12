@@ -24,6 +24,7 @@ type PromptBuilder interface {
 	AppendSystemInstructions(ctx context.Context, instructions ...Part) error
 	BuildContext(ctx context.Context) ([]Part, error)
 	BuildPrompt(ctx context.Context, conv Conversation) (string, error)
+	GetUserPrompt() string
 }
 
 type TokenBudget interface {
@@ -34,10 +35,12 @@ type TokenBudget interface {
 type Builder struct {
 	SystemInstructions []Part
 	ContextSources     []ContextSource
+	ContextParts       []Part
 	Iteration          []Part
 	TokenBudget        int
 	Renderer           Renderer
 	debugSink          gai.DebugSinkFunc
+	userPrompt         string
 }
 
 func NewBuilder(renderer Renderer, tokenBudget int) *Builder {
@@ -83,19 +86,20 @@ func (b *Builder) BuildContext(ctx context.Context) ([]Part, error) {
 		}
 		contextParts = append(contextParts, part)
 	}
+	b.ContextParts = contextParts
 	return contextParts, nil
 }
 
 func (b *Builder) BuildPrompt(ctx context.Context, conv Conversation) (string, error) {
 	var parts []Part
 	parts = append(parts, b.SystemInstructions...)
-	contextParts, err := b.BuildContext(ctx)
-	if err != nil {
-		return "", err
-	}
-	parts = append(parts, contextParts...)
+	parts = append(parts, b.ContextParts...)
 	for _, message := range conv.Messages() {
 		parts = append(parts, message)
 	}
 	return b.Renderer.Render(ctx, parts)
+}
+
+func (b *Builder) GetUserPrompt() string {
+	return b.userPrompt
 }

@@ -107,20 +107,8 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInfor
 
 		retryCount := 0
 		completedToolCalls := map[string]struct{}{}
-		var promptSession gaictx.PromptSession
-		var currentPrompt ai.Prompt
 
-		if builder, ok := a.PromptBuilder.(gaictx.IncrementalPromptBuilder); ok {
-			session, err := builder.StartPrompt(ctx)
-			if err != nil {
-				loopErr = fmt.Errorf("%w: %w", ErrBuildPrompt, err)
-				errCh <- loopErr
-				return
-			}
-			promptSession = session
-			currentPrompt = session.Prompt()
-			incrementalPrompt = true
-		}
+		a.PromptBuilder.BuildContext(ctx)
 
 		var iteration Iteration
 		for i := range a.MaxLoopIterations {
@@ -135,25 +123,21 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInfor
 			iterCtx, cancel := context.WithCancel(iterCtx)
 			var iterationErr error
 
-			prompt := currentPrompt
-			if !incrementalPrompt {
-				var err error
-				prompt, err = a.PromptBuilder.BuildPrompt(iterCtx, a)
-				if err != nil {
-					iterationErr = fmt.Errorf("%w: %w", ErrBuildPrompt, err)
-					loopErr = iterationErr
-					errCh <- iterationErr
-					cancel()
-					gai.EndSpan(iterationSpan, iterationErr)
-					return
-				}
+			prompt, err := a.PromptBuilder.BuildPrompt(iterCtx, a)
+			if err != nil {
+				iterationErr = fmt.Errorf("%w: %w", ErrBuildPrompt, err)
+				loopErr = iterationErr
+				errCh <- iterationErr
+				cancel()
+				gai.EndSpan(iterationSpan, iterationErr)
+				return
 			}
 
 			request := ai.AIRequest{
 				Prompt:    prompt,
 				MaxTokens: a.MaxTokens,
 			}
-			iteration.Request = a.PromptBuilder.GetUserPrompt(iterCtx)
+			iteration.Request = a.PromptBuilder.GetUserPrompt()
 
 			tokens := a.Model.GenerateStream(iterCtx, request)
 
@@ -299,18 +283,6 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInfor
 				)
 				gai.EndSpan(iterationSpan, nil)
 				return
-			}
-			if incrementalPrompt {
-				var err error
-				currentPrompt, err = promptSession.AppendMessages(iterCtx, iteration.DeltaMessages())
-				if err != nil {
-					iterationErr = fmt.Errorf("%w: %w", ErrBuildPrompt, err)
-					loopErr = iterationErr
-					errCh <- iterationErr
-					cancel()
-					gai.EndSpan(iterationSpan, iterationErr)
-					return
-				}
 			}
 			cancel()
 			iterationSpan.SetAttributes(

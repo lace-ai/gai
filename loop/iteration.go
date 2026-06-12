@@ -1,8 +1,6 @@
 package loop
 
 import (
-	"strings"
-
 	"github.com/lace-ai/gai/ai"
 	gaictx "github.com/lace-ai/gai/context"
 )
@@ -26,7 +24,7 @@ type IterationInformation struct {
 type Iteration struct {
 	Count   int
 	Parts   []IterationPart
-	Request []string
+	Request string
 }
 
 type IterationPart struct {
@@ -36,67 +34,14 @@ type IterationPart struct {
 	ToolResp *ToolResponse
 }
 
-func (i *IterationPart) String() string {
-	if i == nil {
-		return "<I>nil</I>"
-	}
-	var builder strings.Builder
-	builder.WriteString("<I")
-	builder.WriteString(" t=")
-	builder.WriteString(string(i.Type))
-	builder.WriteString(">")
-	switch i.Type {
-	case IterationTypeToolCall:
-		if i.ToolReq == nil || i.ToolResp == nil {
-			builder.WriteString("<Error>missing tool request/response</Error>")
-			break
-		}
-		builder.WriteString("<Req u=assistant>")
-		builder.WriteString(i.ToolReq.String())
-		builder.WriteString("</Req>")
-		builder.WriteString("<Resp u=tool>")
-		builder.WriteString(i.ToolResp.String())
-		builder.WriteString("</Resp>")
-	case IterationTypeResponse:
-		if i.Response == nil {
-			builder.WriteString("<Resp u=assistant></Resp>")
-			break
-		}
-		builder.WriteString("<Resp u=assistant>")
-		builder.WriteString(i.Response.Text)
-		builder.WriteString("</Resp>")
-	case IterationTypeToolError:
-		if i.ToolResp == nil || i.ToolResp.Err == nil {
-			builder.WriteString("<Error u=tool>unknown error</Error>")
-			break
-		}
-		builder.WriteString("<Error u=tool>")
-		builder.WriteString(i.ToolResp.Err.Error())
-		builder.WriteString("</Error>")
-	}
-	builder.WriteString("</I>")
-	return builder.String()
-}
-
-func BuildIterationsString(builder *strings.Builder, iterations []Iteration) {
-	for _, i := range iterations {
-		for _, part := range i.Parts {
-			builder.WriteString(part.String())
-		}
-	}
-}
-
-func (i *Iteration) Messages() []gaictx.Message {
-	if i == nil {
-		return nil
-	}
+func (i Iteration) Messages() []gaictx.Message {
 	var msgs []gaictx.Message
 
 	if i.Count == 1 {
 		if len(i.Request) > 0 {
 			msgs = append(msgs, gaictx.Message{
 				Role:    gaictx.RoleUser,
-				Content: gaictx.NewTextContent(strings.Join(i.Request, "\n")),
+				Content: gaictx.NewTextContent(i.Request),
 			})
 		}
 	}
