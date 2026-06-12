@@ -101,9 +101,7 @@ func (b *stubPromptBuilder) BuildPrompt(ctx context.Context, conv gaictx.Convers
 		prompt.WriteString(b.userPrompt)
 		prompt.WriteString("\n")
 	}
-	var history strings.Builder
-	gaictx.RenderMessages(conv.Messages(), &history)
-	prompt.WriteString(history.String())
+	prompt.WriteString(renderTestMessages(conv.Messages()))
 	return prompt.String(), nil
 }
 
@@ -161,6 +159,22 @@ func (m *scriptedStreamModel) Requests() []ai.AIRequest {
 	requests := make([]ai.AIRequest, len(m.requests))
 	copy(requests, m.requests)
 	return requests
+}
+
+func renderTestMessages(messages []gaictx.Message) string {
+	var builder strings.Builder
+	for i, message := range messages {
+		builder.WriteString("<")
+		builder.WriteString(string(message.Role))
+		builder.WriteString(" key=")
+		builder.WriteString(fmt.Sprintf("%d", i))
+		builder.WriteString(">\n")
+		builder.WriteString(message.Content.String())
+		builder.WriteString("\n</")
+		builder.WriteString(string(message.Role))
+		builder.WriteString(">")
+	}
+	return builder.String()
 }
 
 func testPromptBuilder() gaictx.PromptBuilder {

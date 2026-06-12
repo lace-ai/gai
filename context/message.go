@@ -2,8 +2,6 @@ package context
 
 import (
 	"context"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/lace-ai/gai/ai"
@@ -35,27 +33,6 @@ func IsValidRole(role Role) bool {
 	default:
 		return false
 	}
-}
-
-func RenderMessages(messages []Message, builder *strings.Builder) {
-	for i, m := range messages {
-		builder.WriteString("<")
-		builder.WriteString(string(m.Role))
-		builder.WriteString(" key=")
-		builder.WriteString(strconv.Itoa(i))
-		builder.WriteString(">\n")
-		builder.WriteString(m.Content.String())
-		builder.WriteString("\n")
-		builder.WriteString("</")
-		builder.WriteString(string(m.Role))
-		builder.WriteString(">")
-	}
-}
-
-func renderMessages(messages []Message) string {
-	var builder strings.Builder
-	RenderMessages(messages, &builder)
-	return builder.String()
 }
 
 func (m Message) Tokens(ctx context.Context, tokenizer ai.Tokenizer) (int, error) {
