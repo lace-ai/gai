@@ -1,10 +1,15 @@
 package context
 
-import "context"
+import (
+	"context"
+
+	"github.com/lace-ai/gai"
+	"github.com/lace-ai/gai/ai"
+)
 
 type Part interface {
-	Type() string
-	Content() string
+	Tokens(ctx context.Context, tokenizer ai.Tokenizer) int
+	Marshal(ctx context.Context) ([]byte, error)
 }
 
 type ContextSource interface {
@@ -35,6 +40,7 @@ type Builder struct {
 	Iteration          []Part
 	TokenBudget        int
 	Renderer           PromptRenderer
+	debugSink          gai.DebugSinkFunc
 }
 
 func NewBuilder(renderer PromptRenderer, tokenBudget int) *Builder {
@@ -45,6 +51,10 @@ func NewBuilder(renderer PromptRenderer, tokenBudget int) *Builder {
 		TokenBudget:        tokenBudget,
 		Renderer:           renderer,
 	}
+}
+
+func (b *Builder) SetDebugSink(debugSink gai.DebugSinkFunc) {
+	b.debugSink = debugSink
 }
 
 func (b *Builder) AppendContextSource(ctx context.Context, source ContextSource) error {
@@ -80,4 +90,15 @@ func (b *Builder) BuildContext(ctx context.Context) ([]Part, error) {
 }
 
 func (b *Builder) BuildPrompt(ctx context.Context, conv Conversation) (string, error) {
+	var parts []Part
+	parts = append(parts, b.SystemInstructions...)
+	contextParts, err := b.BuildContext(ctx)
+	if err != nil {
+		return "", err
+	}
+	parts = append(parts, contextParts...)
+	for _, message := range conv.Messages() {
+		parts = append(parts, message)
+	}
+	return b.Renderer.RenderPrompt(ctx, parts)
 }

@@ -1,9 +1,12 @@
 package context
 
 import (
+	"context"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/lace-ai/gai/ai"
 )
 
 type Role string
@@ -53,4 +56,15 @@ func renderMessages(messages []Message) string {
 	var builder strings.Builder
 	RenderMessages(messages, &builder)
 	return builder.String()
+}
+
+func (m Message) Tokens(ctx context.Context, tokenizer ai.Tokenizer) int {
+	if count, ok := m.TokenCount[tokenizer.ID()]; ok {
+		return count
+	}
+	return -1
+}
+
+func (m Message) Marshal(ctx context.Context) ([]byte, error) {
+	return m.Content.Marshal()
 }
