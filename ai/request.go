@@ -1,6 +1,6 @@
 package ai
 
 type AIRequest struct {
-	Prompt    Prompt
+	Prompt    string
 	MaxTokens int
 }

@@ -46,7 +46,7 @@ func (m *Model) Close() error {
 
 func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.Token {
 	out := make(chan ai.Token, 1)
-	prompt := req.Prompt.CombinedPrompt()
+	prompt := req.Prompt
 
 	go func() {
 		ctx, span := gai.StartOperationSpan(ctx, geminiTracerName, "ai.gemini", "ai.operation", "model.generate_stream",
@@ -213,7 +213,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 }
 
 func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AIResponse, err error) {
-	prompt := req.Prompt.CombinedPrompt()
+	prompt := req.Prompt
 	ctx, span := gai.StartOperationSpan(ctx, geminiTracerName, "ai.gemini", "ai.operation", "model.generate",
 		attribute.String("ai.provider", "gemini"),
 		attribute.String("ai.model", m.name),

@@ -293,7 +293,7 @@ func (a *mistralToolCallAccumulator) ready(final bool) []ai.ToolCall {
 }
 
 func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.Token {
-	prompt := req.Prompt.CombinedPrompt()
+	prompt := req.Prompt
 	ctx, span := gai.StartOperationSpan(ctx, mistralTracerName, "ai.mistral", "ai.operation", "model.generate_stream",
 		attribute.String("ai.provider", "mistral"),
 		attribute.String("ai.model", m.name),
@@ -650,7 +650,7 @@ func intPtr(v int) *int {
 }
 
 func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AIResponse, err error) {
-	prompt := req.Prompt.CombinedPrompt()
+	prompt := req.Prompt
 	ctx, span := gai.StartOperationSpan(ctx, mistralTracerName, "ai.mistral", "ai.operation", "model.generate",
 		attribute.String("ai.provider", "mistral"),
 		attribute.String("ai.model", m.name),
