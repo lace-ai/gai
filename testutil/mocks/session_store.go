@@ -11,14 +11,14 @@ var _ gaictx.SessionStore = (*MockSessionStore)(nil)
 
 type GetMessagesCall struct {
 	Context   context.Context
-	SessionID int
+	SessionID string
 	Limit     int
 	Offset    int
 }
 
 type GetSessionCall struct {
 	Context   context.Context
-	SessionID int
+	SessionID string
 }
 
 type CreateSessionCall struct {
@@ -27,19 +27,19 @@ type CreateSessionCall struct {
 
 type AddMessagesCall struct {
 	Context   context.Context
-	SessionID int
+	SessionID string
 	Messages  []gaictx.Message
 }
 
 type AddMessageCall struct {
 	Context   context.Context
-	SessionID int
+	SessionID string
 	Message   gaictx.Message
 }
 
 type UpdateMessageTokensCall struct {
 	Context   context.Context
-	MessageID int
+	MessageID string
 	Tokenizer string
 	Tokens    int
 }
@@ -47,7 +47,7 @@ type UpdateMessageTokensCall struct {
 type MockSessionStore struct {
 	Messages                 []gaictx.Message
 	Err                      error
-	CreateSessionID          int
+	CreateSessionID          string
 	GetSessionCalls          []GetSessionCall
 	GetMessagesCalls         []GetMessagesCall
 	CreateCalls              []CreateSessionCall
@@ -58,7 +58,7 @@ type MockSessionStore struct {
 	mu sync.Mutex
 }
 
-func (s *MockSessionStore) GetSession(ctx context.Context, sessionID int) error {
+func (s *MockSessionStore) GetSession(ctx context.Context, sessionID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -66,7 +66,7 @@ func (s *MockSessionStore) GetSession(ctx context.Context, sessionID int) error 
 	return s.Err
 }
 
-func (s *MockSessionStore) GetMessages(ctx context.Context, sessionID int, limit int, offset int) ([]gaictx.Message, error) {
+func (s *MockSessionStore) GetMessages(ctx context.Context, sessionID string, limit int, offset int) ([]gaictx.Message, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -89,18 +89,18 @@ func (s *MockSessionStore) GetMessages(ctx context.Context, sessionID int, limit
 	return messages, nil
 }
 
-func (s *MockSessionStore) CreateSession(ctx context.Context) (int, error) {
+func (s *MockSessionStore) CreateSession(ctx context.Context) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	s.CreateCalls = append(s.CreateCalls, CreateSessionCall{Context: ctx})
 	if s.Err != nil {
-		return 0, s.Err
+		return "", s.Err
 	}
 	return s.CreateSessionID, nil
 }
 
-func (s *MockSessionStore) AddMessages(ctx context.Context, sessionID int, messages []gaictx.Message) ([]gaictx.Message, error) {
+func (s *MockSessionStore) AddMessages(ctx context.Context, sessionID string, messages []gaictx.Message) ([]gaictx.Message, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -121,7 +121,7 @@ func (s *MockSessionStore) AddMessages(ctx context.Context, sessionID int, messa
 	return added, nil
 }
 
-func (s *MockSessionStore) AddMessage(ctx context.Context, sessionID int, message gaictx.Message) (gaictx.Message, error) {
+func (s *MockSessionStore) AddMessage(ctx context.Context, sessionID string, message gaictx.Message) (gaictx.Message, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -137,7 +137,7 @@ func (s *MockSessionStore) AddMessage(ctx context.Context, sessionID int, messag
 	return message, nil
 }
 
-func (s *MockSessionStore) UpdateMessageTokens(ctx context.Context, messageID int, tokenizer string, tokens int) error {
+func (s *MockSessionStore) UpdateMessageTokens(ctx context.Context, messageID string, tokenizer string, tokens int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

@@ -12,17 +12,17 @@ type HistoryState struct {
 }
 
 type HistoryStateStore interface {
-	GetHistoryState(ctx context.Context, turnID int) (*HistoryState, error)
+	GetHistoryState(ctx context.Context, turnID string) (*HistoryState, error)
 	SaveHistoyrState(ctx context.Context, endTurnCount int, summary Summary) error
 }
 
 type HistorySource struct {
 	store SessionStore
-	id    int
+	id    string
 	debug gai.DebugSink
 }
 
-func NewHistory(store SessionStore, id int) *HistorySource {
+func NewHistory(store SessionStore, id string) *HistorySource {
 	return &HistorySource{
 		store: store,
 		id:    id,

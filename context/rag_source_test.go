@@ -3,6 +3,7 @@ package context_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -14,8 +15,8 @@ func TestRAGSourceBudgetsDocumentsInsideGroup(t *testing.T) {
 
 	store := &fakeRAGStore{
 		docs: []gaictx.Document{
-			{ID: 1, Content: "one two"},
-			{ID: 2, Content: "three four five"},
+			{ID: "1", Content: "one two"},
+			{ID: "2", Content: "three four five"},
 		},
 	}
 	parts, err := gaictx.RAG(store, 2, func(ctx context.Context, view gaictx.PromptView) (string, error) {
@@ -73,8 +74,8 @@ func TestRAGSourceReportsMinimumDocumentTokensWhenRequiredDocsDoNotFit(t *testin
 
 	store := &fakeRAGStore{
 		docs: []gaictx.Document{
-			{ID: 1, Content: "one two three"},
-			{ID: 2, Content: "four five"},
+			{ID: "1", Content: "one two three"},
+			{ID: "2", Content: "four five"},
 		},
 	}
 	_, err := gaictx.RAG(store, 2, func(ctx context.Context, view gaictx.PromptView) (string, error) {
@@ -104,11 +105,12 @@ func (s *fakeRAGStore) GetRelevantDocuments(ctx context.Context, query string, l
 	return s.docs, nil
 }
 
-func (s *fakeRAGStore) AddDocument(ctx context.Context, content string) (int, error) {
-	s.docs = append(s.docs, gaictx.Document{ID: len(s.docs) + 1, Content: content})
-	return len(s.docs), nil
+func (s *fakeRAGStore) AddDocument(ctx context.Context, content string) (string, error) {
+	id := fmt.Sprintf("%d", len(s.docs)+1)
+	s.docs = append(s.docs, gaictx.Document{ID: id, Content: content})
+	return id, nil
 }
 
-func (s *fakeRAGStore) UpdateDocumentTokens(ctx context.Context, documentID int, tokenizer string, tokens int) error {
+func (s *fakeRAGStore) UpdateDocumentTokens(ctx context.Context, documentID string, tokenizer string, tokens int) error {
 	return nil
 }

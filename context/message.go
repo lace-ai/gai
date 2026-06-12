@@ -16,7 +16,7 @@ const (
 )
 
 type Turn struct {
-	ID           int
+	ID           string
 	Count        int
 	UserMessage  *Message
 	Messages     []Message
@@ -25,9 +25,9 @@ type Turn struct {
 }
 
 type Message struct {
-	ID        int
-	SessionID int
-	TurnID    int
+	ID        string
+	SessionID string
+	TurnID    string
 	Role      Role
 	Content   Content
 	// TokenCount key: tokenizer.ID, value: token count for content

@@ -21,7 +21,7 @@ type RAGSource struct {
 }
 
 type Document struct {
-	ID         int
+	ID         string
 	Content    string
 	TokenCount map[string]int
 }
@@ -115,7 +115,7 @@ func (s *RAGSource) BuildParts(ctx context.Context, view PromptView, budget Sour
 				return nil, err
 			}
 
-			go func(docID, tokens int) {
+			go func(docID string, tokens int) {
 				detachedCtx := context.WithoutCancel(ctx)
 				innerCtx, cancel := context.WithTimeout(detachedCtx, 5*time.Second)
 				defer cancel()
@@ -147,7 +147,7 @@ func (s *RAGSource) BuildParts(ctx context.Context, view PromptView, budget Sour
 		tokens += docTokens
 		totalTokens = tokens
 		includedDocumentCount++
-		children = append(children, NewPart("rag-doc-"+strconv.Itoa(i)+"-"+strconv.Itoa(doc.ID), doc.Content, Tokens(docTokens), Meta("document_id", doc.ID)))
+		children = append(children, NewPart("rag-doc-"+strconv.Itoa(i)+"-"+doc.ID, doc.Content, Tokens(docTokens), Meta("document_id", doc.ID)))
 	}
 
 	if len(overflow) > 0 && budget.Summarizer != nil && tokens < limit {
