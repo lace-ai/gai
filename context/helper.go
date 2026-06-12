@@ -1,6 +1,7 @@
 package context
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -8,26 +9,14 @@ import (
 	"strings"
 )
 
-func (b *Builder) SystemPrompt(path string) (*Builder, error) {
+func (b *Builder) SystemPrompt(ctx context.Context, path string) error {
 	sysPrompt, err := loadPromptFromFile(path)
 	if err != nil {
-		return b, err
+		return err
 	}
-
-	return b.System("base", sysPrompt, Required()), nil
-}
-
-func (b *Builder) ToolSysPrompt(path string) (*Builder, error) {
-	sysPrompt, err := loadPromptFromFile(path)
-	if err != nil {
-		return b, err
-	}
-
-	return b.System("tool", sysPrompt, Required()), nil
-}
-
-func (b *Builder) UserPrompt(text string) *Builder {
-	return b.User("request", text, Required())
+	part := NewTextPart(sysPrompt)
+	b.AppendSystemInstructions(ctx, part)
+	return nil
 }
 
 func loadPromptFromFile(path string) (string, error) {

@@ -58,11 +58,19 @@ func renderMessages(messages []Message) string {
 	return builder.String()
 }
 
-func (m Message) Tokens(ctx context.Context, tokenizer ai.Tokenizer) int {
+func (m Message) Tokens(ctx context.Context, tokenizer ai.Tokenizer) (int, error) {
 	if count, ok := m.TokenCount[tokenizer.ID()]; ok {
-		return count
+		return count, nil
 	}
-	return -1
+	count, err := tokenizer.CountTokens(ctx, m.Content.String())
+	if err != nil {
+		return 0, err
+	}
+	if m.TokenCount == nil {
+		m.TokenCount = make(map[string]int)
+	}
+	m.TokenCount[tokenizer.ID()] = count
+	return count, nil
 }
 
 func (m Message) Marshal(ctx context.Context) ([]byte, error) {
