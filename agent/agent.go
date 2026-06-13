@@ -22,12 +22,13 @@ type Limits struct {
 }
 
 type Definition struct {
-	Name      string
-	Model     ai.Model
-	Tools     []loop.Tool
-	Prompt    Prompt
-	Limits    Limits
-	Tokenizer ai.Tokenizer
+	Name         string
+	Model        ai.Model
+	Tools        []loop.Tool
+	Prompt       Prompt
+	Limits       Limits
+	Tokenizer    ai.Tokenizer
+	Preprocessor loop.ToolResPreProcessor
 }
 
 type Agent struct {
@@ -57,7 +58,7 @@ func (a *Agent) NewRun(input RunInput) (*loop.Loop, error) {
 		setter.SetTokenizer(a.def.Model.Tokenizer())
 	}
 
-	l := loop.New(a.def.Model, a.def.Tools, promptBuilder, nil)
+	l := loop.New(a.def.Model, a.def.Tools, promptBuilder, a.def.Preprocessor)
 	if a.def.Limits.MaxLoopIterations > 0 {
 		l.MaxLoopIterations = a.def.Limits.MaxLoopIterations
 	}
