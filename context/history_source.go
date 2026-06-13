@@ -35,7 +35,7 @@ func NewHistory(sessionId string, historyStateStore HistoryStore) *HistorySource
 	}
 }
 
-func (p *HistorySource) Name(ctx context.Context) string {
+func (p *HistorySource) Name() string {
 	return "history"
 }
 
