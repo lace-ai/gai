@@ -15,7 +15,7 @@ type HistoryState struct {
 
 type HistoryStore interface {
 	GetLastHistoryState(ctx context.Context, sessionID string) (*HistoryState, error)
-	SaveHistoryState(ctx context.Context, sessionID string, endTurnCount int, summary *Summary) error
+	SaveHistoryState(ctx context.Context, sessionID string, state *HistoryState) error
 
 	TurnTokenStore
 }
@@ -136,10 +136,12 @@ func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (Part, er
 			"tokenizer_id": tokenizerID,
 		}, nil)
 	} else {
-		lastTurn := lastHistoryState.Turns[len(lastHistoryState.Turns)-1].Count
+		builtState := &HistoryState{}
 		if lastHistoryState.Summary != nil {
 			part.Contents = append(part.Contents, lastHistoryState.Summary.Content)
 			tokenCount += lastHistoryState.Summary.TokenCount[tokenizerID]
+			summary := *lastHistoryState.Summary
+			builtState.Summary = &summary
 			summaryFields := map[string]any{
 				"session_id":          s.sessionID,
 				"tokenizer_id":        tokenizerID,
@@ -160,6 +162,7 @@ func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (Part, er
 			}, nil)
 		}
 
+		includedTurns := make([]Turn, 0, len(lastHistoryState.Turns))
 		for _, turn := range lastHistoryState.Turns {
 			turnCount++
 			turnMessages := 0
@@ -193,14 +196,24 @@ func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (Part, er
 					"last_turn_id":  turn.ID,
 					"last_turn_cnt": turn.Count,
 				}, nil)
-				lastTurn = turn.Count
 				break
 			}
 			tokenCount += tokens
 			part.Contents = append(part.Contents, contents...)
+			turn.HistoryState = nil
+			includedTurns = append(includedTurns, turn)
 		}
 
-		s.historyStateStore.SaveHistoryState(ctx, s.sessionID, lastTurn, nil)
+		if builtState.Summary != nil || len(includedTurns) > 0 {
+			builtState.Turns = includedTurns
+			if err := s.historyStateStore.SaveHistoryState(ctx, s.sessionID, builtState); err != nil {
+				s.emit(ctx, "history_source_state_save_failed", map[string]any{
+					"session_id":   s.sessionID,
+					"tokenizer_id": tokenizerID,
+				}, err)
+				return nil, err
+			}
+		}
 	}
 	part.saveTokens(tokenizerID, tokenCount)
 	s.emit(ctx, "history_source_build_finished", map[string]any{

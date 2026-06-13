@@ -1,6 +1,7 @@
 package context
 
 type Summary struct {
+	ID             string
 	StartTurnID    string
 	EndTurnID      string
 	StartTurnCount int
