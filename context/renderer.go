@@ -19,16 +19,19 @@ func (r XMLRenderer) Render(ctx context.Context, parts []Part) (string, error) {
 
 	var builder strings.Builder
 	for _, part := range parts {
-		writeXMLPart(ctx, &builder, part)
+		err := writeXMLPart(ctx, &builder, part)
+		if err != nil {
+			return "", err
+		}
 	}
 
 	return builder.String(), nil
 }
 
-func writeXMLPart(ctx context.Context, builder *strings.Builder, part Part) {
+func writeXMLPart(ctx context.Context, builder *strings.Builder, part Part) error {
 	content, err := part.Marshal(ctx)
 	if err != nil {
-		return
+		return err
 	}
 	contentStr := string(content)
 
@@ -45,6 +48,7 @@ func writeXMLPart(ctx context.Context, builder *strings.Builder, part Part) {
 	builder.WriteString("</")
 	writeEscaped(builder, part.Name())
 	builder.WriteString(">\n")
+	return nil
 }
 
 func writeEscaped(builder *strings.Builder, text string) {
