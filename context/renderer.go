@@ -29,6 +29,9 @@ func (r XMLRenderer) Render(ctx context.Context, parts []Part) (string, error) {
 }
 
 func writeXMLPart(ctx context.Context, builder *strings.Builder, part Part) error {
+	if part == nil {
+		return nil
+	}
 	content, err := part.Marshal(ctx)
 	if err != nil {
 		return err

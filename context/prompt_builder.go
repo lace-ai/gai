@@ -115,7 +115,9 @@ func (b *Builder) BuildContext(ctx context.Context) ([]Part, error) {
 		if err != nil {
 			return nil, err
 		}
-		contextParts = append(contextParts, part)
+		if part != nil {
+			contextParts = append(contextParts, part)
+		}
 	}
 	b.ContextParts = contextParts
 	return contextParts, nil
@@ -128,8 +130,10 @@ func (b *Builder) BuildPrompt(ctx context.Context, conv Conversation) (string, e
 	if b.userPrompt != "" {
 		parts = append(parts, NewTextPart(b.userPrompt))
 	}
-	for _, message := range conv.Messages() {
-		parts = append(parts, message)
+	if conv != nil {
+		for _, message := range conv.Messages() {
+			parts = append(parts, message)
+		}
 	}
 	return b.Renderer.Render(ctx, parts)
 }
