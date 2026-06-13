@@ -35,6 +35,10 @@ func NewHistory(sessionId string, historyStateStore HistoryStore) *HistorySource
 	}
 }
 
+func (p *HistorySource) Name(ctx context.Context) string {
+	return "history"
+}
+
 func (s *HistorySource) SetTokenizer(tokenizer ai.Tokenizer) {
 	s.tokenizer = tokenizer
 }
