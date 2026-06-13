@@ -108,7 +108,12 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInfor
 		retryCount := 0
 		completedToolCalls := map[string]struct{}{}
 
-		a.PromptBuilder.BuildContext(ctx)
+		_, err := a.PromptBuilder.BuildContext(ctx)
+		if err != nil {
+			loopErr = fmt.Errorf("%w: %w", ErrBuildPrompt, err)
+			errCh <- loopErr
+			return
+		}
 
 		var iteration Iteration
 		for i := range a.MaxLoopIterations {
