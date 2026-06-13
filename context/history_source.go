@@ -2,6 +2,7 @@ package context
 
 import (
 	"context"
+	"strings"
 
 	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
@@ -52,7 +53,18 @@ func (p *HistoryPart) Name() string {
 }
 
 func (p *HistoryPart) Marshal(ctx context.Context) ([]byte, error) {
-	return nil, nil
+	if p == nil || len(p.Contents) == 0 {
+		return []byte{}, nil
+	}
+
+	var builder strings.Builder
+	for i, content := range p.Contents {
+		if i > 0 {
+			builder.WriteString("\n")
+		}
+		builder.WriteString(content.String())
+	}
+	return []byte(builder.String()), nil
 }
 
 func (p *HistoryPart) Tokens(ctx context.Context, tokenizer ai.Tokenizer) (int, error) {
