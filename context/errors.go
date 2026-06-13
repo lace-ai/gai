@@ -1,6 +1,9 @@
 package context
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 var (
 	ErrSessionNotFound      = errors.New("session not found")
@@ -23,5 +26,7 @@ var (
 	ErrContentUnmarshal   = errors.New("failed to unmarshal content type")
 	ErrUnknownContentType = errors.New("unknown content type")
 
-	ErrInvalidTokenLimit = errors.New("invalid token limit")
+	ErrInvalidTokenCount    = errors.New("invalid token count")
+	ErrInvalideTokenLimit   = fmt.Errorf("%w for token limit")
+	ErrInvalidOutputReserve = fmt.Errorf("%w for output token reserve")
 )

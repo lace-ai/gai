@@ -2,6 +2,7 @@ package context
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
@@ -28,6 +29,7 @@ type PromptBuilder interface {
 
 type TokenBudget interface {
 	SetTokenLimit(limit int) error
+	SetOutputTokenReserve(reserve int) error
 	GetRemainingTokens() (int, error)
 	Tokenizer() ai.Tokenizer
 }
@@ -38,8 +40,9 @@ type Definition struct {
 	ContextSources     []ContextSource
 	UserPrompt         string
 	TokenBudget        int
-	DebugSink          gai.DebugSinkFunc
+	OutputTokenReserve int
 	Tokenizer          ai.Tokenizer
+	DebugSink          gai.DebugSinkFunc
 }
 
 type Builder struct {
@@ -52,6 +55,7 @@ type Builder struct {
 	debugSink          gai.DebugSinkFunc
 	userPrompt         string
 	tokenizer          ai.Tokenizer
+	OutputTokenReserve int
 }
 
 func New(def Definition) *Builder {
@@ -65,6 +69,7 @@ func New(def Definition) *Builder {
 		ContextParts:       []Part{},
 		Iteration:          []Part{},
 		TokenBudget:        def.TokenBudget,
+		OutputTokenReserve: def.OutputTokenReserve,
 		Renderer:           renderer,
 		debugSink:          def.DebugSink,
 		userPrompt:         def.UserPrompt,
@@ -107,16 +112,24 @@ func (b *Builder) AppendSystemInstructions(ctx context.Context, instructions ...
 
 func (b *Builder) BuildContext(ctx context.Context) ([]Part, error) {
 	var contextParts []Part
+	remainingTokens := b.TokenBudget - b.OutputTokenReserve - b.SystemInstructionsTokens(ctx)
 	for _, source := range b.ContextSources {
 		if setter, ok := source.(TokenizerSetter); ok && b.tokenizer != nil {
 			setter.SetTokenizer(b.tokenizer)
 		}
-		part, err := source.Function(ctx, b.TokenBudget)
+		part, err := source.Function(ctx, remainingTokens)
 		if err != nil {
 			return nil, err
 		}
 		if part != nil {
 			contextParts = append(contextParts, part)
+			tokens, err := part.Tokens(ctx, b.tokenizer)
+			if err != nil {
+				if b.debugSink != nil {
+				}
+				continue
+			}
+			remainingTokens -= tokens
 		}
 	}
 	b.ContextParts = contextParts
@@ -144,7 +157,7 @@ func (b *Builder) GetUserPrompt() string {
 
 func (b *Builder) SetTokenLimit(limit int) error {
 	if limit < 0 {
-		return ErrInvalidTokenLimit
+		return fmt.Errorf("%w: %d", ErrInvalideTokenLimit, limit)
 	}
 	b.TokenBudget = limit
 	return nil
@@ -160,4 +173,26 @@ func (b *Builder) Tokenizer() ai.Tokenizer {
 
 func (b *Builder) SetTokenizer(tokenizer ai.Tokenizer) {
 	b.tokenizer = tokenizer
+}
+
+func (b *Builder) SetOutputTokenReserve(reserve int) error {
+	if reserve < 0 {
+		return fmt.Errorf("%w: %d", ErrInvalidOutputReserve, reserve)
+	}
+	b.OutputTokenReserve = reserve
+	return nil
+}
+
+func (b *Builder) SystemInstructionsTokens(ctx context.Context) int {
+	count := 0
+	for _, part := range b.SystemInstructions {
+		tokens, err := part.Tokens(ctx, b.tokenizer)
+		if err != nil {
+			if b.debugSink != nil {
+			}
+			continue
+		}
+		count += tokens
+	}
+	return count
 }
