@@ -78,7 +78,7 @@ func Definition(model ai.Model, opts ...Option) agent.Definition {
 		Name:  "summary",
 		Model: model,
 		Tools: config.Tools,
-		Prompt: func(input agent.RunInput) gaictx.PromptBuilder {
+		Prompt: func(ctx context.Context, input agent.RunInput) gaictx.PromptBuilder {
 			return gaictx.New(gaictx.Definition{
 				Renderer:           gaictx.XMLRenderer{},
 				SystemInstructions: []gaictx.Part{gaictx.NewTextPart(systemPrompt)},
@@ -122,7 +122,7 @@ func (s Summarizer) Summarize(ctx context.Context, req gaictx.SummaryRequest) (s
 		MaxTokens: req.MaxTokens,
 		Meta:      req.Meta,
 	}
-	l, err := agent.New(def).NewRun(input)
+	l, err := agent.New(def).NewRun(ctx, input)
 	if err != nil {
 		return "", err
 	}

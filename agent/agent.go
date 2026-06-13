@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"context"
+
 	"github.com/lace-ai/gai/ai"
 	gaictx "github.com/lace-ai/gai/context"
 	"github.com/lace-ai/gai/loop"
@@ -13,7 +15,7 @@ type RunInput struct {
 	Meta      map[string]any
 }
 
-type Prompt func(input RunInput) gaictx.PromptBuilder
+type Prompt func(ctx context.Context, input RunInput) gaictx.PromptBuilder
 
 type Limits struct {
 	MaxLoopIterations int
@@ -39,7 +41,7 @@ func New(def Definition) *Agent {
 	return &Agent{def: def}
 }
 
-func (a *Agent) NewRun(input RunInput) (*loop.Loop, error) {
+func (a *Agent) NewRun(ctx context.Context, input RunInput) (*loop.Loop, error) {
 	if a == nil {
 		return nil, loop.ErrNilAgent
 	}
@@ -50,7 +52,7 @@ func (a *Agent) NewRun(input RunInput) (*loop.Loop, error) {
 		return nil, loop.ErrPromptNotConfigured
 	}
 
-	promptBuilder := a.def.Prompt(input)
+	promptBuilder := a.def.Prompt(ctx, input)
 	if promptBuilder == nil {
 		return nil, loop.ErrPromptNotConfigured
 	}

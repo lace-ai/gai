@@ -59,7 +59,7 @@ func TestAgentNewRunCreatesLoop(t *testing.T) {
 		Name:  "test-agent",
 		Model: model,
 		Tools: []loop.Tool{tool},
-		Prompt: func(input agent.RunInput) gaictx.PromptBuilder {
+		Prompt: func(ctx context.Context, input agent.RunInput) gaictx.PromptBuilder {
 			builder = &testPromptBuilder{prompt: input.Text}
 			return builder
 		},
@@ -70,7 +70,7 @@ func TestAgentNewRunCreatesLoop(t *testing.T) {
 		},
 	})
 
-	run, err := assistant.NewRun(agent.RunInput{Text: "input"})
+	run, err := assistant.NewRun(context.Background(), agent.RunInput{Text: "input"})
 	if err != nil {
 		t.Fatalf("NewRun failed: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestAgentNewRunUsesInputMaxTokens(t *testing.T) {
 
 	assistant := agent.New(agent.Definition{
 		Model: &mocks.MockModel{},
-		Prompt: func(input agent.RunInput) gaictx.PromptBuilder {
+		Prompt: func(ctx context.Context, input agent.RunInput) gaictx.PromptBuilder {
 			return &testPromptBuilder{prompt: input.Text}
 		},
 		Limits: agent.Limits{
@@ -107,7 +107,7 @@ func TestAgentNewRunUsesInputMaxTokens(t *testing.T) {
 		},
 	})
 
-	run, err := assistant.NewRun(agent.RunInput{Text: "input", MaxTokens: 3})
+	run, err := assistant.NewRun(context.Background(), agent.RunInput{Text: "input", MaxTokens: 3})
 	if err != nil {
 		t.Fatalf("NewRun failed: %v", err)
 	}
@@ -119,20 +119,20 @@ func TestAgentNewRunUsesInputMaxTokens(t *testing.T) {
 func TestAgentNewRunRequiresModelAndPrompt(t *testing.T) {
 	t.Parallel()
 
-	_, err := agent.New(agent.Definition{}).NewRun(agent.RunInput{})
+	_, err := agent.New(agent.Definition{}).NewRun(context.Background(), agent.RunInput{})
 	if err != loop.ErrModelNotConfigured {
 		t.Fatalf("expected ErrModelNotConfigured, got %v", err)
 	}
 
-	_, err = agent.New(agent.Definition{Model: &mocks.MockModel{}}).NewRun(agent.RunInput{})
+	_, err = agent.New(agent.Definition{Model: &mocks.MockModel{}}).NewRun(context.Background(), agent.RunInput{})
 	if err != loop.ErrPromptNotConfigured {
 		t.Fatalf("expected ErrPromptNotConfigured, got %v", err)
 	}
 
 	_, err = agent.New(agent.Definition{
 		Model:  &mocks.MockModel{},
-		Prompt: func(agent.RunInput) gaictx.PromptBuilder { return nil },
-	}).NewRun(agent.RunInput{})
+		Prompt: func(context.Context, agent.RunInput) gaictx.PromptBuilder { return nil },
+	}).NewRun(context.Background(), agent.RunInput{})
 	if err != loop.ErrPromptNotConfigured {
 		t.Fatalf("expected ErrPromptNotConfigured for nil builder, got %v", err)
 	}
