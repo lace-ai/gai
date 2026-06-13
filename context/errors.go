@@ -2,7 +2,6 @@ package context
 
 import (
 	"errors"
-	"fmt"
 )
 
 var (
@@ -27,6 +26,6 @@ var (
 	ErrUnknownContentType = errors.New("unknown content type")
 
 	ErrInvalidTokenCount    = errors.New("invalid token count")
-	ErrInvalideTokenLimit   = fmt.Errorf("%w for token limit")
-	ErrInvalidOutputReserve = fmt.Errorf("%w for output token reserve")
+	ErrInvalideTokenLimit   = errors.New("invalid token limit")
+	ErrInvalidOutputReserve = errors.New("invalid output token reserve")
 )
