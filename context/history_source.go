@@ -130,13 +130,13 @@ func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (Part, er
 	tokenCount := 0
 	turnCount := 0
 	messageCount := 0
-	lastTurn := lastHistoryState.Turns[len(lastHistoryState.Turns)-1].Count
 	if lastHistoryState == nil {
 		s.emit(ctx, "history_source_state_missing", map[string]any{
 			"session_id":   s.sessionID,
 			"tokenizer_id": tokenizerID,
 		}, nil)
 	} else {
+		lastTurn := lastHistoryState.Turns[len(lastHistoryState.Turns)-1].Count
 		if lastHistoryState.Summary != nil {
 			part.Contents = append(part.Contents, lastHistoryState.Summary.Content)
 			tokenCount += lastHistoryState.Summary.TokenCount[tokenizerID]
@@ -199,6 +199,8 @@ func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (Part, er
 			tokenCount += tokens
 			part.Contents = append(part.Contents, contents...)
 		}
+
+		s.historyStateStore.SaveHistoryState(ctx, s.sessionID, lastTurn, nil)
 	}
 	part.saveTokens(tokenizerID, tokenCount)
 	s.emit(ctx, "history_source_build_finished", map[string]any{
@@ -210,9 +212,6 @@ func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (Part, er
 		"message_count": messageCount,
 		"content_count": len(part.Contents),
 	}, nil)
-
-	s.historyStateStore.SaveHistoryState(ctx, s.sessionID, lastTurn, nil)
-
 	return &part, nil
 }
 
