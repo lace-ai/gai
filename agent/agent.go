@@ -15,7 +15,7 @@ type RunInput struct {
 	Meta      map[string]any
 }
 
-type Prompt func(ctx context.Context, input RunInput) gaictx.PromptBuilder
+type Prompt func(ctx context.Context, input RunInput) (gaictx.PromptBuilder, error)
 
 type Limits struct {
 	MaxLoopIterations int
@@ -52,7 +52,10 @@ func (a *Agent) NewRun(ctx context.Context, input RunInput) (*loop.Loop, error) 
 		return nil, loop.ErrPromptNotConfigured
 	}
 
-	promptBuilder := a.def.Prompt(ctx, input)
+	promptBuilder, err := a.def.Prompt(ctx, input)
+	if err != nil {
+		return nil, err
+	}
 	if promptBuilder == nil {
 		return nil, loop.ErrPromptNotConfigured
 	}

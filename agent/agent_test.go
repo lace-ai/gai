@@ -2,6 +2,7 @@ package agent_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/lace-ai/gai/agent"
@@ -59,9 +60,9 @@ func TestAgentNewRunCreatesLoop(t *testing.T) {
 		Name:  "test-agent",
 		Model: model,
 		Tools: []loop.Tool{tool},
-		Prompt: func(ctx context.Context, input agent.RunInput) gaictx.PromptBuilder {
+		Prompt: func(ctx context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
 			builder = &testPromptBuilder{prompt: input.Text}
-			return builder
+			return builder, nil
 		},
 		Limits: agent.Limits{
 			MaxLoopIterations: 2,
@@ -99,8 +100,8 @@ func TestAgentNewRunUsesInputMaxTokens(t *testing.T) {
 
 	assistant := agent.New(agent.Definition{
 		Model: &mocks.MockModel{},
-		Prompt: func(ctx context.Context, input agent.RunInput) gaictx.PromptBuilder {
-			return &testPromptBuilder{prompt: input.Text}
+		Prompt: func(ctx context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
+			return &testPromptBuilder{prompt: input.Text}, nil
 		},
 		Limits: agent.Limits{
 			MaxTokens: 9,
@@ -131,9 +132,24 @@ func TestAgentNewRunRequiresModelAndPrompt(t *testing.T) {
 
 	_, err = agent.New(agent.Definition{
 		Model:  &mocks.MockModel{},
-		Prompt: func(context.Context, agent.RunInput) gaictx.PromptBuilder { return nil },
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) { return nil, nil },
 	}).NewRun(context.Background(), agent.RunInput{})
 	if err != loop.ErrPromptNotConfigured {
 		t.Fatalf("expected ErrPromptNotConfigured for nil builder, got %v", err)
+	}
+}
+
+func TestAgentNewRunReturnsPromptError(t *testing.T) {
+	t.Parallel()
+
+	promptErr := errors.New("prompt failed")
+	_, err := agent.New(agent.Definition{
+		Model: &mocks.MockModel{},
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return nil, promptErr
+		},
+	}).NewRun(context.Background(), agent.RunInput{})
+	if !errors.Is(err, promptErr) {
+		t.Fatalf("expected prompt error, got %v", err)
 	}
 }
