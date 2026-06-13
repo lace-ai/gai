@@ -84,7 +84,7 @@ func (b *Builder) SetDebugSink(debugSink gai.DebugSinkFunc) {
 }
 
 func (b *Builder) AppendContextSource(ctx context.Context, source ContextSource) error {
-	if source.(TokenizerSetter) != nil {
+	if source.(TokenizerSetter) != nil && b.tokenizer != nil {
 		source.(TokenizerSetter).SetTokenizer(b.tokenizer)
 	}
 	b.ContextSources = append(b.ContextSources, source)
@@ -108,6 +108,9 @@ func (b *Builder) AppendSystemInstructions(ctx context.Context, instructions ...
 func (b *Builder) BuildContext(ctx context.Context) ([]Part, error) {
 	var contextParts []Part
 	for _, source := range b.ContextSources {
+		if source.(TokenizerSetter) != nil && b.tokenizer != nil {
+			source.(TokenizerSetter).SetTokenizer(b.tokenizer)
+		}
 		part, err := source.Function(ctx, b.TokenBudget)
 		if err != nil {
 			return nil, err
