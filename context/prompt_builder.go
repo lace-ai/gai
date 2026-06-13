@@ -29,6 +29,7 @@ type PromptBuilder interface {
 type TokenBudget interface {
 	SetTokenLimit(limit int) error
 	GetRemainingTokens() (int, error)
+	Tokenizer() ai.Tokenizer
 }
 
 type Definition struct {
@@ -38,6 +39,7 @@ type Definition struct {
 	UserPrompt         string
 	TokenBudget        int
 	DebugSink          gai.DebugSinkFunc
+	Tokenizer          ai.Tokenizer
 }
 
 type Builder struct {
@@ -49,6 +51,7 @@ type Builder struct {
 	Renderer           Renderer
 	debugSink          gai.DebugSinkFunc
 	userPrompt         string
+	tokenizer          ai.Tokenizer
 }
 
 func New(def Definition) *Builder {
@@ -65,6 +68,7 @@ func New(def Definition) *Builder {
 		Renderer:           renderer,
 		debugSink:          def.DebugSink,
 		userPrompt:         def.UserPrompt,
+		tokenizer:          def.Tokenizer,
 	}
 }
 
@@ -80,6 +84,9 @@ func (b *Builder) SetDebugSink(debugSink gai.DebugSinkFunc) {
 }
 
 func (b *Builder) AppendContextSource(ctx context.Context, source ContextSource) error {
+	if source.(TokenizerSetter) != nil {
+		source.(TokenizerSetter).SetTokenizer(b.tokenizer)
+	}
 	b.ContextSources = append(b.ContextSources, source)
 	return nil
 }
@@ -138,4 +145,12 @@ func (b *Builder) SetTokenLimit(limit int) error {
 
 func (b *Builder) SetUserPrompt(prompt string) {
 	b.userPrompt = prompt
+}
+
+func (b *Builder) Tokenizer() ai.Tokenizer {
+	return b.tokenizer
+}
+
+func (b *Builder) SetTokenizer(tokenizer ai.Tokenizer) {
+	b.tokenizer = tokenizer
 }

@@ -21,6 +21,7 @@ type Config struct {
 	MaxLoopIterations int
 	RetryCount        int
 	MaxTokens         int
+	Tokenizer         ai.Tokenizer
 }
 
 type Option func(*Config)
@@ -55,10 +56,17 @@ func WithMaxTokens(maxTokens int) Option {
 	}
 }
 
+func WithTokenizer(tokenizer ai.Tokenizer) Option {
+	return func(config *Config) {
+		config.Tokenizer = tokenizer
+	}
+}
+
 func Definition(model ai.Model, opts ...Option) agent.Definition {
 	config := Config{
 		SystemPrompt:      DefaultSystemPrompt,
 		MaxLoopIterations: 1,
+		Tokenizer:         model.Tokenizer(),
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -76,8 +84,10 @@ func Definition(model ai.Model, opts ...Option) agent.Definition {
 				SystemInstructions: []gaictx.Part{gaictx.NewTextPart(systemPrompt)},
 				UserPrompt:         input.Text,
 				TokenBudget:        -1,
+				Tokenizer:          config.Tokenizer,
 			})
 		},
+		Tokenizer: config.Tokenizer,
 		Limits: agent.Limits{
 			MaxLoopIterations: config.MaxLoopIterations,
 			RetryCount:        config.RetryCount,

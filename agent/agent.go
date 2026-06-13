@@ -22,11 +22,12 @@ type Limits struct {
 }
 
 type Definition struct {
-	Name   string
-	Model  ai.Model
-	Tools  []loop.Tool
-	Prompt Prompt
-	Limits Limits
+	Name      string
+	Model     ai.Model
+	Tools     []loop.Tool
+	Prompt    Prompt
+	Limits    Limits
+	Tokenizer ai.Tokenizer
 }
 
 type Agent struct {
