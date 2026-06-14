@@ -130,7 +130,7 @@ func TestNewHistoryWithSummarizerRequiresModelOrSummarizer(t *testing.T) {
 	}
 }
 
-func TestHistorySourceSummarizesOldestTurns(t *testing.T) {
+func TestHistorySourceDoesNotSummarizeWhenHistoryFitsBudget(t *testing.T) {
 	t.Parallel()
 
 	store := &historyStore{
@@ -184,6 +184,78 @@ func TestHistorySourceSummarizesOldestTurns(t *testing.T) {
 	}
 	if part == nil {
 		t.Fatal("expected history part")
+	}
+	if model.Count != 0 {
+		t.Fatalf("expected summarizer not to run, got %d calls", model.Count)
+	}
+	if store.saved == nil {
+		t.Fatal("expected history state to be saved")
+	}
+	if store.saved.Summary != nil {
+		t.Fatalf("expected no summary when history fits budget, got %+v", store.saved.Summary)
+	}
+	if len(store.saved.Turns) != 3 {
+		t.Fatalf("expected all turns to remain unsummarized, got %+v", store.saved.Turns)
+	}
+}
+
+func TestHistorySourceSummarizesOldestTurnsWhenBudgetReached(t *testing.T) {
+	t.Parallel()
+
+	store := &historyStore{
+		state: &history.HistoryState{
+			Turns: []gaictx.Turn{
+				{
+					ID:    "turn-1",
+					Count: 1,
+					UserMessage: &gaictx.Message{
+						Content:    gaictx.NewTextContent("first user"),
+						TokenCount: map[string]int{"mock.tokenizer": 2},
+					},
+				},
+				{
+					ID:    "turn-2",
+					Count: 2,
+					UserMessage: &gaictx.Message{
+						Content:    gaictx.NewTextContent("second user"),
+						TokenCount: map[string]int{"mock.tokenizer": 2},
+					},
+				},
+				{
+					ID:    "turn-3",
+					Count: 3,
+					UserMessage: &gaictx.Message{
+						Content:    gaictx.NewTextContent("third user"),
+						TokenCount: map[string]int{"mock.tokenizer": 2},
+					},
+				},
+			},
+		},
+	}
+	model := &mocks.MockModel{
+		Responses: []mocks.MockModelResponse{
+			{Res: ai.AIResponse{Text: "summary text"}},
+		},
+	}
+	source, err := history.New("session-1", store, &history.SummarizerDefinition{
+		Enabled: true,
+		Amount:  0.67,
+		Model:   model,
+	})
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+	source.SetTokenizer(&mocks.MockTokenizer{})
+
+	part, err := source.Function(context.Background(), 5)
+	if err != nil {
+		t.Fatalf("Function failed: %v", err)
+	}
+	if part == nil {
+		t.Fatal("expected history part")
+	}
+	if model.Count != 1 {
+		t.Fatalf("expected summarizer to run once, got %d calls", model.Count)
 	}
 	if store.saved == nil {
 		t.Fatal("expected summarized state to be saved")

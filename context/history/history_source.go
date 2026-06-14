@@ -61,12 +61,21 @@ type SummarizerDefinition struct {
 	Amount     float32
 }
 
-func New(sessionId string, historyStateStore HistoryStore, summaryDef *SummarizerDefinition) (*HistorySource, error) {
-	config := *summaryDef
-	if summaryDef == nil {
-		config.Enabled = false
-		config.Amount = 0.7
+// SummarizerDefinitoin is kept for compatibility with the original misspelled name.
+type SummarizerDefinitoin = SummarizerDefinition
+
+func NewHistory(sessionId string, historyStateStore HistoryStore) *HistorySource {
+	return &HistorySource{
+		historyStateStore: historyStateStore,
+		sessionID:         sessionId,
 	}
+}
+
+func New(sessionId string, historyStateStore HistoryStore, summaryDef *SummarizerDefinition) (*HistorySource, error) {
+	if summaryDef == nil {
+		return NewHistory(sessionId, historyStateStore), nil
+	}
+	config := *summaryDef
 	if config.Amount < 0 || config.Amount > 1 {
 		return nil, ErrInvalidSummaryAmount
 	}
@@ -213,92 +222,43 @@ func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (result g
 		}, nil)
 	} else {
 		statePresent = true
-		if s.summarize {
-			lastHistoryState, err = s.summarizeState(ctx, lastHistoryState, tokenBudget)
+		state := lastHistoryState
+		summarized := false
+		for {
+			part = HistoryPart{}
+			summaryIncluded = false
+			budgetReached = false
+			tokenCount = 0
+			turnCount = 0
+			messageCount = 0
+			includedTurnCount = 0
+
+			builtState, buildBudgetReached, err := s.buildPart(ctx, state, tokenBudget, tokenizerID, &part, &tokenCount, &turnCount, &messageCount, &includedTurnCount, &summaryIncluded)
 			if err != nil {
 				return nil, err
 			}
-		}
-		builtState := &HistoryState{}
-		if lastHistoryState.Summary != nil {
-			summaryIncluded = true
-			part.Contents = append(part.Contents, lastHistoryState.Summary.Content)
-			tokenCount += lastHistoryState.Summary.TokenCount[tokenizerID]
-			summary := *lastHistoryState.Summary
-			builtState.Summary = &summary
-			summaryFields := map[string]any{
-				"session_id":          s.sessionID,
-				"tokenizer_id":        tokenizerID,
-				"summary_tokens":      lastHistoryState.Summary.TokenCount[tokenizerID],
-				"summary_start_turn":  lastHistoryState.Summary.StartTurnID,
-				"summary_end_turn":    lastHistoryState.Summary.EndTurnID,
-				"summary_start_count": lastHistoryState.Summary.StartTurnCount,
-				"summary_end_count":   lastHistoryState.Summary.EndTurnCount,
-			}
-			if s.debug != nil && s.debug.IncludeSensitiveData() {
-				summaryFields["summary_content"] = lastHistoryState.Summary.Content.String()
-			}
-			s.emit(ctx, "history_source_summary_included", summaryFields, nil)
-		} else {
-			s.emit(ctx, "history_source_summary_missing", map[string]any{
-				"session_id":   s.sessionID,
-				"tokenizer_id": tokenizerID,
-			}, nil)
-		}
+			budgetReached = buildBudgetReached
 
-		includedTurns := make([]gaictx.Turn, 0, len(lastHistoryState.Turns))
-		for _, turn := range lastHistoryState.Turns {
-			turnCount++
-			turnMessages := 0
-			var contents []gaictx.Content
-			if turn.UserMessage != nil {
-				contents = append(contents, turn.UserMessage.Content)
-				messageCount++
-				turnMessages++
+			if budgetReached && s.summarize && !summarized {
+				state, err = s.summarizeState(ctx, lastHistoryState, tokenBudget)
+				if err != nil {
+					return nil, err
+				}
+				summarized = true
+				continue
 			}
-			for _, message := range turn.Messages {
-				contents = append(contents, message.Content)
-				messageCount++
-				turnMessages++
-			}
-			tokens, err := turn.Tokenize(ctx, s.tokenizer, s.historyStateStore)
-			if err != nil {
-				s.emit(ctx, "history_source_turn_tokenize_failed", map[string]any{
-					"session_id":   s.sessionID,
-					"tokenizer_id": tokenizerID,
-					"turn_id":      turn.ID,
-					"turn_count":   turn.Count,
-				}, err)
-				return nil, err
-			}
-			if tokenCount+tokens > tokenBudget {
-				budgetReached = true
-				s.emit(ctx, "history_source_token_budget_reached", map[string]any{
-					"session_id":    s.sessionID,
-					"tokenizer_id":  tokenizerID,
-					"token_budget":  tokenBudget,
-					"total_tokens":  tokenCount,
-					"last_turn_id":  turn.ID,
-					"last_turn_cnt": turn.Count,
-				}, nil)
-				break
-			}
-			tokenCount += tokens
-			part.Contents = append(part.Contents, contents...)
-			includedTurns = append(includedTurns, turn)
-			includedTurnCount++
-		}
 
-		if builtState.Summary != nil || len(includedTurns) > 0 {
-			builtState.Turns = includedTurns
-			if err := s.historyStateStore.SaveHistoryState(ctx, s.sessionID, builtState); err != nil {
-				s.emit(ctx, "history_source_state_save_failed", map[string]any{
-					"session_id":   s.sessionID,
-					"tokenizer_id": tokenizerID,
-				}, err)
-				return nil, err
+			if builtState.Summary != nil || len(builtState.Turns) > 0 {
+				if err := s.historyStateStore.SaveHistoryState(ctx, s.sessionID, builtState); err != nil {
+					s.emit(ctx, "history_source_state_save_failed", map[string]any{
+						"session_id":   s.sessionID,
+						"tokenizer_id": tokenizerID,
+					}, err)
+					return nil, err
+				}
+				stateSaved = true
 			}
-			stateSaved = true
+			break
 		}
 	}
 	part.saveTokens(tokenizerID, tokenCount)
@@ -313,6 +273,78 @@ func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (result g
 	}, nil)
 	result = &part
 	return result, nil
+}
+
+func (s *HistorySource) buildPart(ctx context.Context, state *HistoryState, tokenBudget int, tokenizerID string, part *HistoryPart, tokenCount, turnCount, messageCount, includedTurnCount *int, summaryIncluded *bool) (*HistoryState, bool, error) {
+	builtState := &HistoryState{}
+	if state.Summary != nil {
+		*summaryIncluded = true
+		part.Contents = append(part.Contents, state.Summary.Content)
+		*tokenCount += state.Summary.TokenCount[tokenizerID]
+		summary := *state.Summary
+		builtState.Summary = &summary
+		summaryFields := map[string]any{
+			"session_id":          s.sessionID,
+			"tokenizer_id":        tokenizerID,
+			"summary_tokens":      state.Summary.TokenCount[tokenizerID],
+			"summary_start_turn":  state.Summary.StartTurnID,
+			"summary_end_turn":    state.Summary.EndTurnID,
+			"summary_start_count": state.Summary.StartTurnCount,
+			"summary_end_count":   state.Summary.EndTurnCount,
+		}
+		if s.debug != nil && s.debug.IncludeSensitiveData() {
+			summaryFields["summary_content"] = state.Summary.Content.String()
+		}
+		s.emit(ctx, "history_source_summary_included", summaryFields, nil)
+	} else {
+		s.emit(ctx, "history_source_summary_missing", map[string]any{
+			"session_id":   s.sessionID,
+			"tokenizer_id": tokenizerID,
+		}, nil)
+	}
+
+	includedTurns := make([]gaictx.Turn, 0, len(state.Turns))
+	for _, turn := range state.Turns {
+		*turnCount++
+		var contents []gaictx.Content
+		if turn.UserMessage != nil {
+			contents = append(contents, turn.UserMessage.Content)
+			*messageCount++
+		}
+		for _, message := range turn.Messages {
+			contents = append(contents, message.Content)
+			*messageCount++
+		}
+		tokens, err := turn.Tokenize(ctx, s.tokenizer, s.historyStateStore)
+		if err != nil {
+			s.emit(ctx, "history_source_turn_tokenize_failed", map[string]any{
+				"session_id":   s.sessionID,
+				"tokenizer_id": tokenizerID,
+				"turn_id":      turn.ID,
+				"turn_count":   turn.Count,
+			}, err)
+			return nil, false, err
+		}
+		if *tokenCount+tokens > tokenBudget {
+			s.emit(ctx, "history_source_token_budget_reached", map[string]any{
+				"session_id":    s.sessionID,
+				"tokenizer_id":  tokenizerID,
+				"token_budget":  tokenBudget,
+				"total_tokens":  *tokenCount,
+				"last_turn_id":  turn.ID,
+				"last_turn_cnt": turn.Count,
+			}, nil)
+			builtState.Turns = includedTurns
+			return builtState, true, nil
+		}
+		*tokenCount += tokens
+		part.Contents = append(part.Contents, contents...)
+		includedTurns = append(includedTurns, turn)
+		*includedTurnCount++
+	}
+
+	builtState.Turns = includedTurns
+	return builtState, false, nil
 }
 
 func (s *HistorySource) summarizeState(ctx context.Context, state *HistoryState, maxTokens int) (*HistoryState, error) {
