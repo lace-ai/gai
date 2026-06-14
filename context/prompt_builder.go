@@ -132,8 +132,19 @@ func (b *Builder) BuildContext(ctx context.Context) (contextParts []Part, err er
 		gai.EndSpan(span, err)
 	}()
 
-	systemTokens = b.SystemInstructionsTokens(ctx)
-	remainingTokens = b.TokenBudget - b.OutputTokenReserve - systemTokens
+	if b.TokenBudget > 0 {
+		systemTokens = b.SystemInstructionsTokens(ctx)
+		remainingTokens = b.TokenBudget - b.OutputTokenReserve - systemTokens
+	} else {
+		b.debugSink.Emit(ctx, gai.DebugEvent{
+			Name:   "prompt_builder_token_budget_skipped",
+			Source: "context:Builder",
+			Fields: map[string]any{
+				"reason": "token_budget_not_set",
+			},
+		})
+		remainingTokens = 1000000 // effectively unlimited
+	}
 	span.SetAttributes(
 		attribute.Int("context.system_tokens", systemTokens),
 		attribute.Int("context.remaining_tokens", remainingTokens),
@@ -168,7 +179,7 @@ func (b *Builder) BuildContext(ctx context.Context) (contextParts []Part, err er
 				"source": source.Name(),
 				"part":   part.Name(),
 			})
-			if ok {
+			if ok && b.TokenBudget > 0 {
 				remainingTokens -= tokens
 			}
 			b.emit(ctx, "prompt_builder_source_included", map[string]any{
