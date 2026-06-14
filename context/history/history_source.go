@@ -2,6 +2,7 @@ package history
 
 import (
 	"context"
+	"sort"
 	"strings"
 
 	"github.com/lace-ai/gai"
@@ -49,9 +50,10 @@ type HistorySource struct {
 	debug     gai.DebugSink
 	tokenizer ai.Tokenizer
 
-	summarizer    *summary.Summarizer
-	summarize     bool
-	summaryAmount float32
+	summarizer       *summary.Summarizer
+	summarize        bool
+	summaryAmount    float32
+	summaryMaxTokens int
 }
 
 // SummarizerDefinition configures history summarization.
@@ -60,10 +62,11 @@ type HistorySource struct {
 // turns. Amount is a fraction from 0 to 1 and defaults to 0.7 when left unset.
 // Provide either Summarizer or Model when Enabled is true.
 type SummarizerDefinition struct {
-	Model      ai.Model
-	Summarizer *summary.Summarizer
-	Enabled    bool
-	Amount     float32
+	Model            ai.Model
+	Summarizer       *summary.Summarizer
+	Enabled          bool
+	SummaryMaxTokens int
+	Amount           float32
 }
 
 // NewHistory creates a HistorySource without summarization.
@@ -104,6 +107,7 @@ func New(sessionId string, historyStateStore HistoryStore, summaryDef *Summarize
 		summarizer:        config.Summarizer,
 		summarize:         config.Enabled,
 		summaryAmount:     config.Amount,
+		summaryMaxTokens:  config.SummaryMaxTokens,
 	}, nil
 }
 
@@ -227,6 +231,7 @@ func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (result g
 		}, err)
 		return nil, err
 	}
+	lastHistoryState.Turns = sortTurnsByCount(lastHistoryState.Turns)
 	var part HistoryPart
 	if lastHistoryState == nil {
 		s.emit(ctx, "history_source_state_missing", map[string]any{
@@ -447,7 +452,7 @@ func (s *HistorySource) summarizeState(ctx context.Context, state *HistoryState,
 	req := summary.Request{
 		ID:        "history",
 		Text:      builder.String(),
-		MaxTokens: maxTokens,
+		MaxTokens: s.summaryMaxTokens,
 	}
 
 	res, err := s.summarizer.Summarize(ctx, req)
@@ -522,6 +527,14 @@ func writeTurn(builder *strings.Builder, turn *gaictx.Turn) {
 		builder.WriteString(message.Content.String())
 		builder.WriteString("\n")
 	}
+}
+
+// sortTurnsByCount() Sort turns by Count in ascending order (oldest first)
+func sortTurnsByCount(turns []gaictx.Turn) []gaictx.Turn {
+	sort.SliceStable(turns, func(i, j int) bool {
+		return turns[i].Count < turns[j].Count
+	})
+	return turns
 }
 
 func (s *HistorySource) emit(ctx context.Context, name string, fields map[string]any, err error) {
