@@ -7,7 +7,6 @@ import (
 
 	"github.com/lace-ai/gai/agent/summary"
 	"github.com/lace-ai/gai/ai"
-	"github.com/lace-ai/gai/context/history"
 	"github.com/lace-ai/gai/loop"
 	"github.com/lace-ai/gai/testutil/mocks"
 )
@@ -18,7 +17,7 @@ func TestSummarizerRunsSummaryAgentThroughLoop(t *testing.T) {
 	model := &recordingModel{response: "short summary"}
 	summarizer := summary.New(model)
 
-	got, err := summarizer.Summarize(context.Background(), history.SummaryRequest{
+	got, err := summarizer.Summarize(context.Background(), summary.SummaryRequest{
 		ID:        "history",
 		Text:      "long input",
 		MaxTokens: 7,
@@ -48,7 +47,7 @@ func TestDefinitionAllowsSystemPromptOverride(t *testing.T) {
 		Definition: summary.Definition(model, summary.WithSystemPrompt("custom summary system")),
 	}
 
-	_, err := summarizer.Summarize(context.Background(), history.SummaryRequest{Text: "input"})
+	_, err := summarizer.Summarize(context.Background(), summary.SummaryRequest{Text: "input"})
 	if err != nil {
 		t.Fatalf("Summarize failed: %v", err)
 	}

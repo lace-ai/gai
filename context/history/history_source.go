@@ -22,14 +22,6 @@ type Summary struct {
 	TokenCount     map[string]int
 }
 
-type SummaryRequest struct {
-	ID        string
-	Text      string
-	MaxTokens int
-	Required  bool
-	Meta      map[string]any
-}
-
 type HistoryState struct {
 	Turns   []gaictx.Turn
 	Summary *Summary

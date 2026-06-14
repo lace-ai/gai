@@ -9,12 +9,19 @@ import (
 	"github.com/lace-ai/gai/agent"
 	"github.com/lace-ai/gai/ai"
 	gaictx "github.com/lace-ai/gai/context"
-	"github.com/lace-ai/gai/context/history"
 	"github.com/lace-ai/gai/loop"
 )
 
 //go:embed system.md
 var DefaultSystemPrompt string
+
+type SummaryRequest struct {
+	ID        string
+	Text      string
+	MaxTokens int
+	Required  bool
+	Meta      map[string]any
+}
 
 type Config struct {
 	SystemPrompt      string
@@ -109,7 +116,7 @@ type Summarizer struct {
 
 type activeKey struct{}
 
-func (s Summarizer) Summarize(ctx context.Context, req history.SummaryRequest) (string, error) {
+func (s Summarizer) Summarize(ctx context.Context, req SummaryRequest) (string, error) {
 	if ctx.Value(activeKey{}) == true {
 		return "", fmt.Errorf("%w: recursive summary agent call", gaictx.ErrPromptSource)
 	}
