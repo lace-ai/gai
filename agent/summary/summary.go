@@ -9,6 +9,7 @@ import (
 	"github.com/lace-ai/gai/agent"
 	"github.com/lace-ai/gai/ai"
 	gaictx "github.com/lace-ai/gai/context"
+	"github.com/lace-ai/gai/context/history"
 	"github.com/lace-ai/gai/loop"
 )
 
@@ -108,7 +109,7 @@ type Summarizer struct {
 
 type activeKey struct{}
 
-func (s Summarizer) Summarize(ctx context.Context, req gaictx.SummaryRequest) (string, error) {
+func (s Summarizer) Summarize(ctx context.Context, req history.SummaryRequest) (string, error) {
 	if ctx.Value(activeKey{}) == true {
 		return "", fmt.Errorf("%w: recursive summary agent call", gaictx.ErrPromptSource)
 	}

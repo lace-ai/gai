@@ -1,4 +1,4 @@
-package context
+package history
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 
 	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
+	gaictx "github.com/lace-ai/gai/context"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -17,7 +18,7 @@ type Summary struct {
 	EndTurnID      string
 	StartTurnCount int
 	EndTurnCount   int
-	Content        TextContent
+	Content        gaictx.TextContent
 	TokenCount     map[string]int
 }
 
@@ -30,7 +31,7 @@ type SummaryRequest struct {
 }
 
 type HistoryState struct {
-	Turns   []Turn
+	Turns   []gaictx.Turn
 	Summary *Summary
 }
 
@@ -38,7 +39,7 @@ type HistoryStore interface {
 	GetLastHistoryState(ctx context.Context, sessionID string) (*HistoryState, error)
 	SaveHistoryState(ctx context.Context, sessionID string, state *HistoryState) error
 
-	TurnTokenStore
+	gaictx.TurnTokenStore
 }
 
 type HistorySource struct {
@@ -64,12 +65,12 @@ func (s *HistorySource) SetTokenizer(tokenizer ai.Tokenizer) {
 	s.tokenizer = tokenizer
 }
 
-func (s *HistorySource) DebugSink(debug gai.DebugSink, conv Conversation) {
+func (s *HistorySource) DebugSink(debug gai.DebugSink, conv gaictx.Conversation) {
 	s.debug = debug
 }
 
 type HistoryPart struct {
-	Contents   []Content
+	Contents   []gaictx.Content
 	TokenCount map[string]int
 }
 
@@ -94,7 +95,7 @@ func (p *HistoryPart) Marshal(ctx context.Context) ([]byte, error) {
 
 func (p *HistoryPart) Tokens(ctx context.Context, tokenizer ai.Tokenizer) (int, error) {
 	if tokenizer == nil {
-		return 0, ErrTokenizerNotFound
+		return 0, gaictx.ErrTokenizerNotFound
 	}
 	tokenizerID := tokenizer.ID()
 	if count, ok := p.TokenCount[tokenizerID]; ok {
@@ -120,7 +121,7 @@ func (p *HistoryPart) saveTokens(tokenizerID string, tokens int) {
 	p.TokenCount[tokenizerID] = tokens
 }
 
-func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (result Part, err error) {
+func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (result gaictx.Part, err error) {
 	ctx, span := gai.StartOperationSpan(ctx, contextTracerName, "context.history", "context.operation", "build",
 		attribute.String("context.source", s.Name()),
 		attribute.String("context.session_id", s.sessionID),
@@ -151,14 +152,14 @@ func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (result P
 	if s.historyStateStore == nil {
 		s.emit(ctx, "history_source_store_missing", map[string]any{
 			"session_id": s.sessionID,
-		}, ErrSessionStoreNotFound)
-		return nil, ErrSessionStoreNotFound
+		}, gaictx.ErrSessionStoreNotFound)
+		return nil, gaictx.ErrSessionStoreNotFound
 	}
 	if s.tokenizer == nil {
 		s.emit(ctx, "history_source_tokenizer_missing", map[string]any{
 			"session_id": s.sessionID,
-		}, ErrTokenizerNotFound)
-		return nil, ErrTokenizerNotFound
+		}, gaictx.ErrTokenizerNotFound)
+		return nil, gaictx.ErrTokenizerNotFound
 	}
 	tokenizerID := s.tokenizer.ID()
 	span.SetAttributes(attribute.String("context.tokenizer_id", tokenizerID))
@@ -205,11 +206,11 @@ func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (result P
 			}, nil)
 		}
 
-		includedTurns := make([]Turn, 0, len(lastHistoryState.Turns))
+		includedTurns := make([]gaictx.Turn, 0, len(lastHistoryState.Turns))
 		for _, turn := range lastHistoryState.Turns {
 			turnCount++
 			turnMessages := 0
-			var contents []Content
+			var contents []gaictx.Content
 			if turn.UserMessage != nil {
 				contents = append(contents, turn.UserMessage.Content)
 				messageCount++

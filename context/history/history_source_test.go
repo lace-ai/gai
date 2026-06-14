@@ -1,17 +1,18 @@
-package context_test
+package history_test
 
 import (
 	"context"
 	"testing"
 
 	gaictx "github.com/lace-ai/gai/context"
+	"github.com/lace-ai/gai/context/history"
 	"github.com/lace-ai/gai/testutil/mocks"
 )
 
 func TestHistoryPartMarshalJoinsContentStrings(t *testing.T) {
 	t.Parallel()
 
-	part := &gaictx.HistoryPart{
+	part := &history.HistoryPart{
 		Contents: []gaictx.Content{
 			gaictx.NewTextContent("hello"),
 			gaictx.NewToolCallContent("search", `{"q":"lace"}`),
@@ -33,7 +34,7 @@ func TestHistoryPartMarshalJoinsContentStrings(t *testing.T) {
 func TestHistoryPartMarshalEmpty(t *testing.T) {
 	t.Parallel()
 
-	var part *gaictx.HistoryPart
+	var part *history.HistoryPart
 	got, err := part.Marshal(context.Background())
 	if err != nil {
 		t.Fatalf("Marshal failed: %v", err)
@@ -44,15 +45,15 @@ func TestHistoryPartMarshalEmpty(t *testing.T) {
 }
 
 type historyStore struct {
-	state *gaictx.HistoryState
-	saved *gaictx.HistoryState
+	state *history.HistoryState
+	saved *history.HistoryState
 }
 
-func (s *historyStore) GetLastHistoryState(ctx context.Context, sessionID string) (*gaictx.HistoryState, error) {
+func (s *historyStore) GetLastHistoryState(ctx context.Context, sessionID string) (*history.HistoryState, error) {
 	return s.state, nil
 }
 
-func (s *historyStore) SaveHistoryState(ctx context.Context, sessionID string, state *gaictx.HistoryState) error {
+func (s *historyStore) SaveHistoryState(ctx context.Context, sessionID string, state *history.HistoryState) error {
 	s.saved = state
 	return nil
 }
@@ -65,8 +66,8 @@ func TestHistorySourceSavesBuiltState(t *testing.T) {
 	t.Parallel()
 
 	store := &historyStore{
-		state: &gaictx.HistoryState{
-			Summary: &gaictx.Summary{
+		state: &history.HistoryState{
+			Summary: &history.Summary{
 				ID:             "summary-1",
 				StartTurnID:    "turn-1",
 				EndTurnID:      "turn-2",
@@ -96,7 +97,7 @@ func TestHistorySourceSavesBuiltState(t *testing.T) {
 		},
 	}
 
-	source := gaictx.NewHistory("session-1", store)
+	source := history.NewHistory("session-1", store)
 	source.SetTokenizer(&mocks.MockTokenizer{})
 
 	part, err := source.Function(context.Background(), 10)

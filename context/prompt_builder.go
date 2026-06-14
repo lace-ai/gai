@@ -9,6 +9,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
+const contextTracerName = "github.com/lace-ai/gai/context"
+
 type ContextSource interface {
 	Name() string
 	Function(ctx context.Context, TokenBudget int) (Part, error)
