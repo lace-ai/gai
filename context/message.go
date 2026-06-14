@@ -17,12 +17,11 @@ const (
 )
 
 type Turn struct {
-	ID           string
-	Count        int
-	UserMessage  *Message
-	Messages     []Message
-	HistoryState *HistoryState
-	TokenCount   map[string]int
+	ID          string
+	Count       int
+	UserMessage *Message
+	Messages    []Message
+	TokenCount  map[string]int
 }
 
 type Message struct {

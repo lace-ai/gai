@@ -11,6 +11,24 @@ import (
 
 const contextTracerName = "github.com/lace-ai/gai/context"
 
+type Summary struct {
+	ID             string
+	StartTurnID    string
+	EndTurnID      string
+	StartTurnCount int
+	EndTurnCount   int
+	Content        TextContent
+	TokenCount     map[string]int
+}
+
+type SummaryRequest struct {
+	ID        string
+	Text      string
+	MaxTokens int
+	Required  bool
+	Meta      map[string]any
+}
+
 type HistoryState struct {
 	Turns   []Turn
 	Summary *Summary
@@ -226,7 +244,6 @@ func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (result P
 			}
 			tokenCount += tokens
 			part.Contents = append(part.Contents, contents...)
-			turn.HistoryState = nil
 			includedTurns = append(includedTurns, turn)
 			includedTurnCount++
 		}
