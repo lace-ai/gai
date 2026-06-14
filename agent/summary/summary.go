@@ -15,7 +15,7 @@ import (
 //go:embed system.md
 var DefaultSystemPrompt string
 
-type SummaryRequest struct {
+type Request struct {
 	ID        string
 	Text      string
 	MaxTokens int
@@ -116,7 +116,7 @@ type Summarizer struct {
 
 type activeKey struct{}
 
-func (s Summarizer) Summarize(ctx context.Context, req SummaryRequest) (string, error) {
+func (s Summarizer) Summarize(ctx context.Context, req Request) (string, error) {
 	if ctx.Value(activeKey{}) == true {
 		return "", fmt.Errorf("%w: recursive summary agent call", gaictx.ErrPromptSource)
 	}

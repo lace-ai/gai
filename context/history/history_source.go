@@ -2,9 +2,11 @@ package history
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/lace-ai/gai"
+	"github.com/lace-ai/gai/agent/summary"
 	"github.com/lace-ai/gai/ai"
 	gaictx "github.com/lace-ai/gai/context"
 	"go.opentelemetry.io/otel/attribute"
@@ -40,13 +42,53 @@ type HistorySource struct {
 
 	debug     gai.DebugSink
 	tokenizer ai.Tokenizer
+
+	summarizer    *summary.Summarizer
+	summarize     bool
+	summaryAmount float32
 }
 
-func NewHistory(sessionId string, historyStateStore HistoryStore) *HistorySource {
+// SummarizerDefinition defines the configuration for the summarization of the history.
+// If enabled is true, the history source will attempt to summarize the history when building the context.
+// The amount defines the percentage (0 - 1) of the turns that get summarized,
+// starting from the oldest turn.
+//
+// If summarization is enabled, a summarizer or model must be provided.
+type SummarizerDefinition struct {
+	Model      ai.Model
+	Summarizer *summary.Summarizer
+	Enabled    bool
+	Amount     float32
+}
+
+func New(sessionId string, historyStateStore HistoryStore, summaryDef *SummarizerDefinition) (*HistorySource, error) {
+	config := *summaryDef
+	if summaryDef == nil {
+		config.Enabled = false
+		config.Amount = 0.7
+	}
+	if config.Amount < 0 || config.Amount > 1 {
+		return nil, ErrInvalidSummaryAmount
+	}
+	if config.Amount == 0 {
+		config.Amount = 0.7
+	}
+	if config.Enabled && config.Summarizer == nil {
+		if config.Model != nil {
+			summarizer := summary.New(config.Model)
+			config.Summarizer = &summarizer
+		} else {
+			return nil, ErrSummarizerRequired
+		}
+	}
+
 	return &HistorySource{
 		historyStateStore: historyStateStore,
 		sessionID:         sessionId,
-	}
+		summarizer:        config.Summarizer,
+		summarize:         config.Enabled,
+		summaryAmount:     config.Amount,
+	}, nil
 }
 
 func (p *HistorySource) Name() string {
@@ -171,6 +213,12 @@ func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (result g
 		}, nil)
 	} else {
 		statePresent = true
+		if s.summarize {
+			lastHistoryState, err = s.summarizeState(ctx, lastHistoryState, tokenBudget)
+			if err != nil {
+				return nil, err
+			}
+		}
 		builtState := &HistoryState{}
 		if lastHistoryState.Summary != nil {
 			summaryIncluded = true
@@ -265,6 +313,102 @@ func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (result g
 	}, nil)
 	result = &part
 	return result, nil
+}
+
+func (s *HistorySource) summarizeState(ctx context.Context, state *HistoryState, maxTokens int) (*HistoryState, error) {
+	if state == nil {
+		return nil, fmt.Errorf("history state is nil")
+	}
+	if s == nil {
+		return nil, fmt.Errorf("history source is nil")
+	}
+	if s.summarizer == nil {
+		return nil, fmt.Errorf("summarizer not configured for history source")
+	}
+	if len(state.Turns) == 0 {
+		return state, nil
+	}
+
+	var builder strings.Builder
+
+	if state.Summary != nil {
+		builder.WriteString(state.Summary.Content.String())
+		builder.WriteString("\n")
+	}
+
+	summarizedTurnCount := s.summarizedTurnCount(len(state.Turns))
+	if summarizedTurnCount == 0 {
+		return state, nil
+	}
+	summarizedTurns := state.Turns[:summarizedTurnCount]
+	for i := range summarizedTurns {
+		writeTurn(&builder, &summarizedTurns[i])
+	}
+
+	req := summary.Request{
+		ID:        "history",
+		Text:      builder.String(),
+		MaxTokens: maxTokens,
+	}
+
+	res, err := s.summarizer.Summarize(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	firstTurn := summarizedTurns[0]
+	lastTurn := summarizedTurns[len(summarizedTurns)-1]
+	nextSummary := &Summary{
+		StartTurnID:    firstTurn.ID,
+		EndTurnID:      lastTurn.ID,
+		StartTurnCount: firstTurn.Count,
+		EndTurnCount:   lastTurn.Count,
+		Content:        gaictx.NewTextContent(res),
+		TokenCount:     map[string]int{},
+	}
+	if state.Summary != nil {
+		nextSummary.StartTurnID = state.Summary.StartTurnID
+		nextSummary.StartTurnCount = state.Summary.StartTurnCount
+	}
+	tokenCount, err := s.tokenizer.CountTokens(ctx, nextSummary.Content.String())
+	if err != nil {
+		return nil, err
+	}
+	nextSummary.TokenCount[s.tokenizer.ID()] = tokenCount
+
+	nextState := &HistoryState{
+		Summary: nextSummary,
+		Turns:   append([]gaictx.Turn(nil), state.Turns[summarizedTurnCount:]...),
+	}
+	return nextState, nil
+}
+
+func (s *HistorySource) summarizedTurnCount(turnCount int) int {
+	if turnCount == 0 || s.summaryAmount <= 0 {
+		return 0
+	}
+	count := int(float32(turnCount) * s.summaryAmount)
+	if count == 0 {
+		return 1
+	}
+	if count > turnCount {
+		return turnCount
+	}
+	return count
+}
+
+func writeTurn(builder *strings.Builder, turn *gaictx.Turn) {
+	if turn.UserMessage != nil {
+		builder.WriteString("user: ")
+		builder.WriteString(turn.UserMessage.Content.String())
+		builder.WriteString("\n")
+	}
+	for _, message := range turn.Messages {
+		builder.WriteString(string(message.Role))
+		builder.WriteString(": ")
+		builder.WriteString(message.Content.String())
+		builder.WriteString("\n")
+	}
 }
 
 func (s *HistorySource) emit(ctx context.Context, name string, fields map[string]any, err error) {

@@ -17,7 +17,7 @@ func TestSummarizerRunsSummaryAgentThroughLoop(t *testing.T) {
 	model := &recordingModel{response: "short summary"}
 	summarizer := summary.New(model)
 
-	got, err := summarizer.Summarize(context.Background(), summary.SummaryRequest{
+	got, err := summarizer.Summarize(context.Background(), summary.Request{
 		ID:        "history",
 		Text:      "long input",
 		MaxTokens: 7,
@@ -47,7 +47,7 @@ func TestDefinitionAllowsSystemPromptOverride(t *testing.T) {
 		Definition: summary.Definition(model, summary.WithSystemPrompt("custom summary system")),
 	}
 
-	_, err := summarizer.Summarize(context.Background(), summary.SummaryRequest{Text: "input"})
+	_, err := summarizer.Summarize(context.Background(), summary.Request{Text: "input"})
 	if err != nil {
 		t.Fatalf("Summarize failed: %v", err)
 	}
