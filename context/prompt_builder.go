@@ -10,6 +10,8 @@ import (
 )
 
 const contextTracerName = "github.com/lace-ai/gai/context"
+const promptDebugFullLimit = 4000
+const promptDebugPreviewLimit = 160
 
 type ContextSource interface {
 	Name() string
@@ -45,7 +47,7 @@ type Definition struct {
 	TokenBudget        int
 	OutputTokenReserve int
 	Tokenizer          ai.Tokenizer
-	DebugSink          gai.DebugSinkFunc
+	DebugSink          gai.DebugSink
 }
 
 type Builder struct {
@@ -55,7 +57,7 @@ type Builder struct {
 	Iteration          []Part
 	TokenBudget        int
 	Renderer           Renderer
-	debugSink          gai.DebugSinkFunc
+	debugSink          gai.DebugSink
 	userPrompt         string
 	tokenizer          ai.Tokenizer
 	OutputTokenReserve int
@@ -87,7 +89,7 @@ func NewBuilder(renderer Renderer, tokenBudget int) *Builder {
 	})
 }
 
-func (b *Builder) SetDebugSink(debugSink gai.DebugSinkFunc) {
+func (b *Builder) SetDebugSink(debugSink gai.DebugSink) {
 	b.debugSink = debugSink
 }
 
@@ -138,13 +140,9 @@ func (b *Builder) BuildContext(ctx context.Context) (contextParts []Part, err er
 		systemTokens = b.SystemInstructionsTokens(ctx)
 		remainingTokens = b.TokenBudget - b.OutputTokenReserve - systemTokens
 	} else {
-		b.debugSink.Emit(ctx, gai.DebugEvent{
-			Name:   "prompt_builder_token_budget_skipped",
-			Source: "context:Builder",
-			Fields: map[string]any{
-				"reason": "token_budget_not_set",
-			},
-		})
+		b.emit(ctx, "prompt_builder_token_budget_skipped", map[string]any{
+			"reason": "token_budget_not_set",
+		}, nil)
 		remainingTokens = 1000000 // effectively unlimited
 	}
 	span.SetAttributes(
@@ -233,7 +231,12 @@ func (b *Builder) BuildPrompt(ctx context.Context, conv Conversation) (prompt st
 		}
 	}
 	partCount = len(parts)
-	prompt, err = b.Renderer.Render(ctx, parts)
+	renderCtx, renderSpan := gai.StartOperationSpan(ctx, contextTracerName, "context.prompt_builder", "context.operation", "renderer_render",
+		attribute.Int("context.part_count", partCount),
+	)
+	prompt, err = b.Renderer.Render(renderCtx, parts)
+	renderSpan.SetAttributes(attribute.Int("context.prompt_chars", len(prompt)))
+	gai.EndSpan(renderSpan, err)
 	fields := map[string]any{
 		"part_count":            len(parts),
 		"system_parts":          len(b.SystemInstructions),
@@ -247,7 +250,9 @@ func (b *Builder) BuildPrompt(ctx context.Context, conv Conversation) (prompt st
 	}
 	fields["prompt_chars"] = len(prompt)
 	if b.debugSink != nil && b.debugSink.IncludeSensitiveData() {
-		fields["prompt"] = prompt
+		for key, value := range b.promptDebugFields(ctx, parts, prompt) {
+			fields[key] = value
+		}
 	}
 	b.emit(ctx, "prompt_builder_render_finished", fields, nil)
 	return prompt, nil
@@ -346,4 +351,59 @@ func mergeDebugFields(base map[string]any, extra map[string]any) map[string]any 
 		merged[key] = value
 	}
 	return merged
+}
+
+func (b *Builder) promptDebugFields(ctx context.Context, parts []Part, prompt string) map[string]any {
+	fields := map[string]any{
+		"prompt_render_mode": "full",
+	}
+	if len(prompt) <= promptDebugFullLimit {
+		fields["prompt"] = prompt
+		return fields
+	}
+
+	fields["prompt_render_mode"] = "structured"
+	fields["prompt_head"] = clippedPrompt(prompt, 1000, false)
+	fields["prompt_tail"] = clippedPrompt(prompt, 1000, true)
+	fields["prompt_structure"] = b.promptStructure(ctx, parts)
+	return fields
+}
+
+func (b *Builder) promptStructure(ctx context.Context, parts []Part) []map[string]any {
+	structure := make([]map[string]any, 0, len(parts))
+	for i, part := range parts {
+		entry := map[string]any{
+			"index": i,
+		}
+		if part == nil {
+			entry["name"] = "<nil>"
+			structure = append(structure, entry)
+			continue
+		}
+		entry["name"] = part.Name()
+		raw, err := part.Marshal(ctx)
+		if err != nil {
+			entry["marshal_error"] = err.Error()
+			structure = append(structure, entry)
+			continue
+		}
+		content := string(raw)
+		entry["chars"] = len(content)
+		entry["preview"] = clippedPrompt(content, promptDebugPreviewLimit, false)
+		if len(content) > promptDebugPreviewLimit {
+			entry["preview_tail"] = clippedPrompt(content, promptDebugPreviewLimit, true)
+		}
+		structure = append(structure, entry)
+	}
+	return structure
+}
+
+func clippedPrompt(text string, limit int, tail bool) string {
+	if limit <= 0 || len(text) <= limit {
+		return text
+	}
+	if tail {
+		return "..." + text[len(text)-limit:]
+	}
+	return text[:limit] + "..."
 }
