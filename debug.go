@@ -59,6 +59,10 @@ func EnrichDebugEvent(ctx context.Context, e DebugEvent) DebugEvent {
 	for key, value := range e.Fields {
 		fields[key] = value
 	}
+	fields["otel"] = map[string]any{
+		"trace_id": traceID,
+		"span_id":  spanID,
+	}
 	fields["trace_id"] = traceID
 	fields["span_id"] = spanID
 	e.Fields = fields

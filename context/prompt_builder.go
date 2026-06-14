@@ -6,6 +6,7 @@ import (
 
 	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 type ContextSource interface {
@@ -110,10 +111,33 @@ func (b *Builder) AppendSystemInstructions(ctx context.Context, instructions ...
 	return nil
 }
 
-func (b *Builder) BuildContext(ctx context.Context) ([]Part, error) {
-	var contextParts []Part
-	systemTokens := b.SystemInstructionsTokens(ctx)
-	remainingTokens := b.TokenBudget - b.OutputTokenReserve - systemTokens
+func (b *Builder) BuildContext(ctx context.Context) (contextParts []Part, err error) {
+	ctx, span := gai.StartOperationSpan(ctx, contextTracerName, "context.prompt_builder", "context.operation", "build_context",
+		attribute.Int("context.source_count", len(b.ContextSources)),
+		attribute.Int("context.system_instruction_count", len(b.SystemInstructions)),
+		attribute.Int("context.token_budget", b.TokenBudget),
+		attribute.Int("context.output_token_reserve", b.OutputTokenReserve),
+		attribute.Bool("context.tokenizer_present", b.tokenizer != nil),
+	)
+	systemTokens := 0
+	remainingTokens := 0
+	includedSourceCount := 0
+	defer func() {
+		span.SetAttributes(
+			attribute.Int("context.system_tokens", systemTokens),
+			attribute.Int("context.remaining_tokens", remainingTokens),
+			attribute.Int("context.context_parts", len(contextParts)),
+			attribute.Int("context.included_source_count", includedSourceCount),
+		)
+		gai.EndSpan(span, err)
+	}()
+
+	systemTokens = b.SystemInstructionsTokens(ctx)
+	remainingTokens = b.TokenBudget - b.OutputTokenReserve - systemTokens
+	span.SetAttributes(
+		attribute.Int("context.system_tokens", systemTokens),
+		attribute.Int("context.remaining_tokens", remainingTokens),
+	)
 	b.emit(ctx, "prompt_builder_context_build_started", map[string]any{
 		"source_count":             len(b.ContextSources),
 		"system_instruction_count": len(b.SystemInstructions),
@@ -130,6 +154,7 @@ func (b *Builder) BuildContext(ctx context.Context) ([]Part, error) {
 		}
 		part, err := source.Function(ctx, remainingTokens)
 		if err != nil {
+			span.SetAttributes(attribute.String("context.failed_source", source.Name()))
 			b.emit(ctx, "prompt_builder_source_failed", map[string]any{
 				"source":           source.Name(),
 				"remaining_tokens": remainingTokens,
@@ -138,6 +163,7 @@ func (b *Builder) BuildContext(ctx context.Context) ([]Part, error) {
 		}
 		if part != nil {
 			contextParts = append(contextParts, part)
+			includedSourceCount++
 			tokens, ok := b.partTokens(ctx, part, map[string]any{
 				"source": source.Name(),
 				"part":   part.Name(),
@@ -163,11 +189,26 @@ func (b *Builder) BuildContext(ctx context.Context) ([]Part, error) {
 	return contextParts, nil
 }
 
-func (b *Builder) BuildPrompt(ctx context.Context, conv Conversation) (string, error) {
+func (b *Builder) BuildPrompt(ctx context.Context, conv Conversation) (prompt string, err error) {
+	ctx, span := gai.StartOperationSpan(ctx, contextTracerName, "context.prompt_builder", "context.operation", "render_prompt",
+		attribute.Int("context.system_parts", len(b.SystemInstructions)),
+		attribute.Int("context.context_parts", len(b.ContextParts)),
+		attribute.Bool("context.has_user_prompt", b.userPrompt != ""),
+	)
+	conversationMessages := 0
+	partCount := 0
+	defer func() {
+		span.SetAttributes(
+			attribute.Int("context.conversation_messages", conversationMessages),
+			attribute.Int("context.part_count", partCount),
+			attribute.Int("context.prompt_chars", len(prompt)),
+		)
+		gai.EndSpan(span, err)
+	}()
+
 	var parts []Part
 	parts = append(parts, b.SystemInstructions...)
 	parts = append(parts, b.ContextParts...)
-	conversationMessages := 0
 	if b.userPrompt != "" {
 		parts = append(parts, NewTextPart(b.userPrompt))
 	}
@@ -178,7 +219,8 @@ func (b *Builder) BuildPrompt(ctx context.Context, conv Conversation) (string, e
 			parts = append(parts, message)
 		}
 	}
-	prompt, err := b.Renderer.Render(ctx, parts)
+	partCount = len(parts)
+	prompt, err = b.Renderer.Render(ctx, parts)
 	fields := map[string]any{
 		"part_count":            len(parts),
 		"system_parts":          len(b.SystemInstructions),
