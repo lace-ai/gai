@@ -301,7 +301,7 @@ func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (result g
 		}
 	}
 	part.saveTokens(tokenizerID, tokenCount)
-	s.emit(ctx, "history_source_build_finished", map[string]any{
+	buildFields := map[string]any{
 		"session_id":    s.sessionID,
 		"tokenizer_id":  tokenizerID,
 		"token_budget":  tokenBudget,
@@ -309,7 +309,13 @@ func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (result g
 		"turn_count":    turnCount,
 		"message_count": messageCount,
 		"content_count": len(part.Contents),
-	}, nil)
+	}
+	if s.debug != nil && s.debug.IncludeSensitiveData() {
+		if raw, marshalErr := part.Marshal(ctx); marshalErr == nil {
+			buildFields["history_content"] = string(raw)
+		}
+	}
+	s.emit(ctx, "history_source_build_finished", buildFields, nil)
 	result = &part
 	return result, nil
 }
@@ -480,7 +486,7 @@ func (s *HistorySource) summarizeState(ctx context.Context, state *HistoryState,
 	}
 	nextSummary.TokenCount[s.tokenizer.ID()] = tokenCount
 	span.SetAttributes(attribute.Int("context.history.summary_tokens", tokenCount))
-	s.emit(ctx, "history_source_summary_generated", map[string]any{
+	summaryFields := map[string]any{
 		"session_id":             s.sessionID,
 		"tokenizer_id":           s.tokenizer.ID(),
 		"token_budget":           maxTokens,
@@ -492,7 +498,11 @@ func (s *HistorySource) summarizeState(ctx context.Context, state *HistoryState,
 		"summary_start_count":    nextSummary.StartTurnCount,
 		"summary_end_count":      nextSummary.EndTurnCount,
 		"previous_summary_found": state.Summary != nil,
-	}, nil)
+	}
+	if s.debug != nil && s.debug.IncludeSensitiveData() {
+		summaryFields["summary_content"] = nextSummary.Content.String()
+	}
+	s.emit(ctx, "history_source_summary_generated", summaryFields, nil)
 
 	nextState := &HistoryState{
 		Summary: nextSummary,
