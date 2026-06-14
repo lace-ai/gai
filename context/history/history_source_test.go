@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
 	gaictx "github.com/lace-ai/gai/context"
 	"github.com/lace-ai/gai/context/history"
@@ -176,6 +177,10 @@ func TestHistorySourceDoesNotSummarizeWhenHistoryFitsBudget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New failed: %v", err)
 	}
+	var events []gai.DebugEvent
+	source.DebugSink(gai.DebugSinkFunc(func(ctx context.Context, e gai.DebugEvent) {
+		events = append(events, e)
+	}), nil)
 	source.SetTokenizer(&mocks.MockTokenizer{})
 
 	part, err := source.Function(context.Background(), 100)
@@ -187,6 +192,9 @@ func TestHistorySourceDoesNotSummarizeWhenHistoryFitsBudget(t *testing.T) {
 	}
 	if model.Count != 0 {
 		t.Fatalf("expected summarizer not to run, got %d calls", model.Count)
+	}
+	if hasHistoryDebugEvent(events, "history_source_summary_attempted") {
+		t.Fatalf("expected no summary attempt event when history fits budget, got %+v", events)
 	}
 	if store.saved == nil {
 		t.Fatal("expected history state to be saved")
@@ -245,6 +253,10 @@ func TestHistorySourceSummarizesOldestTurnsWhenBudgetReached(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New failed: %v", err)
 	}
+	var events []gai.DebugEvent
+	source.DebugSink(gai.DebugSinkFunc(func(ctx context.Context, e gai.DebugEvent) {
+		events = append(events, e)
+	}), nil)
 	source.SetTokenizer(&mocks.MockTokenizer{})
 
 	part, err := source.Function(context.Background(), 5)
@@ -256,6 +268,14 @@ func TestHistorySourceSummarizesOldestTurnsWhenBudgetReached(t *testing.T) {
 	}
 	if model.Count != 1 {
 		t.Fatalf("expected summarizer to run once, got %d calls", model.Count)
+	}
+	for _, name := range []string{
+		"history_source_summary_attempted",
+		"history_source_summary_generated",
+	} {
+		if !hasHistoryDebugEvent(events, name) {
+			t.Fatalf("expected debug event %q in %+v", name, events)
+		}
 	}
 	if store.saved == nil {
 		t.Fatal("expected summarized state to be saved")
@@ -272,4 +292,13 @@ func TestHistorySourceSummarizesOldestTurnsWhenBudgetReached(t *testing.T) {
 	if len(store.saved.Turns) != 1 || store.saved.Turns[0].ID != "turn-3" {
 		t.Fatalf("expected newest turn to remain unsummarized, got %+v", store.saved.Turns)
 	}
+}
+
+func hasHistoryDebugEvent(events []gai.DebugEvent, name string) bool {
+	for _, event := range events {
+		if event.Name == name {
+			return true
+		}
+	}
+	return false
 }

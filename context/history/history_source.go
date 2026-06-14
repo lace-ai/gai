@@ -182,6 +182,8 @@ func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (result g
 	summaryIncluded := false
 	budgetReached := false
 	stateSaved := false
+	summaryAttempted := false
+	summaryGenerated := false
 	tokenCount := 0
 	turnCount := 0
 	messageCount := 0
@@ -190,6 +192,9 @@ func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (result g
 		span.SetAttributes(
 			attribute.Bool("context.history.state_present", statePresent),
 			attribute.Bool("context.history.summary_included", summaryIncluded),
+			attribute.Bool("context.history.summary_configured", s.summarize),
+			attribute.Bool("context.history.summary_attempted", summaryAttempted),
+			attribute.Bool("context.history.summary_generated", summaryGenerated),
 			attribute.Bool("context.history.budget_reached", budgetReached),
 			attribute.Bool("context.history.state_saved", stateSaved),
 			attribute.Int("context.history.total_tokens", tokenCount),
@@ -248,12 +253,33 @@ func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (result g
 			budgetReached = buildBudgetReached
 
 			if budgetReached && s.summarize && !summarized {
+				summaryAttempted = true
+				s.emit(ctx, "history_source_summary_attempted", map[string]any{
+					"session_id":     s.sessionID,
+					"tokenizer_id":   tokenizerID,
+					"token_budget":   tokenBudget,
+					"turn_count":     len(lastHistoryState.Turns),
+					"summary_amount": float64(s.summaryAmount),
+				}, nil)
 				state, err = s.summarizeState(ctx, lastHistoryState, tokenBudget)
 				if err != nil {
+					s.emit(ctx, "history_source_summary_failed", map[string]any{
+						"session_id":   s.sessionID,
+						"tokenizer_id": tokenizerID,
+						"token_budget": tokenBudget,
+					}, err)
 					return nil, err
 				}
+				summaryGenerated = state != lastHistoryState && state.Summary != nil
 				summarized = true
 				continue
+			}
+			if budgetReached && !s.summarize {
+				s.emit(ctx, "history_source_summary_skipped", map[string]any{
+					"session_id":   s.sessionID,
+					"tokenizer_id": tokenizerID,
+					"reason":       "disabled",
+				}, nil)
 			}
 
 			if builtState.Summary != nil || len(builtState.Turns) > 0 {
@@ -356,16 +382,38 @@ func (s *HistorySource) buildPart(ctx context.Context, state *HistoryState, toke
 }
 
 func (s *HistorySource) summarizeState(ctx context.Context, state *HistoryState, maxTokens int) (*HistoryState, error) {
-	if state == nil {
-		return nil, ErrHistoryStateRequired
-	}
 	if s == nil {
 		return nil, ErrHistorySourceNil
 	}
-	if s.summarizer == nil {
-		return nil, ErrSummarizerMissing
+	ctx, span := gai.StartOperationSpan(ctx, contextTracerName, "context.history", "context.operation", "summarize",
+		attribute.String("context.session_id", s.sessionID),
+		attribute.Int("context.token_budget", maxTokens),
+		attribute.Float64("context.history.summary_amount", float64(s.summaryAmount)),
+	)
+	var err error
+	defer func() {
+		gai.EndSpan(span, err)
+	}()
+
+	if state == nil {
+		err = ErrHistoryStateRequired
+		return nil, err
 	}
+	if s.summarizer == nil {
+		err = ErrSummarizerMissing
+		return nil, err
+	}
+	span.SetAttributes(
+		attribute.Int("context.history.turn_count", len(state.Turns)),
+		attribute.Bool("context.history.existing_summary", state.Summary != nil),
+	)
 	if len(state.Turns) == 0 {
+		span.SetAttributes(attribute.String("context.history.summary_skip_reason", "no_turns"))
+		s.emit(ctx, "history_source_summary_skipped", map[string]any{
+			"session_id":   s.sessionID,
+			"token_budget": maxTokens,
+			"reason":       "no_turns",
+		}, nil)
 		return state, nil
 	}
 
@@ -378,8 +426,19 @@ func (s *HistorySource) summarizeState(ctx context.Context, state *HistoryState,
 
 	summarizedTurnCount := s.summarizedTurnCount(len(state.Turns))
 	if summarizedTurnCount == 0 {
+		span.SetAttributes(attribute.String("context.history.summary_skip_reason", "amount_zero"))
+		s.emit(ctx, "history_source_summary_skipped", map[string]any{
+			"session_id":     s.sessionID,
+			"token_budget":   maxTokens,
+			"summary_amount": float64(s.summaryAmount),
+			"reason":         "amount_zero",
+		}, nil)
 		return state, nil
 	}
+	span.SetAttributes(
+		attribute.Int("context.history.summarized_turn_count", summarizedTurnCount),
+		attribute.Int("context.history.remaining_turn_count", len(state.Turns)-summarizedTurnCount),
+	)
 	summarizedTurns := state.Turns[:summarizedTurnCount]
 	for i := range summarizedTurns {
 		writeTurn(&builder, &summarizedTurns[i])
@@ -415,6 +474,20 @@ func (s *HistorySource) summarizeState(ctx context.Context, state *HistoryState,
 		return nil, err
 	}
 	nextSummary.TokenCount[s.tokenizer.ID()] = tokenCount
+	span.SetAttributes(attribute.Int("context.history.summary_tokens", tokenCount))
+	s.emit(ctx, "history_source_summary_generated", map[string]any{
+		"session_id":             s.sessionID,
+		"tokenizer_id":           s.tokenizer.ID(),
+		"token_budget":           maxTokens,
+		"summary_tokens":         tokenCount,
+		"summarized_turn_count":  summarizedTurnCount,
+		"remaining_turn_count":   len(state.Turns) - summarizedTurnCount,
+		"summary_start_turn":     nextSummary.StartTurnID,
+		"summary_end_turn":       nextSummary.EndTurnID,
+		"summary_start_count":    nextSummary.StartTurnCount,
+		"summary_end_count":      nextSummary.EndTurnCount,
+		"previous_summary_found": state.Summary != nil,
+	}, nil)
 
 	nextState := &HistoryState{
 		Summary: nextSummary,
