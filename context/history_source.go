@@ -6,7 +6,10 @@ import (
 
 	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
+	"go.opentelemetry.io/otel/attribute"
 )
+
+const contextTracerName = "github.com/lace-ai/gai/context"
 
 type HistoryState struct {
 	Turns   []Turn
@@ -99,11 +102,33 @@ func (p *HistoryPart) saveTokens(tokenizerID string, tokens int) {
 	p.TokenCount[tokenizerID] = tokens
 }
 
-func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (Part, error) {
-	s.emit(ctx, "history_source_build_started", map[string]any{
-		"session_id":   s.sessionID,
-		"token_budget": tokenBudget,
-	}, nil)
+func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (result Part, err error) {
+	ctx, span := gai.StartOperationSpan(ctx, contextTracerName, "context.history", "context.operation", "build",
+		attribute.String("context.source", s.Name()),
+		attribute.String("context.session_id", s.sessionID),
+		attribute.Int("context.token_budget", tokenBudget),
+	)
+	statePresent := false
+	summaryIncluded := false
+	budgetReached := false
+	stateSaved := false
+	tokenCount := 0
+	turnCount := 0
+	messageCount := 0
+	includedTurnCount := 0
+	defer func() {
+		span.SetAttributes(
+			attribute.Bool("context.history.state_present", statePresent),
+			attribute.Bool("context.history.summary_included", summaryIncluded),
+			attribute.Bool("context.history.budget_reached", budgetReached),
+			attribute.Bool("context.history.state_saved", stateSaved),
+			attribute.Int("context.history.total_tokens", tokenCount),
+			attribute.Int("context.history.turn_count", turnCount),
+			attribute.Int("context.history.included_turn_count", includedTurnCount),
+			attribute.Int("context.history.message_count", messageCount),
+		)
+		gai.EndSpan(span, err)
+	}()
 
 	if s.historyStateStore == nil {
 		s.emit(ctx, "history_source_store_missing", map[string]any{
@@ -118,6 +143,7 @@ func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (Part, er
 		return nil, ErrTokenizerNotFound
 	}
 	tokenizerID := s.tokenizer.ID()
+	span.SetAttributes(attribute.String("context.tokenizer_id", tokenizerID))
 	lastHistoryState, err := s.historyStateStore.GetLastHistoryState(ctx, s.sessionID)
 	if err != nil {
 		s.emit(ctx, "history_source_state_load_failed", map[string]any{
@@ -127,17 +153,16 @@ func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (Part, er
 		return nil, err
 	}
 	var part HistoryPart
-	tokenCount := 0
-	turnCount := 0
-	messageCount := 0
 	if lastHistoryState == nil {
 		s.emit(ctx, "history_source_state_missing", map[string]any{
 			"session_id":   s.sessionID,
 			"tokenizer_id": tokenizerID,
 		}, nil)
 	} else {
+		statePresent = true
 		builtState := &HistoryState{}
 		if lastHistoryState.Summary != nil {
+			summaryIncluded = true
 			part.Contents = append(part.Contents, lastHistoryState.Summary.Content)
 			tokenCount += lastHistoryState.Summary.TokenCount[tokenizerID]
 			summary := *lastHistoryState.Summary
@@ -188,6 +213,7 @@ func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (Part, er
 				return nil, err
 			}
 			if tokenCount+tokens > tokenBudget {
+				budgetReached = true
 				s.emit(ctx, "history_source_token_budget_reached", map[string]any{
 					"session_id":    s.sessionID,
 					"tokenizer_id":  tokenizerID,
@@ -202,6 +228,7 @@ func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (Part, er
 			part.Contents = append(part.Contents, contents...)
 			turn.HistoryState = nil
 			includedTurns = append(includedTurns, turn)
+			includedTurnCount++
 		}
 
 		if builtState.Summary != nil || len(includedTurns) > 0 {
@@ -213,6 +240,7 @@ func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (Part, er
 				}, err)
 				return nil, err
 			}
+			stateSaved = true
 		}
 	}
 	part.saveTokens(tokenizerID, tokenCount)
@@ -225,7 +253,8 @@ func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (Part, er
 		"message_count": messageCount,
 		"content_count": len(part.Contents),
 	}, nil)
-	return &part, nil
+	result = &part
+	return result, nil
 }
 
 func (s *HistorySource) emit(ctx context.Context, name string, fields map[string]any, err error) {
