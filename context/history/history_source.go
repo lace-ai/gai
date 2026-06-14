@@ -231,7 +231,6 @@ func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (result g
 		}, err)
 		return nil, err
 	}
-	lastHistoryState.Turns = sortTurnsByCount(lastHistoryState.Turns)
 	var part HistoryPart
 	if lastHistoryState == nil {
 		s.emit(ctx, "history_source_state_missing", map[string]any{
@@ -239,6 +238,7 @@ func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (result g
 			"tokenizer_id": tokenizerID,
 		}, nil)
 	} else {
+		lastHistoryState.Turns = sortTurnsByCount(lastHistoryState.Turns)
 		statePresent = true
 		state := lastHistoryState
 		summarized := false
