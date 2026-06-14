@@ -2,7 +2,6 @@ package history
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/lace-ai/gai"
@@ -14,6 +13,7 @@ import (
 
 const contextTracerName = "github.com/lace-ai/gai/context"
 
+// Summary is the compact representation of older conversation turns.
 type Summary struct {
 	ID             string
 	StartTurnID    string
@@ -24,11 +24,16 @@ type Summary struct {
 	TokenCount     map[string]int
 }
 
+// HistoryState is the persisted conversation state consumed by HistorySource.
+// Turns contains the unsummarized tail of the conversation; Summary contains
+// older turns that have already been compacted.
 type HistoryState struct {
 	Turns   []gaictx.Turn
 	Summary *Summary
 }
 
+// HistoryStore loads and saves history state for a session.
+// Implementations also store cached per-turn token counts through TurnTokenStore.
 type HistoryStore interface {
 	GetLastHistoryState(ctx context.Context, sessionID string) (*HistoryState, error)
 	SaveHistoryState(ctx context.Context, sessionID string, state *HistoryState) error
@@ -36,6 +41,7 @@ type HistoryStore interface {
 	gaictx.TurnTokenStore
 }
 
+// HistorySource renders persisted conversation history as prompt context.
 type HistorySource struct {
 	historyStateStore HistoryStore
 	sessionID         string
@@ -48,12 +54,11 @@ type HistorySource struct {
 	summaryAmount float32
 }
 
-// SummarizerDefinition defines the configuration for the summarization of the history.
-// If enabled is true, the history source will attempt to summarize the history when building the context.
-// The amount defines the percentage (0 - 1) of the turns that get summarized,
-// starting from the oldest turn.
-//
-// If summarization is enabled, a summarizer or model must be provided.
+// SummarizerDefinition configures history summarization.
+// When Enabled is true, HistorySource first tries to fit history normally. If
+// the token budget is reached, it summarizes the oldest Amount of unsummarized
+// turns. Amount is a fraction from 0 to 1 and defaults to 0.7 when left unset.
+// Provide either Summarizer or Model when Enabled is true.
 type SummarizerDefinition struct {
 	Model      ai.Model
 	Summarizer *summary.Summarizer
@@ -61,9 +66,7 @@ type SummarizerDefinition struct {
 	Amount     float32
 }
 
-// SummarizerDefinitoin is kept for compatibility with the original misspelled name.
-type SummarizerDefinitoin = SummarizerDefinition
-
+// NewHistory creates a HistorySource without summarization.
 func NewHistory(sessionId string, historyStateStore HistoryStore) *HistorySource {
 	return &HistorySource{
 		historyStateStore: historyStateStore,
@@ -71,6 +74,10 @@ func NewHistory(sessionId string, historyStateStore HistoryStore) *HistorySource
 	}
 }
 
+// New creates a HistorySource for sessionId.
+// Pass nil summaryDef to disable summarization. When summarization is enabled,
+// New validates the configuration and builds a default summary agent from Model
+// if Summarizer is not provided.
 func New(sessionId string, historyStateStore HistoryStore, summaryDef *SummarizerDefinition) (*HistorySource, error) {
 	if summaryDef == nil {
 		return NewHistory(sessionId, historyStateStore), nil
@@ -112,6 +119,7 @@ func (s *HistorySource) DebugSink(debug gai.DebugSink, conv gaictx.Conversation)
 	s.debug = debug
 }
 
+// HistoryPart is the rendered prompt part emitted by HistorySource.
 type HistoryPart struct {
 	Contents   []gaictx.Content
 	TokenCount map[string]int
@@ -349,13 +357,13 @@ func (s *HistorySource) buildPart(ctx context.Context, state *HistoryState, toke
 
 func (s *HistorySource) summarizeState(ctx context.Context, state *HistoryState, maxTokens int) (*HistoryState, error) {
 	if state == nil {
-		return nil, fmt.Errorf("history state is nil")
+		return nil, ErrHistoryStateRequired
 	}
 	if s == nil {
-		return nil, fmt.Errorf("history source is nil")
+		return nil, ErrHistorySourceNil
 	}
 	if s.summarizer == nil {
-		return nil, fmt.Errorf("summarizer not configured for history source")
+		return nil, ErrSummarizerMissing
 	}
 	if len(state.Turns) == 0 {
 		return state, nil
