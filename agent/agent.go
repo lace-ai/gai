@@ -59,7 +59,7 @@ func (a *Agent) NewRun(ctx context.Context, input RunInput) (*loop.Loop, error) 
 	if promptBuilder == nil {
 		return nil, loop.ErrPromptNotConfigured
 	}
-	if setter, ok := promptBuilder.(gaictx.TokenizerSetter); ok {
+	if setter, ok := promptBuilder.(gaictx.TokenizerSetter); ok && a.def.Model.Tokenizer() != nil && a.def.Tokenizer == nil {
 		setter.SetTokenizer(a.def.Model.Tokenizer())
 	}
 

@@ -74,7 +74,6 @@ func Definition(model ai.Model, opts ...Option) agent.Definition {
 	config := Config{
 		SystemPrompt:      DefaultSystemPrompt,
 		MaxLoopIterations: 1,
-		Tokenizer:         model.Tokenizer(),
 	}
 	for _, opt := range opts {
 		if opt != nil {
