@@ -9,9 +9,11 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
-const contextTracerName = "github.com/lace-ai/gai/context"
-const promptDebugFullLimit = 4000
-const promptDebugPreviewLimit = 160
+const (
+	contextTracerName       = "github.com/lace-ai/gai/context"
+	promptDebugFullLimit    = 4000
+	promptDebugPreviewLimit = 160
+)
 
 type ContextSource interface {
 	Name() string
@@ -221,13 +223,15 @@ func (b *Builder) BuildPrompt(ctx context.Context, conv Conversation) (prompt st
 	parts = append(parts, b.SystemInstructions...)
 	parts = append(parts, b.ContextParts...)
 	if b.userPrompt != "" {
-		parts = append(parts, NewTextPart(b.userPrompt))
+		parts = append(parts, NewMessagePart("user", b.userPrompt))
 	}
 	if conv != nil {
 		messages := conv.Messages()
 		conversationMessages = len(messages)
 		for _, message := range messages {
-			parts = append(parts, message)
+			if message.Role != RoleUser {
+				parts = append(parts, NewMessagePart(string(message.Role), message.Content.String()))
+			}
 		}
 	}
 	partCount = len(parts)

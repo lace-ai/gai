@@ -134,11 +134,3 @@ func (m Message) Tokens(ctx context.Context, tokenizer ai.Tokenizer) (int, error
 	m.TokenCount[tokenizer.ID()] = count
 	return count, nil
 }
-
-func (m Message) Marshal(ctx context.Context) ([]byte, error) {
-	return m.Content.Marshal()
-}
-
-func (m Message) Name() string {
-	return string(m.Role)
-}
