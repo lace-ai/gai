@@ -230,7 +230,7 @@ func (o *historyObserver) SummaryIncluded(ctx context.Context, summary *Summary)
 	fields := map[string]any{
 		"session_id":          o.sessionID,
 		"tokenizer_id":        o.tokenizerID,
-		"summary_tokens":      summary.TokenCount[o.tokenizerID],
+		"summary_tokens":      summary.tokenCount[o.tokenizerID],
 		"summary_start_turn":  summary.StartTurnID,
 		"summary_end_turn":    summary.EndTurnID,
 		"summary_start_count": summary.StartTurnCount,
@@ -240,6 +240,24 @@ func (o *historyObserver) SummaryIncluded(ctx context.Context, summary *Summary)
 		fields["summary_content"] = summary.Content.String()
 	}
 	o.emit(ctx, "history_source_summary_included", fields, nil)
+}
+
+func (o *historyObserver) SummaryTokenCountFailed(ctx context.Context, summary *Summary, err error) {
+	if o == nil || summary == nil {
+		return
+	}
+	fields := map[string]any{
+		"session_id":          o.sessionID,
+		"tokenizer_id":        o.tokenizerID,
+		"summary_start_turn":  summary.StartTurnID,
+		"summary_end_turn":    summary.EndTurnID,
+		"summary_start_count": summary.StartTurnCount,
+		"summary_end_count":   summary.EndTurnCount,
+	}
+	if o.debug != nil && o.debug.IncludeSensitiveData() {
+		fields["summary_content"] = summary.Content.String()
+	}
+	o.emit(ctx, "history_source_summary_token_count_failed", fields, err)
 }
 
 func (o *historyObserver) SummaryMissing(ctx context.Context) {
@@ -260,14 +278,17 @@ func (o *historyObserver) TurnTokenizeFailed(ctx context.Context, turn *gaictx.T
 
 func (o *historyObserver) BudgetReached(ctx context.Context, totalTokens int, turn *gaictx.Turn) {
 	o.MarkBudgetReached()
-	o.emit(ctx, "history_source_token_budget_reached", map[string]any{
-		"session_id":    o.sessionID,
-		"tokenizer_id":  o.tokenizerID,
-		"token_budget":  o.tokenBudget,
-		"total_tokens":  totalTokens,
-		"last_turn_id":  turn.ID,
-		"last_turn_cnt": turn.Count,
-	}, nil)
+	fields := map[string]any{
+		"session_id":   o.sessionID,
+		"tokenizer_id": o.tokenizerID,
+		"token_budget": o.tokenBudget,
+		"total_tokens": totalTokens,
+	}
+	if turn != nil {
+		fields["last_turn_id"] = turn.ID
+		fields["last_turn_cnt"] = turn.Count
+	}
+	o.emit(ctx, "history_source_token_budget_reached", fields, nil)
 }
 
 func (o *historyObserver) BuildFinished(ctx context.Context, part *Part, tokenCount, turnCount, includedTurnCount, messageCount int) {
@@ -305,7 +326,7 @@ func (o *historyObserver) SummaryGenerated(ctx context.Context, summary *Summary
 	o.summaryTotalTurnCount = summarizedTurnCount + remainingTurnCount
 	o.summaryTurnCount = summarizedTurnCount
 	o.summaryRemainingCount = remainingTurnCount
-	o.summaryTokens = summary.TokenCount[o.tokenizerID]
+	o.summaryTokens = summary.tokenCount[o.tokenizerID]
 	o.summaryExisting = previousSummaryFound
 
 	fields := map[string]any{

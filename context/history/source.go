@@ -152,7 +152,7 @@ func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (result g
 			messageCount = 0
 			includedTurnCount = 0
 
-			builtState, buildBudgetReached, err := s.buildPart(ctx, state, tokenBudget, tokenizerID, &part, obs, &tokenCount, &turnCount, &messageCount, &includedTurnCount, &summaryIncluded)
+			builtState, buildBudgetReached, err := s.buildPart(ctx, state, tokenBudget, s.tokenizer, &part, obs, &tokenCount, &turnCount, &messageCount, &includedTurnCount, &summaryIncluded)
 			if err != nil {
 				return nil, err
 			}
@@ -191,7 +191,19 @@ func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (result g
 	return result, nil
 }
 
-func (s *HistorySource) buildPart(ctx context.Context, state *HistoryState, tokenBudget int, tokenizerID string, part *Part, obs *historyObserver, tokenCount, turnCount, messageCount, includedTurnCount *int, summaryIncluded *bool) (*HistoryState, bool, error) {
+func (s *HistorySource) buildPart(
+	ctx context.Context,
+	state *HistoryState,
+	tokenBudget int,
+	tokenizer ai.Tokenizer,
+	part *Part,
+	obs *historyObserver,
+	tokenCount,
+	turnCount,
+	messageCount,
+	includedTurnCount *int,
+	summaryIncluded *bool,
+) (*HistoryState, bool, error) {
 	builtState := &HistoryState{}
 	if state.Summary != nil {
 		*summaryIncluded = true
@@ -200,7 +212,17 @@ func (s *HistorySource) buildPart(ctx context.Context, state *HistoryState, toke
 			Role: "summary",
 		}
 		part.Contents = append(part.Contents, summaryContent)
-		*tokenCount += state.Summary.TokenCount[tokenizerID]
+		summaryTokenCount, err := state.Summary.TokenCount(tokenizer)
+		if err != nil {
+			obs.SummaryTokenCountFailed(ctx, state.Summary, err)
+			return nil, false, err
+		}
+		if *tokenCount+summaryTokenCount > tokenBudget {
+			obs.BudgetReached(ctx, *tokenCount, nil)
+			builtState.Turns = []gaictx.Turn{}
+			return builtState, true, nil
+		}
+		*tokenCount += summaryTokenCount
 		summary := *state.Summary
 		builtState.Summary = &summary
 		obs.SummaryIncluded(ctx, state.Summary)

@@ -2,9 +2,11 @@ package history
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/lace-ai/gai/agent/summary"
+	"github.com/lace-ai/gai/ai"
 	gaictx "github.com/lace-ai/gai/context"
 )
 
@@ -16,7 +18,19 @@ type Summary struct {
 	StartTurnCount int
 	EndTurnCount   int
 	Content        gaictx.TextContent
-	TokenCount     map[string]int
+	tokenCount     map[string]int
+}
+
+func NewSummary(id, startTurnID, endTurnID string, startTurnCount, endTurnCount int, content gaictx.TextContent) *Summary {
+	return &Summary{
+		ID:             id,
+		StartTurnID:    startTurnID,
+		EndTurnID:      endTurnID,
+		StartTurnCount: startTurnCount,
+		EndTurnCount:   endTurnCount,
+		Content:        content,
+		tokenCount:     map[string]int{},
+	}
 }
 
 func (s *HistorySource) summarizeState(ctx context.Context, state *HistoryState, maxTokens int) (*HistoryState, error) {
@@ -80,7 +94,7 @@ func (s *HistorySource) summarizeState(ctx context.Context, state *HistoryState,
 		StartTurnCount: firstTurn.Count,
 		EndTurnCount:   lastTurn.Count,
 		Content:        gaictx.NewTextContent(res),
-		TokenCount:     map[string]int{},
+		tokenCount:     map[string]int{},
 	}
 	if state.Summary != nil {
 		nextSummary.StartTurnID = state.Summary.StartTurnID
@@ -88,9 +102,10 @@ func (s *HistorySource) summarizeState(ctx context.Context, state *HistoryState,
 	}
 	tokenCount, err := s.tokenizer.CountTokens(ctx, nextSummary.Content.String())
 	if err != nil {
+		obs.SummaryTokenCountFailed(ctx, nextSummary, err)
 		return nil, err
 	}
-	nextSummary.TokenCount[s.tokenizer.ID()] = tokenCount
+	nextSummary.tokenCount[s.tokenizer.ID()] = tokenCount
 	obs.SummaryGenerated(ctx, nextSummary, summarizedTurnCount, len(state.Turns)-summarizedTurnCount, state.Summary != nil)
 
 	nextState := &HistoryState{
@@ -126,4 +141,25 @@ func writeTurn(builder *strings.Builder, turn *gaictx.Turn) {
 		builder.WriteString(message.Content.String())
 		builder.WriteString("\n")
 	}
+}
+
+func (s *Summary) TokenCount(tokenizer ai.Tokenizer) (int, error) {
+	if s == nil {
+		return 0, fmt.Errorf("summary is nil")
+	}
+	if tokenizer == nil {
+		return 0, fmt.Errorf("tokenizer is required")
+	}
+	if s.tokenCount == nil {
+		s.tokenCount = map[string]int{}
+	}
+	if count, ok := s.tokenCount[tokenizer.ID()]; ok {
+		return count, nil
+	}
+	count, err := tokenizer.CountTokens(context.Background(), s.Content.String())
+	if err != nil {
+		return 0, err
+	}
+	s.tokenCount[tokenizer.ID()] = count
+	return count, nil
 }

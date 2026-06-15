@@ -101,7 +101,6 @@ func TestHistorySourceSavesBuiltState(t *testing.T) {
 				StartTurnCount: 1,
 				EndTurnCount:   2,
 				Content:        gaictx.NewTextContent("summary"),
-				TokenCount:     map[string]int{"mock.tokenizer": 1},
 			},
 			Turns: []gaictx.Turn{
 				{
@@ -334,7 +333,6 @@ func TestHistorySourceFunctionTable(t *testing.T) {
 					StartTurnCount: 1,
 					EndTurnCount:   2,
 					Content:        gaictx.NewTextContent("summary"),
-					TokenCount:     map[string]int{"mock.tokenizer": 1},
 				},
 				Turns: []gaictx.Turn{
 					{
