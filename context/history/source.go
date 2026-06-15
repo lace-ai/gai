@@ -8,10 +8,7 @@ import (
 	"github.com/lace-ai/gai/agent/summary"
 	"github.com/lace-ai/gai/ai"
 	gaictx "github.com/lace-ai/gai/context"
-	"go.opentelemetry.io/otel/attribute"
 )
-
-const contextTracerName = "github.com/lace-ai/gai/context"
 
 // HistoryState is the persisted conversation state consumed by HistorySource.
 // Turns contains the unsummarized tail of the conversation; Summary contains
@@ -112,69 +109,38 @@ func (s *HistorySource) DebugSink(debug gai.DebugSink, conv gaictx.Conversation)
 }
 
 func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (result gaictx.Part, err error) {
-	ctx, span := gai.StartOperationSpan(ctx, contextTracerName, "context.history", "context.operation", "build",
-		attribute.String("context.source", s.Name()),
-		attribute.String("context.session_id", s.sessionID),
-		attribute.Int("context.token_budget", tokenBudget),
-	)
-	statePresent := false
+	ctx, obs := newHistoryBuildObserver(ctx, s.debug, s.sessionID, tokenBudget, s.summarize)
+	defer func() {
+		obs.Finish(err)
+	}()
+
+	if s.historyStateStore == nil {
+		obs.StoreMissing(ctx)
+		return nil, gaictx.ErrSessionStoreNotFound
+	}
+	if s.tokenizer == nil {
+		obs.TokenizerMissing(ctx)
+		return nil, gaictx.ErrTokenizerNotFound
+	}
+	tokenizerID := s.tokenizer.ID()
+	obs.SetTokenizerID(tokenizerID)
+	lastHistoryState, err := s.historyStateStore.GetLastHistoryState(ctx, s.sessionID)
+	if err != nil {
+		obs.StateLoadFailed(ctx, err)
+		return nil, err
+	}
+	var part Part
 	summaryIncluded := false
 	budgetReached := false
-	stateSaved := false
-	summaryAttempted := false
-	summaryGenerated := false
 	tokenCount := 0
 	turnCount := 0
 	messageCount := 0
 	includedTurnCount := 0
-	defer func() {
-		span.SetAttributes(
-			attribute.Bool("context.history.state_present", statePresent),
-			attribute.Bool("context.history.summary_included", summaryIncluded),
-			attribute.Bool("context.history.summary_configured", s.summarize),
-			attribute.Bool("context.history.summary_attempted", summaryAttempted),
-			attribute.Bool("context.history.summary_generated", summaryGenerated),
-			attribute.Bool("context.history.budget_reached", budgetReached),
-			attribute.Bool("context.history.state_saved", stateSaved),
-			attribute.Int("context.history.total_tokens", tokenCount),
-			attribute.Int("context.history.turn_count", turnCount),
-			attribute.Int("context.history.included_turn_count", includedTurnCount),
-			attribute.Int("context.history.message_count", messageCount),
-		)
-		gai.EndSpan(span, err)
-	}()
-
-	if s.historyStateStore == nil {
-		s.emit(ctx, "history_source_store_missing", map[string]any{
-			"session_id": s.sessionID,
-		}, gaictx.ErrSessionStoreNotFound)
-		return nil, gaictx.ErrSessionStoreNotFound
-	}
-	if s.tokenizer == nil {
-		s.emit(ctx, "history_source_tokenizer_missing", map[string]any{
-			"session_id": s.sessionID,
-		}, gaictx.ErrTokenizerNotFound)
-		return nil, gaictx.ErrTokenizerNotFound
-	}
-	tokenizerID := s.tokenizer.ID()
-	span.SetAttributes(attribute.String("context.tokenizer_id", tokenizerID))
-	lastHistoryState, err := s.historyStateStore.GetLastHistoryState(ctx, s.sessionID)
-	if err != nil {
-		s.emit(ctx, "history_source_state_load_failed", map[string]any{
-			"session_id":   s.sessionID,
-			"tokenizer_id": tokenizerID,
-		}, err)
-		return nil, err
-	}
-	var part Part
 	if lastHistoryState == nil {
-		s.emit(ctx, "history_source_state_missing", map[string]any{
-			"session_id":   s.sessionID,
-			"tokenizer_id": tokenizerID,
-		}, nil)
+		obs.StateMissing(ctx)
 	} else {
 		lastHistoryState.Turns = sortTurnsByCount(lastHistoryState.Turns)
-		statePresent = true
+		obs.MarkStatePresent()
 		state := lastHistoryState
 		summarized := false
 		for {
@@ -186,76 +152,46 @@ func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (result g
 			messageCount = 0
 			includedTurnCount = 0
 
-			builtState, buildBudgetReached, err := s.buildPart(ctx, state, tokenBudget, tokenizerID, &part, &tokenCount, &turnCount, &messageCount, &includedTurnCount, &summaryIncluded)
+			builtState, buildBudgetReached, err := s.buildPart(ctx, state, tokenBudget, tokenizerID, &part, obs, &tokenCount, &turnCount, &messageCount, &includedTurnCount, &summaryIncluded)
 			if err != nil {
 				return nil, err
 			}
 			budgetReached = buildBudgetReached
 
 			if budgetReached && s.summarize && !summarized {
-				summaryAttempted = true
-				s.emit(ctx, "history_source_summary_attempted", map[string]any{
-					"session_id":     s.sessionID,
-					"tokenizer_id":   tokenizerID,
-					"token_budget":   tokenBudget,
-					"turn_count":     len(lastHistoryState.Turns),
-					"summary_amount": float64(s.summaryAmount),
-				}, nil)
+				obs.SummaryAttempted(ctx, len(lastHistoryState.Turns))
 				state, err = s.summarizeState(ctx, lastHistoryState, tokenBudget)
 				if err != nil {
-					s.emit(ctx, "history_source_summary_failed", map[string]any{
-						"session_id":   s.sessionID,
-						"tokenizer_id": tokenizerID,
-						"token_budget": tokenBudget,
-					}, err)
+					obs.SummaryFailed(ctx, err)
 					return nil, err
 				}
-				summaryGenerated = state != lastHistoryState && state.Summary != nil
+				if state != lastHistoryState && state.Summary != nil {
+					obs.MarkSummaryGenerated()
+				}
 				summarized = true
 				continue
 			}
 			if budgetReached && !s.summarize {
-				s.emit(ctx, "history_source_summary_skipped", map[string]any{
-					"session_id":   s.sessionID,
-					"tokenizer_id": tokenizerID,
-					"reason":       "disabled",
-				}, nil)
+				obs.SummarySkippedDisabled(ctx)
 			}
 
 			if builtState.Summary != nil || len(builtState.Turns) > 0 {
 				if err := s.historyStateStore.SaveHistoryState(ctx, s.sessionID, builtState); err != nil {
-					s.emit(ctx, "history_source_state_save_failed", map[string]any{
-						"session_id":   s.sessionID,
-						"tokenizer_id": tokenizerID,
-					}, err)
+					obs.StateSaveFailed(ctx, err)
 					return nil, err
 				}
-				stateSaved = true
+				obs.MarkStateSaved()
 			}
 			break
 		}
 	}
 	part.saveTokens(tokenizerID, tokenCount)
-	buildFields := map[string]any{
-		"session_id":    s.sessionID,
-		"tokenizer_id":  tokenizerID,
-		"token_budget":  tokenBudget,
-		"total_tokens":  tokenCount,
-		"turn_count":    turnCount,
-		"message_count": messageCount,
-		"content_count": len(part.Contents),
-	}
-	if s.debug != nil && s.debug.IncludeSensitiveData() {
-		if raw, marshalErr := part.Marshal(ctx); marshalErr == nil {
-			buildFields["history_content"] = string(raw)
-		}
-	}
-	s.emit(ctx, "history_source_build_finished", buildFields, nil)
+	obs.BuildFinished(ctx, &part, tokenCount, turnCount, includedTurnCount, messageCount)
 	result = &part
 	return result, nil
 }
 
-func (s *HistorySource) buildPart(ctx context.Context, state *HistoryState, tokenBudget int, tokenizerID string, part *Part, tokenCount, turnCount, messageCount, includedTurnCount *int, summaryIncluded *bool) (*HistoryState, bool, error) {
+func (s *HistorySource) buildPart(ctx context.Context, state *HistoryState, tokenBudget int, tokenizerID string, part *Part, obs *historyObserver, tokenCount, turnCount, messageCount, includedTurnCount *int, summaryIncluded *bool) (*HistoryState, bool, error) {
 	builtState := &HistoryState{}
 	if state.Summary != nil {
 		*summaryIncluded = true
@@ -267,24 +203,9 @@ func (s *HistorySource) buildPart(ctx context.Context, state *HistoryState, toke
 		*tokenCount += state.Summary.TokenCount[tokenizerID]
 		summary := *state.Summary
 		builtState.Summary = &summary
-		summaryFields := map[string]any{
-			"session_id":          s.sessionID,
-			"tokenizer_id":        tokenizerID,
-			"summary_tokens":      state.Summary.TokenCount[tokenizerID],
-			"summary_start_turn":  state.Summary.StartTurnID,
-			"summary_end_turn":    state.Summary.EndTurnID,
-			"summary_start_count": state.Summary.StartTurnCount,
-			"summary_end_count":   state.Summary.EndTurnCount,
-		}
-		if s.debug != nil && s.debug.IncludeSensitiveData() {
-			summaryFields["summary_content"] = state.Summary.Content.String()
-		}
-		s.emit(ctx, "history_source_summary_included", summaryFields, nil)
+		obs.SummaryIncluded(ctx, state.Summary)
 	} else {
-		s.emit(ctx, "history_source_summary_missing", map[string]any{
-			"session_id":   s.sessionID,
-			"tokenizer_id": tokenizerID,
-		}, nil)
+		obs.SummaryMissing(ctx)
 	}
 
 	includedTurns := make([]gaictx.Turn, 0, len(state.Turns))
@@ -301,23 +222,13 @@ func (s *HistorySource) buildPart(ctx context.Context, state *HistoryState, toke
 		}
 		tokens, err := turn.Tokenize(ctx, s.tokenizer, s.historyStateStore)
 		if err != nil {
-			s.emit(ctx, "history_source_turn_tokenize_failed", map[string]any{
-				"session_id":   s.sessionID,
-				"tokenizer_id": tokenizerID,
-				"turn_id":      turn.ID,
-				"turn_count":   turn.Count,
-			}, err)
+			turnCopy := turn
+			obs.TurnTokenizeFailed(ctx, &turnCopy, err)
 			return nil, false, err
 		}
 		if *tokenCount+tokens > tokenBudget {
-			s.emit(ctx, "history_source_token_budget_reached", map[string]any{
-				"session_id":    s.sessionID,
-				"tokenizer_id":  tokenizerID,
-				"token_budget":  tokenBudget,
-				"total_tokens":  *tokenCount,
-				"last_turn_id":  turn.ID,
-				"last_turn_cnt": turn.Count,
-			}, nil)
+			turnCopy := turn
+			obs.BudgetReached(ctx, *tokenCount, &turnCopy)
 			builtState.Turns = includedTurns
 			return builtState, true, nil
 		}
@@ -337,16 +248,4 @@ func sortTurnsByCount(turns []gaictx.Turn) []gaictx.Turn {
 		return turns[i].Count < turns[j].Count
 	})
 	return turns
-}
-
-func (s *HistorySource) emit(ctx context.Context, name string, fields map[string]any, err error) {
-	if s == nil || s.debug == nil {
-		return
-	}
-	s.debug.Emit(ctx, gai.DebugEvent{
-		Name:   name,
-		Source: "context:HistorySource",
-		Fields: fields,
-		Err:    err,
-	})
 }

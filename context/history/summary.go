@@ -4,10 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/agent/summary"
 	gaictx "github.com/lace-ai/gai/context"
-	"go.opentelemetry.io/otel/attribute"
 )
 
 // Summary is the compact representation of older conversation turns.
@@ -25,14 +23,10 @@ func (s *HistorySource) summarizeState(ctx context.Context, state *HistoryState,
 	if s == nil {
 		return nil, ErrHistorySourceNil
 	}
-	ctx, span := gai.StartOperationSpan(ctx, contextTracerName, "context.history", "context.operation", "summarize",
-		attribute.String("context.session_id", s.sessionID),
-		attribute.Int("context.token_budget", maxTokens),
-		attribute.Float64("context.history.summary_amount", float64(s.summaryAmount)),
-	)
+	ctx, obs := newHistorySummaryObserver(ctx, s.debug, s.sessionID, maxTokens, s.summaryAmount)
 	var err error
 	defer func() {
-		gai.EndSpan(span, err)
+		obs.Finish(err)
 	}()
 
 	if state == nil {
@@ -43,17 +37,10 @@ func (s *HistorySource) summarizeState(ctx context.Context, state *HistoryState,
 		err = ErrSummarizerMissing
 		return nil, err
 	}
-	span.SetAttributes(
-		attribute.Int("context.history.turn_count", len(state.Turns)),
-		attribute.Bool("context.history.existing_summary", state.Summary != nil),
-	)
+	obs.ObserveState(len(state.Turns), state.Summary != nil)
+	obs.SetTokenizerID(s.tokenizer.ID())
 	if len(state.Turns) == 0 {
-		span.SetAttributes(attribute.String("context.history.summary_skip_reason", "no_turns"))
-		s.emit(ctx, "history_source_summary_skipped", map[string]any{
-			"session_id":   s.sessionID,
-			"token_budget": maxTokens,
-			"reason":       "no_turns",
-		}, nil)
+		obs.SummarySkippedNoTurns(ctx)
 		return state, nil
 	}
 
@@ -66,19 +53,9 @@ func (s *HistorySource) summarizeState(ctx context.Context, state *HistoryState,
 
 	summarizedTurnCount := s.summarizedTurnCount(len(state.Turns))
 	if summarizedTurnCount == 0 {
-		span.SetAttributes(attribute.String("context.history.summary_skip_reason", "amount_zero"))
-		s.emit(ctx, "history_source_summary_skipped", map[string]any{
-			"session_id":     s.sessionID,
-			"token_budget":   maxTokens,
-			"summary_amount": float64(s.summaryAmount),
-			"reason":         "amount_zero",
-		}, nil)
+		obs.SummarySkippedAmountZero(ctx)
 		return state, nil
 	}
-	span.SetAttributes(
-		attribute.Int("context.history.summarized_turn_count", summarizedTurnCount),
-		attribute.Int("context.history.remaining_turn_count", len(state.Turns)-summarizedTurnCount),
-	)
 	summarizedTurns := state.Turns[:summarizedTurnCount]
 	for i := range summarizedTurns {
 		writeTurn(&builder, &summarizedTurns[i])
@@ -114,24 +91,7 @@ func (s *HistorySource) summarizeState(ctx context.Context, state *HistoryState,
 		return nil, err
 	}
 	nextSummary.TokenCount[s.tokenizer.ID()] = tokenCount
-	span.SetAttributes(attribute.Int("context.history.summary_tokens", tokenCount))
-	summaryFields := map[string]any{
-		"session_id":             s.sessionID,
-		"tokenizer_id":           s.tokenizer.ID(),
-		"token_budget":           maxTokens,
-		"summary_tokens":         tokenCount,
-		"summarized_turn_count":  summarizedTurnCount,
-		"remaining_turn_count":   len(state.Turns) - summarizedTurnCount,
-		"summary_start_turn":     nextSummary.StartTurnID,
-		"summary_end_turn":       nextSummary.EndTurnID,
-		"summary_start_count":    nextSummary.StartTurnCount,
-		"summary_end_count":      nextSummary.EndTurnCount,
-		"previous_summary_found": state.Summary != nil,
-	}
-	if s.debug != nil && s.debug.IncludeSensitiveData() {
-		summaryFields["summary_content"] = nextSummary.Content.String()
-	}
-	s.emit(ctx, "history_source_summary_generated", summaryFields, nil)
+	obs.SummaryGenerated(ctx, nextSummary, summarizedTurnCount, len(state.Turns)-summarizedTurnCount, state.Summary != nil)
 
 	nextState := &HistoryState{
 		Summary: nextSummary,
