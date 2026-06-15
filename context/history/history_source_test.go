@@ -13,11 +13,11 @@ import (
 func TestHistoryPartMarshalJoinsContentStrings(t *testing.T) {
 	t.Parallel()
 
-	part := &history.HistoryPart{
-		Contents: []gaictx.Content{
-			gaictx.NewTextContent("hello"),
-			gaictx.NewToolCallContent("search", `{"q":"lace"}`),
-			gaictx.NewToolResultContent("search", "found docs", false, ""),
+	part := &history.Part{
+		Contents: []history.Content{
+			{Text: "hello"},
+			{Text: "search({\"q\":\"lace\"})"},
+			{Text: "search result: found docs"},
 		},
 	}
 
@@ -35,13 +35,39 @@ func TestHistoryPartMarshalJoinsContentStrings(t *testing.T) {
 func TestHistoryPartMarshalEmpty(t *testing.T) {
 	t.Parallel()
 
-	var part *history.HistoryPart
+	var part *history.Part
 	got, err := part.Marshal(context.Background())
 	if err != nil {
 		t.Fatalf("Marshal failed: %v", err)
 	}
 	if string(got) != "" {
 		t.Fatalf("expected empty history output, got %q", string(got))
+	}
+}
+
+func TestHistoryContentImplementsContent(t *testing.T) {
+	t.Parallel()
+
+	var content gaictx.Content = history.Content{
+		Text: "hello",
+		Role: gaictx.RoleUser,
+	}
+
+	if content.String() != "hello" {
+		t.Fatalf("unexpected String result: %q", content.String())
+	}
+	if content.Type() != gaictx.ContentTypeText {
+		t.Fatalf("unexpected Type result: %q", content.Type())
+	}
+
+	got, err := content.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+
+	want := `{"Text":"hello","Role":"user"}`
+	if string(got) != want {
+		t.Fatalf("unexpected Marshal result:\nwant %q\n got %q", want, string(got))
 	}
 }
 
@@ -493,7 +519,6 @@ func TestHistorySourceFunctionTable(t *testing.T) {
 					t.Fatalf("unexpected saved turn id at %d: want %q got %q", i, tt.wantSavedTurnIDs[i], gotTurnIDs[i])
 				}
 			}
-
 		})
 	}
 }

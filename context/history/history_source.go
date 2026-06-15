@@ -3,7 +3,6 @@ package history
 import (
 	"context"
 	"sort"
-	"strings"
 
 	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/agent/summary"
@@ -13,17 +12,6 @@ import (
 )
 
 const contextTracerName = "github.com/lace-ai/gai/context"
-
-// Summary is the compact representation of older conversation turns.
-type Summary struct {
-	ID             string
-	StartTurnID    string
-	EndTurnID      string
-	StartTurnCount int
-	EndTurnCount   int
-	Content        gaictx.TextContent
-	TokenCount     map[string]int
-}
 
 // HistoryState is the persisted conversation state consumed by HistorySource.
 // Turns contains the unsummarized tail of the conversation; Summary contains
@@ -123,59 +111,6 @@ func (s *HistorySource) DebugSink(debug gai.DebugSink, conv gaictx.Conversation)
 	s.debug = debug
 }
 
-// HistoryPart is the rendered prompt part emitted by HistorySource.
-type HistoryPart struct {
-	Contents   []gaictx.Content
-	TokenCount map[string]int
-}
-
-func (p *HistoryPart) Name() string {
-	return "history"
-}
-
-func (p *HistoryPart) Marshal(ctx context.Context) ([]byte, error) {
-	if p == nil || len(p.Contents) == 0 {
-		return []byte{}, nil
-	}
-
-	var builder strings.Builder
-	for i, content := range p.Contents {
-		if i > 0 {
-			builder.WriteString("\n")
-		}
-		builder.WriteString(content.String())
-	}
-	return []byte(builder.String()), nil
-}
-
-func (p *HistoryPart) Tokens(ctx context.Context, tokenizer ai.Tokenizer) (int, error) {
-	if tokenizer == nil {
-		return 0, gaictx.ErrTokenizerNotFound
-	}
-	tokenizerID := tokenizer.ID()
-	if count, ok := p.TokenCount[tokenizerID]; ok {
-		return count, nil
-	}
-
-	count := 0
-	for _, content := range p.Contents {
-		tokens, err := tokenizer.CountTokens(ctx, content.String())
-		if err != nil {
-			return 0, err
-		}
-		count += tokens
-	}
-	p.saveTokens(tokenizerID, count)
-	return count, nil
-}
-
-func (p *HistoryPart) saveTokens(tokenizerID string, tokens int) {
-	if p.TokenCount == nil {
-		p.TokenCount = make(map[string]int)
-	}
-	p.TokenCount[tokenizerID] = tokens
-}
-
 func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (result gaictx.Part, err error) {
 	ctx, span := gai.StartOperationSpan(ctx, contextTracerName, "context.history", "context.operation", "build",
 		attribute.String("context.source", s.Name()),
@@ -231,7 +166,7 @@ func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (result g
 		}, err)
 		return nil, err
 	}
-	var part HistoryPart
+	var part Part
 	if lastHistoryState == nil {
 		s.emit(ctx, "history_source_state_missing", map[string]any{
 			"session_id":   s.sessionID,
@@ -243,7 +178,7 @@ func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (result g
 		state := lastHistoryState
 		summarized := false
 		for {
-			part = HistoryPart{}
+			part = Part{}
 			summaryIncluded = false
 			budgetReached = false
 			tokenCount = 0
@@ -320,11 +255,15 @@ func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (result g
 	return result, nil
 }
 
-func (s *HistorySource) buildPart(ctx context.Context, state *HistoryState, tokenBudget int, tokenizerID string, part *HistoryPart, tokenCount, turnCount, messageCount, includedTurnCount *int, summaryIncluded *bool) (*HistoryState, bool, error) {
+func (s *HistorySource) buildPart(ctx context.Context, state *HistoryState, tokenBudget int, tokenizerID string, part *Part, tokenCount, turnCount, messageCount, includedTurnCount *int, summaryIncluded *bool) (*HistoryState, bool, error) {
 	builtState := &HistoryState{}
 	if state.Summary != nil {
 		*summaryIncluded = true
-		part.Contents = append(part.Contents, state.Summary.Content)
+		summaryContent := Content{
+			Text: state.Summary.Content.String(),
+			Role: "summary",
+		}
+		part.Contents = append(part.Contents, summaryContent)
 		*tokenCount += state.Summary.TokenCount[tokenizerID]
 		summary := *state.Summary
 		builtState.Summary = &summary
@@ -351,13 +290,13 @@ func (s *HistorySource) buildPart(ctx context.Context, state *HistoryState, toke
 	includedTurns := make([]gaictx.Turn, 0, len(state.Turns))
 	for _, turn := range state.Turns {
 		*turnCount++
-		var contents []gaictx.Content
+		var contents []Content
 		if turn.UserMessage != nil {
-			contents = append(contents, turn.UserMessage.Content)
+			contents = append(contents, MapMessageToContent(*turn.UserMessage))
 			*messageCount++
 		}
 		for _, message := range turn.Messages {
-			contents = append(contents, message.Content)
+			contents = append(contents, MapMessageToContent(message))
 			*messageCount++
 		}
 		tokens, err := turn.Tokenize(ctx, s.tokenizer, s.historyStateStore)
@@ -390,153 +329,6 @@ func (s *HistorySource) buildPart(ctx context.Context, state *HistoryState, toke
 
 	builtState.Turns = includedTurns
 	return builtState, false, nil
-}
-
-func (s *HistorySource) summarizeState(ctx context.Context, state *HistoryState, maxTokens int) (*HistoryState, error) {
-	if s == nil {
-		return nil, ErrHistorySourceNil
-	}
-	ctx, span := gai.StartOperationSpan(ctx, contextTracerName, "context.history", "context.operation", "summarize",
-		attribute.String("context.session_id", s.sessionID),
-		attribute.Int("context.token_budget", maxTokens),
-		attribute.Float64("context.history.summary_amount", float64(s.summaryAmount)),
-	)
-	var err error
-	defer func() {
-		gai.EndSpan(span, err)
-	}()
-
-	if state == nil {
-		err = ErrHistoryStateRequired
-		return nil, err
-	}
-	if s.summarizer == nil {
-		err = ErrSummarizerMissing
-		return nil, err
-	}
-	span.SetAttributes(
-		attribute.Int("context.history.turn_count", len(state.Turns)),
-		attribute.Bool("context.history.existing_summary", state.Summary != nil),
-	)
-	if len(state.Turns) == 0 {
-		span.SetAttributes(attribute.String("context.history.summary_skip_reason", "no_turns"))
-		s.emit(ctx, "history_source_summary_skipped", map[string]any{
-			"session_id":   s.sessionID,
-			"token_budget": maxTokens,
-			"reason":       "no_turns",
-		}, nil)
-		return state, nil
-	}
-
-	var builder strings.Builder
-
-	if state.Summary != nil {
-		builder.WriteString(state.Summary.Content.String())
-		builder.WriteString("\n")
-	}
-
-	summarizedTurnCount := s.summarizedTurnCount(len(state.Turns))
-	if summarizedTurnCount == 0 {
-		span.SetAttributes(attribute.String("context.history.summary_skip_reason", "amount_zero"))
-		s.emit(ctx, "history_source_summary_skipped", map[string]any{
-			"session_id":     s.sessionID,
-			"token_budget":   maxTokens,
-			"summary_amount": float64(s.summaryAmount),
-			"reason":         "amount_zero",
-		}, nil)
-		return state, nil
-	}
-	span.SetAttributes(
-		attribute.Int("context.history.summarized_turn_count", summarizedTurnCount),
-		attribute.Int("context.history.remaining_turn_count", len(state.Turns)-summarizedTurnCount),
-	)
-	summarizedTurns := state.Turns[:summarizedTurnCount]
-	for i := range summarizedTurns {
-		writeTurn(&builder, &summarizedTurns[i])
-	}
-
-	req := summary.Request{
-		ID:        "history",
-		Text:      builder.String(),
-		MaxTokens: s.summaryMaxTokens,
-	}
-
-	res, err := s.summarizer.Summarize(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-
-	firstTurn := summarizedTurns[0]
-	lastTurn := summarizedTurns[len(summarizedTurns)-1]
-	nextSummary := &Summary{
-		StartTurnID:    firstTurn.ID,
-		EndTurnID:      lastTurn.ID,
-		StartTurnCount: firstTurn.Count,
-		EndTurnCount:   lastTurn.Count,
-		Content:        gaictx.NewTextContent(res),
-		TokenCount:     map[string]int{},
-	}
-	if state.Summary != nil {
-		nextSummary.StartTurnID = state.Summary.StartTurnID
-		nextSummary.StartTurnCount = state.Summary.StartTurnCount
-	}
-	tokenCount, err := s.tokenizer.CountTokens(ctx, nextSummary.Content.String())
-	if err != nil {
-		return nil, err
-	}
-	nextSummary.TokenCount[s.tokenizer.ID()] = tokenCount
-	span.SetAttributes(attribute.Int("context.history.summary_tokens", tokenCount))
-	summaryFields := map[string]any{
-		"session_id":             s.sessionID,
-		"tokenizer_id":           s.tokenizer.ID(),
-		"token_budget":           maxTokens,
-		"summary_tokens":         tokenCount,
-		"summarized_turn_count":  summarizedTurnCount,
-		"remaining_turn_count":   len(state.Turns) - summarizedTurnCount,
-		"summary_start_turn":     nextSummary.StartTurnID,
-		"summary_end_turn":       nextSummary.EndTurnID,
-		"summary_start_count":    nextSummary.StartTurnCount,
-		"summary_end_count":      nextSummary.EndTurnCount,
-		"previous_summary_found": state.Summary != nil,
-	}
-	if s.debug != nil && s.debug.IncludeSensitiveData() {
-		summaryFields["summary_content"] = nextSummary.Content.String()
-	}
-	s.emit(ctx, "history_source_summary_generated", summaryFields, nil)
-
-	nextState := &HistoryState{
-		Summary: nextSummary,
-		Turns:   append([]gaictx.Turn(nil), state.Turns[summarizedTurnCount:]...),
-	}
-	return nextState, nil
-}
-
-func (s *HistorySource) summarizedTurnCount(turnCount int) int {
-	if turnCount == 0 || s.summaryAmount <= 0 {
-		return 0
-	}
-	count := int(float32(turnCount) * s.summaryAmount)
-	if count == 0 {
-		return 1
-	}
-	if count > turnCount {
-		return turnCount
-	}
-	return count
-}
-
-func writeTurn(builder *strings.Builder, turn *gaictx.Turn) {
-	if turn.UserMessage != nil {
-		builder.WriteString("user: ")
-		builder.WriteString(turn.UserMessage.Content.String())
-		builder.WriteString("\n")
-	}
-	for _, message := range turn.Messages {
-		builder.WriteString(string(message.Role))
-		builder.WriteString(": ")
-		builder.WriteString(message.Content.String())
-		builder.WriteString("\n")
-	}
 }
 
 // sortTurnsByCount() Sort turns by Count in ascending order (oldest first)
