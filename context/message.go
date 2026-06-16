@@ -46,8 +46,10 @@ func (t *Turn) Tokenize(ctx context.Context, tokenizer ai.Tokenizer, store TurnT
 		return 0, ErrTokenizerNotFound
 	}
 	tokenizerID := tokenizer.ID()
-	if count, ok := t.TokenCount[tokenizerID]; ok {
+	if count, ok := t.TokenCount[tokenizerID]; ok && count >= 0 {
 		return count, nil
+	} else if ok {
+		delete(t.TokenCount, tokenizerID)
 	}
 
 	messages := t.messages()
@@ -92,7 +94,7 @@ func messagesTokenCount(messages []Message, tokenizerID string) (int, bool) {
 	total := 0
 	for _, message := range messages {
 		count, ok := message.TokenCount[tokenizerID]
-		if !ok {
+		if !ok || count < 0 {
 			return 0, false
 		}
 		total += count
@@ -121,8 +123,14 @@ func IsValidRole(role Role) bool {
 }
 
 func (m Message) Tokens(ctx context.Context, tokenizer ai.Tokenizer) (int, error) {
-	if count, ok := m.TokenCount[tokenizer.ID()]; ok {
+	if tokenizer == nil {
+		return 0, ErrTokenizerNotFound
+	}
+	tokenizerID := tokenizer.ID()
+	if count, ok := m.TokenCount[tokenizerID]; ok && count >= 0 {
 		return count, nil
+	} else if ok {
+		delete(m.TokenCount, tokenizerID)
 	}
 	count, err := tokenizer.CountTokens(ctx, m.Content.String())
 	if err != nil {
@@ -131,6 +139,6 @@ func (m Message) Tokens(ctx context.Context, tokenizer ai.Tokenizer) (int, error
 	if m.TokenCount == nil {
 		m.TokenCount = make(map[string]int)
 	}
-	m.TokenCount[tokenizer.ID()] = count
+	m.TokenCount[tokenizerID] = count
 	return count, nil
 }

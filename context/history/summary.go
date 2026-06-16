@@ -153,13 +153,16 @@ func (s *Summary) TokenCount(tokenizer ai.Tokenizer) (int, error) {
 	if s.tokenCount == nil {
 		s.tokenCount = map[string]int{}
 	}
-	if count, ok := s.tokenCount[tokenizer.ID()]; ok {
+	tokenizerID := tokenizer.ID()
+	if count, ok := s.tokenCount[tokenizerID]; ok && count >= 0 {
 		return count, nil
+	} else if ok {
+		delete(s.tokenCount, tokenizerID)
 	}
 	count, err := tokenizer.CountTokens(context.Background(), s.Content.String())
 	if err != nil {
 		return 0, err
 	}
-	s.tokenCount[tokenizer.ID()] = count
+	s.tokenCount[tokenizerID] = count
 	return count, nil
 }

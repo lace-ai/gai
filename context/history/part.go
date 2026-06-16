@@ -93,8 +93,10 @@ func (p *Part) Tokens(ctx context.Context, tokenizer ai.Tokenizer) (int, error) 
 		return 0, gaictx.ErrTokenizerNotFound
 	}
 	tokenizerID := tokenizer.ID()
-	if count, ok := p.TokenCount[tokenizerID]; ok {
+	if count, ok := p.TokenCount[tokenizerID]; ok && count >= 0 {
 		return count, nil
+	} else if ok {
+		delete(p.TokenCount, tokenizerID)
 	}
 
 	count := 0

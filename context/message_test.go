@@ -152,3 +152,64 @@ func TestTurnTokenizeRequiresTokenizer(t *testing.T) {
 		t.Fatalf("expected ErrTokenizerNotFound, got %v", err)
 	}
 }
+
+func TestMessageTokensRecountsNegativeCachedValue(t *testing.T) {
+	t.Parallel()
+
+	tokenizer := &mocks.MockTokenizer{Count: 4}
+	message := gaictx.Message{
+		Content:    gaictx.NewTextContent("hello world"),
+		TokenCount: map[string]int{"mock.tokenizer": -1},
+	}
+
+	tokens, err := message.Tokens(context.Background(), tokenizer)
+	if err != nil {
+		t.Fatalf("Tokens failed: %v", err)
+	}
+	if tokens != 4 {
+		t.Fatalf("expected tokenizer to recount invalid cached value, got %d", tokens)
+	}
+	if tokenizer.CountCalls != 1 {
+		t.Fatalf("expected one tokenizer call, got %d", tokenizer.CountCalls)
+	}
+	if message.TokenCount["mock.tokenizer"] != 4 {
+		t.Fatalf("expected cache to be updated, got %+v", message.TokenCount)
+	}
+}
+
+func TestTurnTokenizeIgnoresNegativeCachedMessageCounts(t *testing.T) {
+	t.Parallel()
+
+	tokenizer := &mocks.MockTokenizer{}
+	store := &turnTokenStore{}
+	turn := gaictx.Turn{
+		ID: "turn-1",
+		UserMessage: &gaictx.Message{
+			Content:    gaictx.NewTextContent("hello"),
+			TokenCount: map[string]int{"mock.tokenizer": -1},
+		},
+		Messages: []gaictx.Message{
+			{
+				Content:    gaictx.NewTextContent("assistant response"),
+				TokenCount: map[string]int{"mock.tokenizer": 2},
+			},
+		},
+	}
+
+	tokens, err := turn.Tokenize(context.Background(), tokenizer, store)
+	if err != nil {
+		t.Fatalf("Tokenize failed: %v", err)
+	}
+	if tokens != 3 {
+		t.Fatalf("expected turn tokens to be recounted from messages, got %d", tokens)
+	}
+	if tokenizer.CountCalls != 1 {
+		t.Fatalf("expected tokenizer to be called once, got %d calls", tokenizer.CountCalls)
+	}
+	if turn.TokenCount["mock.tokenizer"] != 3 {
+		t.Fatalf("expected turn token count to be cached, got %+v", turn.TokenCount)
+	}
+	if len(store.updates) != 1 || store.updates[0].tokens != 3 {
+		t.Fatalf("expected turn token update with repaired count, got %+v", store.updates)
+	}
+}
