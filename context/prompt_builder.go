@@ -3,11 +3,9 @@ package context
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
-	"go.opentelemetry.io/otel/attribute"
 )
 
 const (
@@ -119,105 +117,68 @@ func (b *Builder) AppendSystemInstructions(ctx context.Context, instructions ...
 }
 
 func (b *Builder) BuildContext(ctx context.Context) (contextParts []Part, err error) {
-	ctx, span := gai.StartOperationSpan(ctx, contextTracerName, "context.prompt_builder", "context.operation", "build_context",
-		attribute.Int("context.source_count", len(b.ContextSources)),
-		attribute.Int("context.system_instruction_count", len(b.SystemInstructions)),
-		attribute.Int("context.token_budget", b.TokenBudget),
-		attribute.Int("context.output_token_reserve", b.OutputTokenReserve),
-		attribute.Bool("context.tokenizer_present", b.tokenizer != nil),
-	)
-	systemTokens := 0
-	remainingTokens := 0
-	includedSourceCount := 0
+	ctx, obs := newPromptBuilderContextObserver(ctx, b)
+	stats := promptContextBuildStats{
+		SourceCount:            len(b.ContextSources),
+		SystemInstructionCount: len(b.SystemInstructions),
+		TokenBudget:            b.TokenBudget,
+		OutputTokenReserve:     b.OutputTokenReserve,
+		TokenizerPresent:       b.tokenizer != nil,
+	}
 	defer func() {
-		span.SetAttributes(
-			attribute.Int("context.system_tokens", systemTokens),
-			attribute.Int("context.remaining_tokens", remainingTokens),
-			attribute.Int("context.context_parts", len(contextParts)),
-			attribute.Int("context.included_source_count", includedSourceCount),
-		)
-		gai.EndSpan(span, err)
+		stats.ContextPartCount = len(contextParts)
+		obs.FinishContext(err, stats)
 	}()
 
 	if b.TokenBudget > 0 {
-		systemTokens = b.SystemInstructionsTokens(ctx)
-		remainingTokens = b.TokenBudget - b.OutputTokenReserve - systemTokens
+		stats.SystemTokens = b.SystemInstructionsTokens(ctx)
+		stats.RemainingTokens = b.TokenBudget - b.OutputTokenReserve - stats.SystemTokens
 	} else {
-		b.emit(ctx, "prompt_builder_token_budget_skipped", map[string]any{
-			"reason": "token_budget_not_set",
-		}, nil)
-		remainingTokens = 1000000 // effectively unlimited
+		obs.TokenBudgetSkipped(ctx)
+		stats.RemainingTokens = 1000000 // effectively unlimited
 	}
-	span.SetAttributes(
-		attribute.Int("context.system_tokens", systemTokens),
-		attribute.Int("context.remaining_tokens", remainingTokens),
-	)
-	b.emit(ctx, "prompt_builder_context_build_started", map[string]any{
-		"source_count":             len(b.ContextSources),
-		"system_instruction_count": len(b.SystemInstructions),
-		"system_tokens":            systemTokens,
-		"token_budget":             b.TokenBudget,
-		"output_token_reserve":     b.OutputTokenReserve,
-		"remaining_tokens":         remainingTokens,
-		"tokenizer_present":        b.tokenizer != nil,
-	}, nil)
+	obs.BuildStarted(ctx, stats)
 
 	for _, source := range b.ContextSources {
 		if setter, ok := source.(TokenizerSetter); ok && b.tokenizer != nil {
 			setter.SetTokenizer(b.tokenizer)
 		}
-		part, err := source.Function(ctx, remainingTokens)
+		part, err := source.Function(ctx, stats.RemainingTokens)
 		if err != nil {
-			span.SetAttributes(attribute.String("context.failed_source", source.Name()))
-			b.emit(ctx, "prompt_builder_source_failed", map[string]any{
-				"source":           source.Name(),
-				"remaining_tokens": remainingTokens,
-			}, err)
+			obs.SourceFailed(ctx, source.Name(), stats.RemainingTokens, err)
 			return nil, err
 		}
 		if part != nil {
 			contextParts = append(contextParts, part)
-			includedSourceCount++
+			stats.IncludedSourceCount++
 			tokens, ok := b.partTokens(ctx, part, map[string]any{
 				"source": source.Name(),
 				"part":   part.Name(),
 			})
 			if ok && b.TokenBudget > 0 {
-				remainingTokens -= tokens
+				stats.RemainingTokens -= tokens
 			}
-			b.emit(ctx, "prompt_builder_source_included", map[string]any{
-				"source":           source.Name(),
-				"part":             part.Name(),
-				"tokens":           tokens,
-				"tokens_counted":   ok,
-				"remaining_tokens": remainingTokens,
-			}, nil)
+			obs.SourceIncluded(ctx, source.Name(), part.Name(), promptPartTokenStats{
+				Tokens:        tokens,
+				TokensCounted: ok,
+			}, stats.RemainingTokens)
 		}
 	}
 	b.ContextParts = contextParts
-	b.emit(ctx, "prompt_builder_context_build_finished", map[string]any{
-		"source_count":     len(b.ContextSources),
-		"context_parts":    len(contextParts),
-		"remaining_tokens": remainingTokens,
-	}, nil)
+	obs.BuildFinished(ctx, stats)
 	return contextParts, nil
 }
 
 func (b *Builder) BuildPrompt(ctx context.Context, conv Conversation) (prompt string, err error) {
-	ctx, span := gai.StartOperationSpan(ctx, contextTracerName, "context.prompt_builder", "context.operation", "render_prompt",
-		attribute.Int("context.system_parts", len(b.SystemInstructions)),
-		attribute.Int("context.context_parts", len(b.ContextParts)),
-		attribute.Bool("context.has_user_prompt", b.userPrompt != ""),
-	)
-	conversationMessages := 0
-	partCount := 0
+	ctx, obs := newPromptBuilderRenderObserver(ctx, b)
+	stats := promptRenderStats{
+		SystemPartCount:  len(b.SystemInstructions),
+		ContextPartCount: len(b.ContextParts),
+		HasUserPrompt:    b.userPrompt != "",
+	}
 	defer func() {
-		span.SetAttributes(
-			attribute.Int("context.conversation_messages", conversationMessages),
-			attribute.Int("context.part_count", partCount),
-			attribute.Int("context.prompt_chars", len(prompt)),
-		)
-		gai.EndSpan(span, err)
+		stats.PromptChars = len(prompt)
+		obs.FinishRender(err, stats)
 	}()
 
 	var parts []Part
@@ -228,38 +189,23 @@ func (b *Builder) BuildPrompt(ctx context.Context, conv Conversation) (prompt st
 	}
 	if conv != nil {
 		messages := conv.Messages()
-		conversationMessages = len(messages)
+		stats.ConversationMessageCount = len(messages)
 		for _, message := range messages {
 			if message.Role != RoleUser {
 				parts = append(parts, NewMessagePart(message.Role, message.Content))
 			}
 		}
 	}
-	partCount = len(parts)
-	renderCtx, renderSpan := gai.StartOperationSpan(ctx, contextTracerName, "context.prompt_builder", "context.operation", "renderer_render",
-		attribute.Int("context.part_count", partCount),
-	)
+	stats.PartCount = len(parts)
+	renderCtx, finishRendererRender := obs.StartRendererRender(ctx, stats.PartCount)
 	prompt, err = b.Renderer.Render(renderCtx, parts)
-	renderSpan.SetAttributes(attribute.Int("context.prompt_chars", len(prompt)))
-	gai.EndSpan(renderSpan, err)
-	fields := map[string]any{
-		"part_count":            len(parts),
-		"system_parts":          len(b.SystemInstructions),
-		"context_parts":         len(b.ContextParts),
-		"has_user_prompt":       b.userPrompt != "",
-		"conversation_messages": conversationMessages,
-	}
+	stats.PromptChars = len(prompt)
+	finishRendererRender(err, stats.PromptChars)
 	if err != nil {
-		b.emit(ctx, "prompt_builder_render_failed", fields, err)
+		obs.RenderFailed(ctx, stats, err)
 		return "", err
 	}
-	fields["prompt_chars"] = len(prompt)
-	if b.debugSink != nil && b.debugSink.IncludeSensitiveData() {
-		for key, value := range b.promptDebugFields(ctx, parts, prompt) {
-			fields[key] = value
-		}
-	}
-	b.emit(ctx, "prompt_builder_render_finished", fields, nil)
+	obs.RenderFinished(ctx, stats, promptDebugFields(ctx, parts, prompt))
 	return prompt, nil
 }
 
@@ -299,11 +245,11 @@ func (b *Builder) SystemInstructionsTokens(ctx context.Context) int {
 	count := 0
 	if b.tokenizer == nil {
 		if len(b.SystemInstructions) > 0 {
-			b.emit(ctx, "prompt_builder_token_count_skipped", map[string]any{
+			newPromptBuilderDebugObserver(b).TokenCountSkipped(ctx, map[string]any{
 				"reason": "tokenizer_missing",
 				"scope":  "system_instructions",
 				"parts":  len(b.SystemInstructions),
-			}, nil)
+			})
 		}
 		return count
 	}
@@ -321,30 +267,19 @@ func (b *Builder) SystemInstructionsTokens(ctx context.Context) int {
 }
 
 func (b *Builder) partTokens(ctx context.Context, part Part, fields map[string]any) (int, bool) {
+	obs := newPromptBuilderDebugObserver(b)
 	if b.tokenizer == nil {
-		b.emit(ctx, "prompt_builder_token_count_skipped", mergeDebugFields(fields, map[string]any{
+		obs.TokenCountSkipped(ctx, mergeDebugFields(fields, map[string]any{
 			"reason": "tokenizer_missing",
-		}), nil)
+		}))
 		return 0, false
 	}
 	tokens, err := part.Tokens(ctx, b.tokenizer)
 	if err != nil {
-		b.emit(ctx, "prompt_builder_token_count_failed", fields, err)
+		obs.TokenCountFailed(ctx, fields, err)
 		return 0, false
 	}
 	return tokens, true
-}
-
-func (b *Builder) emit(ctx context.Context, name string, fields map[string]any, err error) {
-	if b == nil || b.debugSink == nil {
-		return
-	}
-	b.debugSink.Emit(ctx, gai.DebugEvent{
-		Name:   name,
-		Source: "context:Builder",
-		Fields: fields,
-		Err:    err,
-	})
 }
 
 func mergeDebugFields(base map[string]any, extra map[string]any) map[string]any {
@@ -356,106 +291,4 @@ func mergeDebugFields(base map[string]any, extra map[string]any) map[string]any 
 		merged[key] = value
 	}
 	return merged
-}
-
-func (b *Builder) promptDebugFields(ctx context.Context, parts []Part, prompt string) map[string]any {
-	fields := map[string]any{
-		"prompt_render_mode": "full",
-	}
-	if len(prompt) <= promptDebugFullLimit {
-		fields["prompt"] = prompt
-		return fields
-	}
-
-	fields["prompt_render_mode"] = "structured"
-	fields["prompt_head"] = clippedPrompt(prompt, 1000, false)
-	fields["prompt_tail"] = clippedPrompt(prompt, 1000, true)
-	fields["prompt_structure"] = b.promptStructure(ctx, parts)
-	return fields
-}
-
-func (b *Builder) promptStructure(ctx context.Context, parts []Part) []map[string]any {
-	structure := make([]map[string]any, 0, len(parts))
-	for i, part := range parts {
-		entry := map[string]any{
-			"index": i,
-		}
-		if part == nil {
-			entry["name"] = "<nil>"
-			structure = append(structure, entry)
-			continue
-		}
-		entry["name"] = part.Name()
-		node, err := part.Render(ctx)
-		if err != nil {
-			entry["render_error"] = err.Error()
-			structure = append(structure, entry)
-			continue
-		}
-		entry["node"] = renderNodeStructure(node)
-		content := renderNodeText(node)
-		entry["chars"] = len(content)
-		entry["preview"] = clippedPrompt(content, promptDebugPreviewLimit, false)
-		if len(content) > promptDebugPreviewLimit {
-			entry["preview_tail"] = clippedPrompt(content, promptDebugPreviewLimit, true)
-		}
-		structure = append(structure, entry)
-	}
-	return structure
-}
-
-func renderNodeStructure(node RenderNode) map[string]any {
-	entry := map[string]any{
-		"type": node.Type,
-	}
-	if len(node.Fields) > 0 {
-		fields := make([]map[string]string, 0, len(node.Fields))
-		for _, field := range node.Fields {
-			fields = append(fields, map[string]string{
-				"key":   field.Key,
-				"value": field.Value,
-			})
-		}
-		entry["fields"] = fields
-	}
-	if node.Value != "" {
-		entry["value_chars"] = len(node.Value)
-		entry["value_preview"] = clippedPrompt(node.Value, promptDebugPreviewLimit, false)
-	}
-	if len(node.Children) > 0 {
-		children := make([]map[string]any, 0, len(node.Children))
-		for _, child := range node.Children {
-			children = append(children, renderNodeStructure(child))
-		}
-		entry["children"] = children
-	}
-	return entry
-}
-
-func renderNodeText(node RenderNode) string {
-	var builder strings.Builder
-	appendRenderNodeText(&builder, node)
-	return builder.String()
-}
-
-func appendRenderNodeText(builder *strings.Builder, node RenderNode) {
-	if node.Value != "" {
-		if builder.Len() > 0 {
-			builder.WriteString("\n")
-		}
-		builder.WriteString(node.Value)
-	}
-	for _, child := range node.Children {
-		appendRenderNodeText(builder, child)
-	}
-}
-
-func clippedPrompt(text string, limit int, tail bool) string {
-	if limit <= 0 || len(text) <= limit {
-		return text
-	}
-	if tail {
-		return "..." + text[len(text)-limit:]
-	}
-	return text[:limit] + "..."
 }

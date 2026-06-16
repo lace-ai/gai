@@ -2,8 +2,14 @@ package context
 
 import (
 	"context"
+	"errors"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/lace-ai/gai"
+	"github.com/lace-ai/gai/ai"
 )
 
 type testContextSource struct {
@@ -144,5 +150,140 @@ func TestBuildPromptRendersStructuredConversationContent(t *testing.T) {
 		if strings.Contains(prompt, fragment) {
 			t.Fatalf("expected prompt not to contain %q:\n%s", fragment, prompt)
 		}
+	}
+}
+
+type debugEventSink struct {
+	sensitive bool
+	events    []gai.DebugEvent
+}
+
+func (s *debugEventSink) Emit(ctx context.Context, e gai.DebugEvent) {
+	s.events = append(s.events, e)
+}
+
+func (s *debugEventSink) IncludeSensitiveData() bool {
+	return s.sensitive
+}
+
+type failingPart struct{}
+
+func (failingPart) Name() string {
+	return "failing"
+}
+
+func (failingPart) Tokens(ctx context.Context, tokenizer ai.Tokenizer) (int, error) {
+	return 0, errors.New("token count failed")
+}
+
+func (failingPart) Render(ctx context.Context) (RenderNode, error) {
+	return RenderNode{}, errors.New("render failed")
+}
+
+func TestPromptBuilderEmitsExistingEventsWithoutSensitiveFieldsByDefault(t *testing.T) {
+	t.Parallel()
+
+	sink := &debugEventSink{}
+	source := &testContextSource{name: "docs", text: "context"}
+	builder := New(Definition{
+		SystemInstructions: []Part{NewTextPart("system prompt")},
+		ContextSources:     []ContextSource{source},
+		UserPrompt:         "find docs",
+		TokenBudget:        10,
+		DebugSink:          sink,
+	})
+	builder.SetTokenizer(debugTestTokenizer{})
+
+	if _, err := builder.BuildContext(context.Background()); err != nil {
+		t.Fatalf("BuildContext failed: %v", err)
+	}
+	if _, err := builder.BuildPrompt(context.Background(), emptyConversation{}); err != nil {
+		t.Fatalf("BuildPrompt failed: %v", err)
+	}
+
+	var names []string
+	for _, event := range sink.events {
+		names = append(names, event.Name)
+	}
+	want := []string{
+		"prompt_builder_context_build_started",
+		"prompt_builder_source_included",
+		"prompt_builder_context_build_finished",
+		"prompt_builder_render_finished",
+	}
+	if !reflect.DeepEqual(names, want) {
+		t.Fatalf("unexpected event names: got %v want %v", names, want)
+	}
+
+	renderEvent := sink.events[len(sink.events)-1]
+	if _, ok := renderEvent.Fields["prompt"]; ok {
+		t.Fatalf("expected prompt field to be omitted without sensitive debug")
+	}
+	if _, ok := renderEvent.Fields["prompt_structure"]; ok {
+		t.Fatalf("expected prompt_structure field to be omitted without sensitive debug")
+	}
+}
+
+func TestPromptBuilderEmitsSensitiveRenderFieldsWhenEnabled(t *testing.T) {
+	t.Parallel()
+
+	sink := &debugEventSink{sensitive: true}
+	builder := New(Definition{
+		SystemInstructions: []Part{NewTextPart(strings.Repeat("system ", 900))},
+		UserPrompt:         "find docs",
+		DebugSink:          sink,
+	})
+
+	if _, err := builder.BuildPrompt(context.Background(), messageConversation{
+		messages: []Message{{Role: RoleAssistant, Content: NewTextContent("assistant reply")}},
+	}); err != nil {
+		t.Fatalf("BuildPrompt failed: %v", err)
+	}
+
+	renderEvent := sink.events[len(sink.events)-1]
+	if got := renderEvent.Name; got != "prompt_builder_render_finished" {
+		t.Fatalf("expected final render event, got %q", got)
+	}
+	if got := renderEvent.Fields["prompt_render_mode"]; got != "structured" {
+		t.Fatalf("expected structured prompt render mode, got %v", got)
+	}
+	if _, ok := renderEvent.Fields["prompt_head"]; !ok {
+		t.Fatal("expected prompt_head field")
+	}
+	if _, ok := renderEvent.Fields["prompt_tail"]; !ok {
+		t.Fatal("expected prompt_tail field")
+	}
+	if _, ok := renderEvent.Fields["prompt_structure"]; !ok {
+		t.Fatal("expected prompt_structure field")
+	}
+}
+
+func TestPromptBuilderKeepsTokenErrorEvents(t *testing.T) {
+	t.Parallel()
+
+	sink := &debugEventSink{sensitive: true}
+	builder := New(Definition{
+		SystemInstructions: []Part{failingPart{}},
+		DebugSink:          sink,
+	})
+	builder.SetTokenizer(debugTestTokenizer{})
+
+	promptFields := promptDebugFields(context.Background(), []Part{failingPart{}}, strings.Repeat("p", promptDebugFullLimit+1))
+	structure, ok := promptFields["prompt_structure"].([]map[string]any)
+	if !ok || len(structure) != 1 {
+		t.Fatalf("expected prompt structure entry, got %#v", promptFields["prompt_structure"])
+	}
+	if got := structure[0]["render_error"]; got != "render failed" {
+		t.Fatalf("expected render_error field, got %v", got)
+	}
+
+	builder.SystemInstructionsTokens(context.Background())
+
+	names := make([]string, 0, len(sink.events))
+	for _, event := range sink.events {
+		names = append(names, event.Name)
+	}
+	if !slices.Contains(names, "prompt_builder_token_count_failed") {
+		t.Fatalf("expected token count failure event, got %v", names)
 	}
 }
