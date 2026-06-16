@@ -309,9 +309,8 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 				Name:   "mistral_stream_request",
 				Source: "ai:mistral.Model.GenerateStream",
 				Fields: map[string]any{
-					"prompt":          req.Prompt,
-					"combined_prompt": prompt,
-					"max_tokens":      req.MaxTokens,
+					"prompt":     req.Prompt,
+					"max_tokens": req.MaxTokens,
 				},
 			})
 		}
@@ -663,9 +662,8 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 			Name:   "mistral_generate_request",
 			Source: "ai:mistral.Model.Generate",
 			Fields: map[string]any{
-				"prompt":          req.Prompt,
-				"combined_prompt": prompt,
-				"max_tokens":      req.MaxTokens,
+				"prompt":     req.Prompt,
+				"max_tokens": req.MaxTokens,
 			},
 		})
 	}

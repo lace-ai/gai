@@ -61,9 +61,8 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 				Name:   "gemini_stream_request",
 				Source: "ai:gemini.Model.GenerateStream",
 				Fields: map[string]any{
-					"prompt":          req.Prompt,
-					"combined_prompt": prompt,
-					"max_tokens":      req.MaxTokens,
+					"prompt":     req.Prompt,
+					"max_tokens": req.MaxTokens,
 				},
 			})
 		}
@@ -226,9 +225,8 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 			Name:   "gemini_generate_request",
 			Source: "ai:gemini.Model.Generate",
 			Fields: map[string]any{
-				"prompt":          req.Prompt,
-				"combined_prompt": prompt,
-				"max_tokens":      req.MaxTokens,
+				"prompt":     req.Prompt,
+				"max_tokens": req.MaxTokens,
 			},
 		})
 	}
