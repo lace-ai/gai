@@ -73,19 +73,29 @@ func (p *Part) Render(ctx context.Context) (gaictx.RenderNode, error) {
 			return gaictx.RenderNode{}, err
 		}
 		if content.Role == "summary" {
-			node.Children = append(node.Children, gaictx.RenderNode{
-				Type:     "summary",
-				Children: []gaictx.RenderNode{child},
-			})
+			node.Children = append(node.Children, wrapContentNode("summary", child))
 			continue
 		}
-		node.Children = append(node.Children, gaictx.RenderNode{
-			Type:     "message",
-			Fields:   []gaictx.RenderField{{Key: "role", Value: string(content.Role)}},
-			Children: []gaictx.RenderNode{child},
-		})
+		node.Children = append(node.Children, wrapContentNode(roleRenderType(content.Role), child))
 	}
 	return node, nil
+}
+
+func wrapContentNode(nodeType string, child gaictx.RenderNode) gaictx.RenderNode {
+	node := gaictx.RenderNode{Type: nodeType}
+	if child.Type == gaictx.ContentTypeText && len(child.Fields) == 0 && len(child.Children) == 0 {
+		node.Value = child.Value
+		return node
+	}
+	node.Children = []gaictx.RenderNode{child}
+	return node
+}
+
+func roleRenderType(role gaictx.Role) string {
+	if gaictx.IsValidRole(role) {
+		return string(role)
+	}
+	return "message"
 }
 
 func (p *Part) Tokens(ctx context.Context, tokenizer ai.Tokenizer) (int, error) {

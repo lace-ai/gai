@@ -122,14 +122,14 @@ func TestBuildPromptRendersStructuredConversationContent(t *testing.T) {
 	}
 
 	expected := []string{
-		`<message role="user">`,
-		`<text>`,
+		`<user>`,
 		`find docs`,
-		`<message role="assistant">`,
+		`</user>`,
+		`<assistant>`,
 		`<tool_call name="search">`,
 		`<arguments>`,
 		`{&#34;q&#34;:&#34;lace&#34;}`,
-		`<message role="tool">`,
+		`<tool>`,
 		`<tool_result name="search">`,
 		`<result>`,
 		`found &lt;docs&gt;`,
@@ -140,6 +140,8 @@ func TestBuildPromptRendersStructuredConversationContent(t *testing.T) {
 		}
 	}
 	rejected := []string{
+		`<message role=`,
+		`<user><text>`,
 		`assistant: search`,
 		`tool: search result`,
 		`{&amp;#34;`,

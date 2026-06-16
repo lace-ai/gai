@@ -29,14 +29,14 @@ func TestHistoryPartRendersStructuredContent(t *testing.T) {
 
 	expected := []string{
 		`<history>`,
-		`<message role="user">`,
-		`<text>`,
+		`<user>`,
 		`hello`,
-		`<message role="assistant">`,
+		`</user>`,
+		`<assistant>`,
 		`<tool_call name="search">`,
 		`<arguments>`,
 		`&#34;q&#34;`,
-		`<message role="tool">`,
+		`<tool>`,
 		`<tool_result name="search">`,
 		`found docs`,
 	}
@@ -46,6 +46,8 @@ func TestHistoryPartRendersStructuredContent(t *testing.T) {
 		}
 	}
 	rejected := []string{
+		`<message role=`,
+		`<user><text>`,
 		`search({"q":"lace"})`,
 		`search result: found docs`,
 	}
@@ -86,7 +88,6 @@ func TestHistoryPartRendersSummary(t *testing.T) {
 	expected := []string{
 		`<history>`,
 		`<summary>`,
-		`<text>`,
 		`older turns`,
 	}
 	for _, fragment := range expected {
@@ -94,7 +95,7 @@ func TestHistoryPartRendersSummary(t *testing.T) {
 			t.Fatalf("expected summary render to contain %q:\n%s", fragment, got)
 		}
 	}
-	if strings.Contains(got, `<message role="summary">`) {
+	if strings.Contains(got, `<message role="summary">`) || strings.Contains(got, `<summary><text>`) {
 		t.Fatalf("expected summary not to render as a message:\n%s", got)
 	}
 }

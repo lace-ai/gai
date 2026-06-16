@@ -86,8 +86,7 @@ func (m MessagePart) Tokens(ctx context.Context, tokenizer ai.Tokenizer) (int, e
 
 func (m MessagePart) Render(ctx context.Context) (RenderNode, error) {
 	node := RenderNode{
-		Type:   "message",
-		Fields: []RenderField{{Key: "role", Value: string(m.Role)}},
+		Type: roleRenderType(m.Role),
 	}
 	if m.Content == nil {
 		return node, nil
@@ -96,6 +95,17 @@ func (m MessagePart) Render(ctx context.Context) (RenderNode, error) {
 	if err != nil {
 		return RenderNode{}, err
 	}
+	if child.Type == ContentTypeText && len(child.Fields) == 0 && len(child.Children) == 0 {
+		node.Value = child.Value
+		return node, nil
+	}
 	node.Children = []RenderNode{child}
 	return node, nil
+}
+
+func roleRenderType(role Role) string {
+	if IsValidRole(role) {
+		return string(role)
+	}
+	return "message"
 }
