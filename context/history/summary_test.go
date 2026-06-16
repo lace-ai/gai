@@ -30,3 +30,44 @@ func TestSummaryTokenCountRecountsNegativeCachedValue(t *testing.T) {
 		t.Fatalf("expected cache to be updated, got %+v", summary.tokenCount)
 	}
 }
+
+func TestSummarySetTokenCountStoresAndClearsCache(t *testing.T) {
+	t.Parallel()
+
+	summary := &Summary{}
+	summary.SetTokenCount("mock.tokenizer", 7)
+
+	if summary.tokenCount["mock.tokenizer"] != 7 {
+		t.Fatalf("expected cache to store token count, got %+v", summary.tokenCount)
+	}
+
+	summary.SetTokenCount("mock.tokenizer", -1)
+	if _, ok := summary.tokenCount["mock.tokenizer"]; ok {
+		t.Fatalf("expected negative token count to clear cache entry, got %+v", summary.tokenCount)
+	}
+}
+
+func TestSummarySetTokenCountsReplacesCache(t *testing.T) {
+	t.Parallel()
+
+	summary := &Summary{
+		tokenCount: map[string]int{
+			"old.tokenizer": 9,
+		},
+	}
+
+	summary.SetTokenCounts(map[string]int{
+		"mock.tokenizer": 7,
+		"bad.tokenizer":  -1,
+	})
+
+	if _, ok := summary.tokenCount["old.tokenizer"]; ok {
+		t.Fatalf("expected old cache entry to be replaced, got %+v", summary.tokenCount)
+	}
+	if summary.tokenCount["mock.tokenizer"] != 7 {
+		t.Fatalf("expected new cache entry to be stored, got %+v", summary.tokenCount)
+	}
+	if _, ok := summary.tokenCount["bad.tokenizer"]; ok {
+		t.Fatalf("expected negative cache entry to be omitted, got %+v", summary.tokenCount)
+	}
+}

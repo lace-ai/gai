@@ -94,7 +94,6 @@ func (s *HistorySource) summarizeState(ctx context.Context, state *HistoryState,
 		StartTurnCount: firstTurn.Count,
 		EndTurnCount:   lastTurn.Count,
 		Content:        gaictx.NewTextContent(res),
-		tokenCount:     map[string]int{},
 	}
 	if state.Summary != nil {
 		nextSummary.StartTurnID = state.Summary.StartTurnID
@@ -105,7 +104,7 @@ func (s *HistorySource) summarizeState(ctx context.Context, state *HistoryState,
 		obs.SummaryTokenCountFailed(ctx, nextSummary, err)
 		return nil, err
 	}
-	nextSummary.tokenCount[s.tokenizer.ID()] = tokenCount
+	nextSummary.SetTokenCount(s.tokenizer.ID(), tokenCount)
 	obs.SummaryGenerated(ctx, nextSummary, summarizedTurnCount, len(state.Turns)-summarizedTurnCount, state.Summary != nil)
 
 	nextState := &HistoryState{
@@ -163,6 +162,33 @@ func (s *Summary) TokenCount(tokenizer ai.Tokenizer) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	s.tokenCount[tokenizerID] = count
+	s.SetTokenCount(tokenizerID, count)
 	return count, nil
+}
+
+func (s *Summary) SetTokenCount(tokenizerID string, tokens int) {
+	if s == nil {
+		return
+	}
+	if s.tokenCount == nil {
+		s.tokenCount = map[string]int{}
+	}
+	if tokens < 0 {
+		delete(s.tokenCount, tokenizerID)
+		return
+	}
+	s.tokenCount[tokenizerID] = tokens
+}
+
+func (s *Summary) SetTokenCounts(tokenCounts map[string]int) {
+	if s == nil {
+		return
+	}
+	s.tokenCount = make(map[string]int, len(tokenCounts))
+	for tokenizerID, tokens := range tokenCounts {
+		if tokens < 0 {
+			continue
+		}
+		s.tokenCount[tokenizerID] = tokens
+	}
 }
