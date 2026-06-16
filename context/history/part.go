@@ -3,7 +3,6 @@ package history
 import (
 	"context"
 	"encoding/json"
-	"strings"
 
 	"github.com/lace-ai/gai/ai"
 	gaictx "github.com/lace-ai/gai/context"
@@ -11,15 +10,22 @@ import (
 
 // Content is a minimal persisted history message representation.
 type Content struct {
-	Text string
-	Role gaictx.Role
+	Text  string
+	Role  gaictx.Role
+	Value gaictx.Content `json:"-"`
 }
 
 func (c Content) String() string {
+	if c.Value != nil {
+		return c.Value.String()
+	}
 	return c.Text
 }
 
 func (c Content) Type() string {
+	if c.Value != nil {
+		return c.Value.Type()
+	}
 	return gaictx.ContentTypeText
 }
 
@@ -27,14 +33,21 @@ func (c Content) Marshal() ([]byte, error) {
 	return json.Marshal(c)
 }
 
+func (c Content) Render(ctx context.Context) (gaictx.RenderNode, error) {
+	if c.Value != nil {
+		return c.Value.Render(ctx)
+	}
+	return gaictx.RenderNode{Type: gaictx.ContentTypeText, Value: c.Text}, nil
+}
+
 func MapMessageToContent(msg gaictx.Message) Content {
-	text, err := msg.Content.Marshal()
-	if err != nil {
-		text = []byte{}
+	if msg.Content == nil {
+		return Content{Role: msg.Role}
 	}
 	return Content{
-		Text: string(text),
-		Role: msg.Role,
+		Text:  msg.Content.String(),
+		Role:  msg.Role,
+		Value: msg.Content,
 	}
 }
 
@@ -48,19 +61,31 @@ func (p *Part) Name() string {
 	return "history"
 }
 
-func (p *Part) Marshal(ctx context.Context) ([]byte, error) {
+func (p *Part) Render(ctx context.Context) (gaictx.RenderNode, error) {
+	node := gaictx.RenderNode{Type: "history"}
 	if p == nil || len(p.Contents) == 0 {
-		return []byte{}, nil
+		return node, nil
 	}
 
-	var builder strings.Builder
-	for i, content := range p.Contents {
-		if i > 0 {
-			builder.WriteString("\n")
+	for _, content := range p.Contents {
+		child, err := content.Render(ctx)
+		if err != nil {
+			return gaictx.RenderNode{}, err
 		}
-		builder.WriteString(content.String())
+		if content.Role == "summary" {
+			node.Children = append(node.Children, gaictx.RenderNode{
+				Type:     "summary",
+				Children: []gaictx.RenderNode{child},
+			})
+			continue
+		}
+		node.Children = append(node.Children, gaictx.RenderNode{
+			Type:     "message",
+			Fields:   []gaictx.RenderField{{Key: "role", Value: string(content.Role)}},
+			Children: []gaictx.RenderNode{child},
+		})
 	}
-	return []byte(builder.String()), nil
+	return node, nil
 }
 
 func (p *Part) Tokens(ctx context.Context, tokenizer ai.Tokenizer) (int, error) {

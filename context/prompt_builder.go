@@ -3,6 +3,7 @@ package context
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
@@ -223,14 +224,14 @@ func (b *Builder) BuildPrompt(ctx context.Context, conv Conversation) (prompt st
 	parts = append(parts, b.SystemInstructions...)
 	parts = append(parts, b.ContextParts...)
 	if b.userPrompt != "" {
-		parts = append(parts, NewMessagePart("user", b.userPrompt))
+		parts = append(parts, NewMessagePart(RoleUser, NewTextContent(b.userPrompt)))
 	}
 	if conv != nil {
 		messages := conv.Messages()
 		conversationMessages = len(messages)
 		for _, message := range messages {
 			if message.Role != RoleUser {
-				parts = append(parts, NewMessagePart(string(message.Role), message.Content.String()))
+				parts = append(parts, NewMessagePart(message.Role, message.Content))
 			}
 		}
 	}
@@ -385,13 +386,14 @@ func (b *Builder) promptStructure(ctx context.Context, parts []Part) []map[strin
 			continue
 		}
 		entry["name"] = part.Name()
-		raw, err := part.Marshal(ctx)
+		node, err := part.Render(ctx)
 		if err != nil {
-			entry["marshal_error"] = err.Error()
+			entry["render_error"] = err.Error()
 			structure = append(structure, entry)
 			continue
 		}
-		content := string(raw)
+		entry["node"] = renderNodeStructure(node)
+		content := renderNodeText(node)
 		entry["chars"] = len(content)
 		entry["preview"] = clippedPrompt(content, promptDebugPreviewLimit, false)
 		if len(content) > promptDebugPreviewLimit {
@@ -400,6 +402,52 @@ func (b *Builder) promptStructure(ctx context.Context, parts []Part) []map[strin
 		structure = append(structure, entry)
 	}
 	return structure
+}
+
+func renderNodeStructure(node RenderNode) map[string]any {
+	entry := map[string]any{
+		"type": node.Type,
+	}
+	if len(node.Fields) > 0 {
+		fields := make([]map[string]string, 0, len(node.Fields))
+		for _, field := range node.Fields {
+			fields = append(fields, map[string]string{
+				"key":   field.Key,
+				"value": field.Value,
+			})
+		}
+		entry["fields"] = fields
+	}
+	if node.Value != "" {
+		entry["value_chars"] = len(node.Value)
+		entry["value_preview"] = clippedPrompt(node.Value, promptDebugPreviewLimit, false)
+	}
+	if len(node.Children) > 0 {
+		children := make([]map[string]any, 0, len(node.Children))
+		for _, child := range node.Children {
+			children = append(children, renderNodeStructure(child))
+		}
+		entry["children"] = children
+	}
+	return entry
+}
+
+func renderNodeText(node RenderNode) string {
+	var builder strings.Builder
+	appendRenderNodeText(&builder, node)
+	return builder.String()
+}
+
+func appendRenderNodeText(builder *strings.Builder, node RenderNode) {
+	if node.Value != "" {
+		if builder.Len() > 0 {
+			builder.WriteString("\n")
+		}
+		builder.WriteString(node.Value)
+	}
+	for _, child := range node.Children {
+		appendRenderNodeText(builder, child)
+	}
 }
 
 func clippedPrompt(text string, limit int, tail bool) string {

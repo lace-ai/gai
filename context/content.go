@@ -1,6 +1,7 @@
 package context
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 )
@@ -10,6 +11,7 @@ type Content interface {
 	String() string
 	Type() string
 	Marshal() ([]byte, error)
+	Render(ctx context.Context) (RenderNode, error)
 }
 
 const (
@@ -36,6 +38,10 @@ func (c TextContent) Marshal() ([]byte, error) {
 	return json.Marshal(c)
 }
 
+func (c TextContent) Render(ctx context.Context) (RenderNode, error) {
+	return RenderNode{Type: ContentTypeText, Value: c.Text}, nil
+}
+
 func NewTextContent(text string) TextContent {
 	return TextContent{Text: text}
 }
@@ -56,6 +62,16 @@ func (c ToolCallContent) Type() string {
 
 func (c ToolCallContent) Marshal() ([]byte, error) {
 	return json.Marshal(c)
+}
+
+func (c ToolCallContent) Render(ctx context.Context) (RenderNode, error) {
+	return RenderNode{
+		Type:   ContentTypeToolCall,
+		Fields: []RenderField{{Key: "name", Value: c.ToolName}},
+		Children: []RenderNode{
+			{Type: "arguments", Value: c.Args},
+		},
+	}, nil
 }
 
 func NewToolCallContent(toolName, args string) ToolCallContent {
@@ -85,6 +101,16 @@ func (c ToolResultContent) Marshal() ([]byte, error) {
 	return json.Marshal(c)
 }
 
+func (c ToolResultContent) Render(ctx context.Context) (RenderNode, error) {
+	return RenderNode{
+		Type:   ContentTypeToolResult,
+		Fields: []RenderField{{Key: "name", Value: c.ToolName}},
+		Children: []RenderNode{
+			{Type: "result", Value: c.Result},
+		},
+	}, nil
+}
+
 func NewToolResultContent(toolName, result string, precomputed bool, precomputedResult string) ToolResultContent {
 	return ToolResultContent{
 		ToolName:          toolName,
@@ -110,6 +136,16 @@ func (c ToolResultErrContent) Type() string {
 
 func (c ToolResultErrContent) Marshal() ([]byte, error) {
 	return json.Marshal(c)
+}
+
+func (c ToolResultErrContent) Render(ctx context.Context) (RenderNode, error) {
+	return RenderNode{
+		Type:   ContentTypeToolResultErr,
+		Fields: []RenderField{{Key: "name", Value: c.ToolName}},
+		Children: []RenderNode{
+			{Type: "error", Value: c.Err},
+		},
+	}, nil
 }
 
 func NewToolResultErrContent(toolName, err string) ToolResultErrContent {

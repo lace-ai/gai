@@ -82,3 +82,67 @@ func TestNewPromptBuilderFromDefinition(t *testing.T) {
 		t.Fatalf("expected system, context, user prompt order: %q", prompt)
 	}
 }
+
+type messageConversation struct {
+	messages []Message
+}
+
+func (c messageConversation) Messages() []Message {
+	return c.messages
+}
+
+func TestBuildPromptRendersStructuredConversationContent(t *testing.T) {
+	t.Parallel()
+
+	builder := New(Definition{
+		SystemInstructions: []Part{NewTextPart("system")},
+		UserPrompt:         "find docs",
+	})
+
+	prompt, err := builder.BuildPrompt(context.Background(), messageConversation{
+		messages: []Message{
+			{
+				Role:    RoleAssistant,
+				Content: NewToolCallContent("search", `{"q":"lace"}`),
+			},
+			{
+				Role:    RoleTool,
+				Content: NewToolResultContent("search", "found <docs>", true, "cached"),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildPrompt failed: %v", err)
+	}
+
+	expected := []string{
+		`<message role="user">`,
+		`<text>`,
+		`find docs`,
+		`<message role="assistant">`,
+		`<tool_call name="search">`,
+		`<arguments>`,
+		`{&#34;q&#34;:&#34;lace&#34;}`,
+		`<message role="tool">`,
+		`<tool_result name="search">`,
+		`<result>`,
+		`found &lt;docs&gt;`,
+	}
+	for _, fragment := range expected {
+		if !strings.Contains(prompt, fragment) {
+			t.Fatalf("expected prompt to contain %q:\n%s", fragment, prompt)
+		}
+	}
+	rejected := []string{
+		`assistant: search`,
+		`tool: search result`,
+		`{&amp;#34;`,
+		`Precomputed`,
+		`cached`,
+	}
+	for _, fragment := range rejected {
+		if strings.Contains(prompt, fragment) {
+			t.Fatalf("expected prompt not to contain %q:\n%s", fragment, prompt)
+		}
+	}
+}

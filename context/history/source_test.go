@@ -2,6 +2,7 @@ package history_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/lace-ai/gai/ai"
@@ -10,38 +11,91 @@ import (
 	"github.com/lace-ai/gai/testutil/mocks"
 )
 
-func TestHistoryPartMarshalJoinsContentStrings(t *testing.T) {
+func TestHistoryPartRendersStructuredContent(t *testing.T) {
 	t.Parallel()
 
 	part := &history.Part{
 		Contents: []history.Content{
-			{Text: "hello"},
-			{Text: "search({\"q\":\"lace\"})"},
-			{Text: "search result: found docs"},
+			{Role: gaictx.RoleUser, Value: gaictx.NewTextContent("hello")},
+			{Role: gaictx.RoleAssistant, Value: gaictx.NewToolCallContent("search", `{"q":"lace"}`)},
+			{Role: gaictx.RoleTool, Value: gaictx.NewToolResultContent("search", "found docs", false, "")},
 		},
 	}
 
-	got, err := part.Marshal(context.Background())
+	got, err := (gaictx.XMLRenderer{}).Render(context.Background(), []gaictx.Part{part})
 	if err != nil {
-		t.Fatalf("Marshal failed: %v", err)
+		t.Fatalf("Render failed: %v", err)
 	}
 
-	want := "hello\nsearch({\"q\":\"lace\"})\nsearch result: found docs"
-	if string(got) != want {
-		t.Fatalf("unexpected history marshal output:\nwant %q\n got %q", want, string(got))
+	expected := []string{
+		`<history>`,
+		`<message role="user">`,
+		`<text>`,
+		`hello`,
+		`<message role="assistant">`,
+		`<tool_call name="search">`,
+		`<arguments>`,
+		`&#34;q&#34;`,
+		`<message role="tool">`,
+		`<tool_result name="search">`,
+		`found docs`,
+	}
+	for _, fragment := range expected {
+		if !strings.Contains(got, fragment) {
+			t.Fatalf("expected history render to contain %q:\n%s", fragment, got)
+		}
+	}
+	rejected := []string{
+		`search({"q":"lace"})`,
+		`search result: found docs`,
+	}
+	for _, fragment := range rejected {
+		if strings.Contains(got, fragment) {
+			t.Fatalf("expected history render not to contain %q:\n%s", fragment, got)
+		}
 	}
 }
 
-func TestHistoryPartMarshalEmpty(t *testing.T) {
+func TestHistoryPartRenderEmpty(t *testing.T) {
 	t.Parallel()
 
 	var part *history.Part
-	got, err := part.Marshal(context.Background())
+	node, err := part.Render(context.Background())
 	if err != nil {
-		t.Fatalf("Marshal failed: %v", err)
+		t.Fatalf("Render failed: %v", err)
 	}
-	if string(got) != "" {
-		t.Fatalf("expected empty history output, got %q", string(got))
+	if node.Type != "history" || len(node.Children) != 0 {
+		t.Fatalf("expected empty history node, got %+v", node)
+	}
+}
+
+func TestHistoryPartRendersSummary(t *testing.T) {
+	t.Parallel()
+
+	part := &history.Part{
+		Contents: []history.Content{
+			{Role: "summary", Value: gaictx.NewTextContent("older turns")},
+		},
+	}
+
+	got, err := (gaictx.XMLRenderer{}).Render(context.Background(), []gaictx.Part{part})
+	if err != nil {
+		t.Fatalf("Render failed: %v", err)
+	}
+
+	expected := []string{
+		`<history>`,
+		`<summary>`,
+		`<text>`,
+		`older turns`,
+	}
+	for _, fragment := range expected {
+		if !strings.Contains(got, fragment) {
+			t.Fatalf("expected summary render to contain %q:\n%s", fragment, got)
+		}
+	}
+	if strings.Contains(got, `<message role="summary">`) {
+		t.Fatalf("expected summary not to render as a message:\n%s", got)
 	}
 }
 

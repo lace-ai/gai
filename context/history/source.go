@@ -208,8 +208,9 @@ func (s *HistorySource) buildPart(
 	if state.Summary != nil {
 		*summaryIncluded = true
 		summaryContent := Content{
-			Text: state.Summary.Content.String(),
-			Role: "summary",
+			Text:  state.Summary.Content.String(),
+			Role:  "summary",
+			Value: state.Summary.Content,
 		}
 		part.Contents = append(part.Contents, summaryContent)
 		summaryTokenCount, err := state.Summary.TokenCount(tokenizer)

@@ -9,7 +9,7 @@ import (
 type Part interface {
 	Name() string
 	Tokens(ctx context.Context, tokenizer ai.Tokenizer) (int, error)
-	Marshal(ctx context.Context) ([]byte, error)
+	Render(ctx context.Context) (RenderNode, error)
 }
 
 type TextPart struct {
@@ -43,17 +43,17 @@ func (t TextPart) Tokens(ctx context.Context, tokenizer ai.Tokenizer) (int, erro
 	return count, nil
 }
 
-func (t TextPart) Marshal(ctx context.Context) ([]byte, error) {
-	return []byte(t.Content), nil
+func (t TextPart) Render(ctx context.Context) (RenderNode, error) {
+	return RenderNode{Type: "text", Value: t.Content}, nil
 }
 
 type MessagePart struct {
-	Role    string
-	Content string
+	Role    Role
+	Content Content
 	tokens  map[string]int
 }
 
-func NewMessagePart(role, content string) MessagePart {
+func NewMessagePart(role Role, content Content) MessagePart {
 	return MessagePart{
 		Role:    role,
 		Content: content,
@@ -72,7 +72,11 @@ func (m MessagePart) Tokens(ctx context.Context, tokenizer ai.Tokenizer) (int, e
 	if count, exists := m.tokens[tokenizer.ID()]; exists {
 		return count, nil
 	}
-	count, err := tokenizer.CountTokens(ctx, m.Content)
+	content := ""
+	if m.Content != nil {
+		content = m.Content.String()
+	}
+	count, err := tokenizer.CountTokens(ctx, content)
 	if err != nil {
 		return 0, err
 	}
@@ -80,6 +84,18 @@ func (m MessagePart) Tokens(ctx context.Context, tokenizer ai.Tokenizer) (int, e
 	return count, nil
 }
 
-func (m MessagePart) Marshal(ctx context.Context) ([]byte, error) {
-	return []byte(m.Role + ": " + m.Content), nil
+func (m MessagePart) Render(ctx context.Context) (RenderNode, error) {
+	node := RenderNode{
+		Type:   "message",
+		Fields: []RenderField{{Key: "role", Value: string(m.Role)}},
+	}
+	if m.Content == nil {
+		return node, nil
+	}
+	child, err := m.Content.Render(ctx)
+	if err != nil {
+		return RenderNode{}, err
+	}
+	node.Children = []RenderNode{child}
+	return node, nil
 }

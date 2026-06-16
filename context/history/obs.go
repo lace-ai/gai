@@ -311,8 +311,8 @@ func (o *historyObserver) BuildFinished(ctx context.Context, part *Part, tokenCo
 		"content_count": o.contentCount,
 	}
 	if o.debug != nil && o.debug.IncludeSensitiveData() && part != nil {
-		if raw, err := part.Marshal(ctx); err == nil {
-			fields["history_content"] = string(raw)
+		if rendered, err := (gaictx.XMLRenderer{}).Render(ctx, []gaictx.Part{part}); err == nil {
+			fields["history_content"] = rendered
 		}
 	}
 	o.emit(ctx, "history_source_build_finished", fields, nil)
