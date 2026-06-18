@@ -144,7 +144,7 @@ func (s *historyStore) UpdateTurnTokens(ctx context.Context, turnID string, toke
 	return nil
 }
 
-func TestHistorySourceSavesBuiltState(t *testing.T) {
+func TestHistorySourceDoesNotDiscardTurnsExcludedFromPrompt(t *testing.T) {
 	t.Parallel()
 
 	store := &historyStore{
@@ -194,8 +194,49 @@ func TestHistorySourceSavesBuiltState(t *testing.T) {
 	if store.saved.Summary == nil || store.saved.Summary.ID != "summary-1" {
 		t.Fatalf("expected summary to be preserved, got %+v", store.saved.Summary)
 	}
-	if len(store.saved.Turns) != 1 || store.saved.Turns[0].ID != "turn-3" {
-		t.Fatalf("expected only the fitting turn to be saved, got %+v", store.saved.Turns)
+	if len(store.saved.Turns) != 2 || store.saved.Turns[0].ID != "turn-3" || store.saved.Turns[1].ID != "turn-4" {
+		t.Fatalf("expected all persisted turns to be preserved, got %+v", store.saved.Turns)
+	}
+}
+
+func TestHistorySourceIncludesNewestFittingTurnsInChronologicalOrder(t *testing.T) {
+	t.Parallel()
+
+	store := &historyStore{
+		state: &history.HistoryState{
+			Turns: []gaictx.Turn{
+				{
+					ID:       "turn-1",
+					Count:    1,
+					Messages: []gaictx.Message{{Role: gaictx.RoleAssistant, Content: gaictx.NewTextContent("oldest"), TokenCount: map[string]int{"mock.tokenizer": 100}}},
+				},
+				{
+					ID:       "turn-2",
+					Count:    2,
+					Messages: []gaictx.Message{{Role: gaictx.RoleAssistant, Content: gaictx.NewTextContent("middle"), TokenCount: map[string]int{"mock.tokenizer": 2}}},
+				},
+				{
+					ID:       "turn-3",
+					Count:    3,
+					Messages: []gaictx.Message{{Role: gaictx.RoleAssistant, Content: gaictx.NewTextContent("newest"), TokenCount: map[string]int{"mock.tokenizer": 2}}},
+				},
+			},
+		},
+	}
+
+	source := history.NewHistory("session-1", store)
+	source.SetTokenizer(&mocks.MockTokenizer{})
+
+	result, err := source.Function(context.Background(), 4)
+	if err != nil {
+		t.Fatalf("Function failed: %v", err)
+	}
+	part := result.(*history.Part)
+	if len(part.Contents) != 2 || part.Contents[0].String() != "middle" || part.Contents[1].String() != "newest" {
+		t.Fatalf("expected newest fitting turns in chronological order, got %+v", part.Contents)
+	}
+	if len(store.saved.Turns) != 3 {
+		t.Fatalf("expected all persisted turns to be preserved, got %+v", store.saved.Turns)
 	}
 }
 
@@ -412,7 +453,7 @@ func TestHistorySourceFunctionTable(t *testing.T) {
 			wantPart:         true,
 			wantSaved:        true,
 			wantSavedSummary: true,
-			wantSavedTurnIDs: []string{"turn-3"},
+			wantSavedTurnIDs: []string{"turn-3", "turn-4"},
 		},
 		{
 			name: "summary enabled but budget fits skips summarizer",

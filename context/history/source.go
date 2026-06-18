@@ -152,7 +152,7 @@ func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (result g
 			messageCount = 0
 			includedTurnCount = 0
 
-			builtState, buildBudgetReached, err := s.buildPart(ctx, state, tokenBudget, s.tokenizer, &part, obs, &tokenCount, &turnCount, &messageCount, &includedTurnCount, &summaryIncluded)
+			buildBudgetReached, err := s.buildPart(ctx, state, tokenBudget, s.tokenizer, &part, obs, &tokenCount, &turnCount, &messageCount, &includedTurnCount, &summaryIncluded)
 			if err != nil {
 				return nil, err
 			}
@@ -175,8 +175,8 @@ func (s *HistorySource) Function(ctx context.Context, tokenBudget int) (result g
 				obs.SummarySkippedDisabled(ctx)
 			}
 
-			if builtState.Summary != nil || len(builtState.Turns) > 0 {
-				if err := s.historyStateStore.SaveHistoryState(ctx, s.sessionID, builtState); err != nil {
+			if state.Summary != nil || len(state.Turns) > 0 {
+				if err := s.historyStateStore.SaveHistoryState(ctx, s.sessionID, state); err != nil {
 					obs.StateSaveFailed(ctx, err)
 					return nil, err
 				}
@@ -203,8 +203,7 @@ func (s *HistorySource) buildPart(
 	messageCount,
 	includedTurnCount *int,
 	summaryIncluded *bool,
-) (*HistoryState, bool, error) {
-	builtState := &HistoryState{}
+) (bool, error) {
 	if state.Summary != nil {
 		*summaryIncluded = true
 		summaryContent := Content{
@@ -216,53 +215,52 @@ func (s *HistorySource) buildPart(
 		summaryTokenCount, err := state.Summary.TokenCount(tokenizer)
 		if err != nil {
 			obs.SummaryTokenCountFailed(ctx, state.Summary, err)
-			return nil, false, err
+			return false, err
 		}
 		if *tokenCount+summaryTokenCount > tokenBudget {
 			obs.BudgetReached(ctx, *tokenCount, nil)
-			builtState.Turns = []gaictx.Turn{}
-			return builtState, true, nil
+			return true, nil
 		}
 		*tokenCount += summaryTokenCount
-		summary := *state.Summary
-		builtState.Summary = &summary
 		obs.SummaryIncluded(ctx, state.Summary)
 	} else {
 		obs.SummaryMissing(ctx)
 	}
 
-	includedTurns := make([]gaictx.Turn, 0, len(state.Turns))
-	for _, turn := range state.Turns {
+	firstIncluded := len(state.Turns)
+	budgetReached := false
+	for i := len(state.Turns) - 1; i >= 0; i-- {
+		turn := &state.Turns[i]
 		*turnCount++
-		var contents []Content
-		if turn.UserMessage != nil {
-			contents = append(contents, MapMessageToContent(*turn.UserMessage))
-			*messageCount++
-		}
-		for _, message := range turn.Messages {
-			contents = append(contents, MapMessageToContent(message))
-			*messageCount++
-		}
 		tokens, err := turn.Tokenize(ctx, s.tokenizer, s.historyStateStore)
 		if err != nil {
-			turnCopy := turn
+			turnCopy := *turn
 			obs.TurnTokenizeFailed(ctx, &turnCopy, err)
-			return nil, false, err
+			return false, err
 		}
 		if *tokenCount+tokens > tokenBudget {
-			turnCopy := turn
+			turnCopy := *turn
 			obs.BudgetReached(ctx, *tokenCount, &turnCopy)
-			builtState.Turns = includedTurns
-			return builtState, true, nil
+			budgetReached = true
+			break
 		}
 		*tokenCount += tokens
-		part.Contents = append(part.Contents, contents...)
-		includedTurns = append(includedTurns, turn)
+		firstIncluded = i
 		*includedTurnCount++
 	}
 
-	builtState.Turns = includedTurns
-	return builtState, false, nil
+	for _, turn := range state.Turns[firstIncluded:] {
+		if turn.UserMessage != nil {
+			part.Contents = append(part.Contents, MapMessageToContent(*turn.UserMessage))
+			*messageCount++
+		}
+		for _, message := range turn.Messages {
+			part.Contents = append(part.Contents, MapMessageToContent(message))
+			*messageCount++
+		}
+	}
+
+	return budgetReached, nil
 }
 
 // sortTurnsByCount() Sort turns by Count in ascending order (oldest first)
