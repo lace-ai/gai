@@ -143,6 +143,28 @@ func TestTurnTokenizeCountsCombinedMessagesWithoutUpdatingMessages(t *testing.T)
 	}
 }
 
+func TestTurnTokenizeHandlesNilMessageContent(t *testing.T) {
+	t.Parallel()
+
+	tokenizer := &mocks.MockTokenizer{}
+	turn := gaictx.Turn{
+		ID:          "turn-1",
+		UserMessage: &gaictx.Message{Role: gaictx.RoleUser},
+		Messages:    []gaictx.Message{{Role: gaictx.RoleAssistant}},
+	}
+
+	tokens, err := turn.Tokenize(context.Background(), tokenizer, nil)
+	if err != nil {
+		t.Fatalf("Tokenize failed: %v", err)
+	}
+	if tokens != 0 {
+		t.Fatalf("expected nil content to contribute no tokens, got %d", tokens)
+	}
+	if tokenizer.CountCalls != 1 {
+		t.Fatalf("expected one tokenizer call, got %d", tokenizer.CountCalls)
+	}
+}
+
 func TestTurnTokenizeRequiresTokenizer(t *testing.T) {
 	t.Parallel()
 
@@ -174,6 +196,21 @@ func TestMessageTokensRecountsNegativeCachedValue(t *testing.T) {
 	}
 	if message.TokenCount["mock.tokenizer"] != 4 {
 		t.Fatalf("expected cache to be updated, got %+v", message.TokenCount)
+	}
+}
+
+func TestMessageTokensHandlesNilContent(t *testing.T) {
+	t.Parallel()
+
+	tokenizer := &mocks.MockTokenizer{}
+	message := gaictx.Message{}
+
+	tokens, err := message.Tokens(context.Background(), tokenizer)
+	if err != nil {
+		t.Fatalf("Tokens failed: %v", err)
+	}
+	if tokens != 0 {
+		t.Fatalf("expected nil content to contribute no tokens, got %d", tokens)
 	}
 }
 

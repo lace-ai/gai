@@ -108,7 +108,9 @@ func combinedMessageContent(messages []Message) string {
 		if i > 0 {
 			builder.WriteString("\n")
 		}
-		builder.WriteString(message.Content.String())
+		if message.Content != nil {
+			builder.WriteString(message.Content.String())
+		}
 	}
 	return builder.String()
 }
@@ -132,7 +134,11 @@ func (m Message) Tokens(ctx context.Context, tokenizer ai.Tokenizer) (int, error
 	} else if ok {
 		delete(m.TokenCount, tokenizerID)
 	}
-	count, err := tokenizer.CountTokens(ctx, m.Content.String())
+	content := ""
+	if m.Content != nil {
+		content = m.Content.String()
+	}
+	count, err := tokenizer.CountTokens(ctx, content)
 	if err != nil {
 		return 0, err
 	}

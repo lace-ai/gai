@@ -131,13 +131,17 @@ func (s *HistorySource) summarizedTurnCount(turnCount int) int {
 func writeTurn(builder *strings.Builder, turn *gaictx.Turn) {
 	if turn.UserMessage != nil {
 		builder.WriteString("user: ")
-		builder.WriteString(turn.UserMessage.Content.String())
+		if turn.UserMessage.Content != nil {
+			builder.WriteString(turn.UserMessage.Content.String())
+		}
 		builder.WriteString("\n")
 	}
 	for _, message := range turn.Messages {
 		builder.WriteString(string(message.Role))
 		builder.WriteString(": ")
-		builder.WriteString(message.Content.String())
+		if message.Content != nil {
+			builder.WriteString(message.Content.String())
+		}
 		builder.WriteString("\n")
 	}
 }

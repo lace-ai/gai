@@ -1,11 +1,28 @@
 package history
 
 import (
+	"strings"
 	"testing"
 
 	gaictx "github.com/lace-ai/gai/context"
 	"github.com/lace-ai/gai/testutil/mocks"
 )
+
+func TestWriteTurnHandlesNilMessageContent(t *testing.T) {
+	t.Parallel()
+
+	turn := gaictx.Turn{
+		UserMessage: &gaictx.Message{Role: gaictx.RoleUser},
+		Messages:    []gaictx.Message{{Role: gaictx.RoleAssistant}},
+	}
+	var builder strings.Builder
+
+	writeTurn(&builder, &turn)
+
+	if got, want := builder.String(), "user: \nassistant: \n"; got != want {
+		t.Fatalf("unexpected serialized turn: want %q got %q", want, got)
+	}
+}
 
 func TestSummaryTokenCountRecountsNegativeCachedValue(t *testing.T) {
 	t.Parallel()
