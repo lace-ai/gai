@@ -148,6 +148,12 @@ func (o *promptBuilderObserver) SourceFailed(ctx context.Context, source string,
 	}, err)
 }
 
+func (o *promptBuilderObserver) SourceSkipped(ctx context.Context, source string) {
+	o.emit(ctx, "prompt_builder_source_skipped", map[string]any{
+		"source": source,
+	}, nil)
+}
+
 func (o *promptBuilderObserver) SourceIncluded(ctx context.Context, source string, part string, stats promptPartTokenStats, remainingTokens int) {
 	o.emit(ctx, "prompt_builder_source_included", map[string]any{
 		"source":           source,

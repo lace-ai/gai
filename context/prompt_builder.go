@@ -140,6 +140,10 @@ func (b *Builder) BuildContext(ctx context.Context) (contextParts []Part, err er
 	obs.BuildStarted(ctx, stats)
 
 	for _, source := range b.ContextSources {
+		if source == nil {
+			obs.SourceSkipped(ctx, "<nil>")
+			continue
+		}
 		if setter, ok := source.(TokenizerSetter); ok && b.tokenizer != nil {
 			setter.SetTokenizer(b.tokenizer)
 		}
@@ -182,7 +186,7 @@ func (b *Builder) BuildPrompt(ctx context.Context, conv Conversation) (prompt st
 	}()
 
 	var parts []Part
-	parts = append(parts, b.SystemInstructions...)
+	parts = append(parts, NewSystemPart(b.SystemInstructions))
 	parts = append(parts, b.ContextParts...)
 	if b.userPrompt != "" {
 		parts = append(parts, NewMessagePart(RoleUser, NewTextContent(b.userPrompt)))

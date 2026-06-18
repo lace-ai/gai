@@ -109,3 +109,41 @@ func roleRenderType(role Role) string {
 	}
 	return "message"
 }
+
+type SystemPart struct {
+	Instructions []Part
+}
+
+func NewSystemPart(instructions []Part) SystemPart {
+	return SystemPart{
+		Instructions: instructions,
+	}
+}
+
+func (i SystemPart) Name() string {
+	return "system"
+}
+
+func (i SystemPart) Tokens(ctx context.Context, tokenizer ai.Tokenizer) (int, error) {
+	count := 0
+	for _, part := range i.Instructions {
+		tokens, err := part.Tokens(ctx, tokenizer)
+		if err != nil {
+			return 0, err
+		}
+		count += tokens
+	}
+	return count, nil
+}
+
+func (i SystemPart) Render(ctx context.Context) (RenderNode, error) {
+	node := RenderNode{Type: "instructions"}
+	for _, part := range i.Instructions {
+		child, err := part.Render(ctx)
+		if err != nil {
+			return RenderNode{}, err
+		}
+		node.Children = append(node.Children, child)
+	}
+	return node, nil
+}
