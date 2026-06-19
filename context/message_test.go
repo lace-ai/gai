@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/lace-ai/gai"
 	gaictx "github.com/lace-ai/gai/context"
 	"github.com/lace-ai/gai/testutil/mocks"
 )
@@ -248,5 +249,44 @@ func TestTurnTokenizeIgnoresNegativeCachedMessageCounts(t *testing.T) {
 	}
 	if len(store.updates) != 1 || store.updates[0].tokens != 3 {
 		t.Fatalf("expected turn token update with repaired count, got %+v", store.updates)
+	}
+}
+
+func TestTurnTokenizeEmitsDebugEventWhenSavingTokensFails(t *testing.T) {
+	t.Parallel()
+
+	saveErr := errors.New("save tokens")
+	store := &turnTokenStore{err: saveErr}
+	turn := gaictx.Turn{
+		ID:    "turn-1",
+		Count: 2,
+		Messages: []gaictx.Message{
+			{Content: gaictx.NewTextContent("three token message")},
+		},
+	}
+	var event gai.DebugEvent
+	turn.SetDebugSink(gai.DebugSinkFunc(func(_ context.Context, emitted gai.DebugEvent) {
+		event = emitted
+	}))
+
+	tokens, err := turn.Tokenize(context.Background(), &mocks.MockTokenizer{}, store)
+	if err != nil {
+		t.Fatalf("Tokenize failed: %v", err)
+	}
+	if tokens != 3 {
+		t.Fatalf("expected calculated token count despite save failure, got %d", tokens)
+	}
+	if event.Name != "turn_token_save_failed" {
+		t.Fatalf("expected token save failure event, got %+v", event)
+	}
+	if event.Source != "context:Turn.Tokenize" {
+		t.Fatalf("unexpected event source: %q", event.Source)
+	}
+	if !errors.Is(event.Err, saveErr) {
+		t.Fatalf("expected save error on event, got %v", event.Err)
+	}
+	if event.Fields["turn_id"] != "turn-1" || event.Fields["turn_count"] != 2 ||
+		event.Fields["tokenizer_id"] != "mock.tokenizer" || event.Fields["token_count"] != 3 {
+		t.Fatalf("unexpected event fields: %+v", event.Fields)
 	}
 }

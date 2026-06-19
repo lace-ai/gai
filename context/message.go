@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
 )
 
@@ -22,6 +23,7 @@ type Turn struct {
 	UserMessage *Message
 	Messages    []Message
 	TokenCount  map[string]int
+	debugSink   gai.DebugSink
 }
 
 type Message struct {
@@ -61,7 +63,27 @@ func (t *Turn) Tokenize(ctx context.Context, tokenizer ai.Tokenizer, store TurnT
 	if err != nil {
 		return 0, err
 	}
-	return t.saveTokens(ctx, store, tokenizerID, count)
+	_, err = t.saveTokens(ctx, store, tokenizerID, count)
+	if err != nil {
+		if t.debugSink != nil {
+			t.debugSink.Emit(ctx, gai.DebugEvent{
+				Name:   "turn_token_save_failed",
+				Source: "context:Turn.Tokenize",
+				Fields: map[string]any{
+					"turn_id":      t.ID,
+					"turn_count":   t.Count,
+					"tokenizer_id": tokenizerID,
+					"token_count":  count,
+				},
+				Err: err,
+			})
+		}
+	}
+	return count, nil
+}
+
+func (t *Turn) SetDebugSink(sink gai.DebugSink) {
+	t.debugSink = sink
 }
 
 func (t *Turn) saveTokens(ctx context.Context, store TurnTokenStore, tokenizerID string, count int) (int, error) {
