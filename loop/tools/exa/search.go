@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
 	"github.com/lace-ai/gai/loop"
 )
@@ -32,7 +33,33 @@ var (
 	ErrInvalidOption    = errors.New("invalid Exa search option")
 	ErrResponseTooLarge = errors.New("Exa response is too large")
 	ErrInvalidResponse  = errors.New("Exa returned invalid JSON")
+	ErrAPIRequest       = errors.New("Exa search API request failed")
 )
+
+// APIError is returned when Exa responds with a non-success HTTP status.
+type APIError struct {
+	StatusCode int
+	RequestID  string
+	Message    string
+}
+
+func (e *APIError) Error() string {
+	if e == nil {
+		return ErrAPIRequest.Error()
+	}
+	detail := fmt.Sprintf("%s: status %d", ErrAPIRequest, e.StatusCode)
+	if e.RequestID != "" {
+		detail += ", request " + e.RequestID
+	}
+	if e.Message != "" {
+		detail += ": " + e.Message
+	}
+	return detail
+}
+
+func (e *APIError) Unwrap() error {
+	return ErrAPIRequest
+}
 
 // SearchTool searches the web with Exa and returns the raw JSON response to the
 // agent. Its default request uses type=auto and query-relevant highlights.
@@ -42,6 +69,7 @@ type SearchTool struct {
 	client     *http.Client
 	searchType string
 	numResults int
+	debug      gai.DebugSink
 }
 
 var _ loop.Tool = (*SearchTool)(nil)
@@ -81,6 +109,15 @@ func WithHTTPClient(client *http.Client) Option {
 			return fmt.Errorf("%w: HTTP client is nil", ErrInvalidOption)
 		}
 		tool.client = client
+		return nil
+	}
+}
+
+// WithDebugSink emits lifecycle and failure events for the search operation.
+// Query text is emitted only when the sink opts into sensitive data.
+func WithDebugSink(debug gai.DebugSink) Option {
+	return func(tool *SearchTool) error {
+		tool.debug = debug
 		return nil
 	}
 }
@@ -154,15 +191,25 @@ type searchContents struct {
 	Highlights bool `json:"highlights"`
 }
 
-func (t *SearchTool) Function(ctx context.Context, call *ai.ToolCall) *loop.ToolResponse {
+func (t *SearchTool) Function(ctx context.Context, call *ai.ToolCall) (response *loop.ToolResponse) {
+	ctx, observer := newSearchObserver(ctx, t.debug, t.searchType, t.numResults)
+	defer func() {
+		if response == nil {
+			observer.Finish(errors.New("Exa search returned no tool response"))
+			return
+		}
+		observer.Finish(response.Err)
+	}()
+
 	var args searchArgs
 	if err := loop.DecodeToolArgs(call, &args); err != nil {
-		return &loop.ToolResponse{Err: err}
+		return observer.Failure(ctx, "decode_arguments", err)
 	}
 	args.Query = strings.TrimSpace(args.Query)
 	if args.Query == "" {
-		return &loop.ToolResponse{Err: fmt.Errorf("%w: query is empty", loop.ErrToolReqValidation)}
+		return observer.Failure(ctx, "validate_query", fmt.Errorf("%w: query is empty", loop.ErrToolReqValidation))
 	}
+	observer.Started(ctx, args.Query)
 
 	payload, err := json.Marshal(searchRequest{
 		Query:      args.Query,
@@ -171,39 +218,71 @@ func (t *SearchTool) Function(ctx context.Context, call *ai.ToolCall) *loop.Tool
 		Contents:   searchContents{Highlights: true},
 	})
 	if err != nil {
-		return &loop.ToolResponse{Err: fmt.Errorf("marshal Exa search request: %w", err)}
+		return observer.Failure(ctx, "marshal_request", fmt.Errorf("marshal Exa search request: %w", err))
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.endpoint, bytes.NewReader(payload))
 	if err != nil {
-		return &loop.ToolResponse{Err: fmt.Errorf("create Exa search request: %w", err)}
+		return observer.Failure(ctx, "create_request", fmt.Errorf("create Exa search request: %w", err))
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", t.apiKey)
 
 	res, err := t.client.Do(req)
 	if err != nil {
-		return &loop.ToolResponse{Err: fmt.Errorf("execute Exa search request: %w", err)}
+		return observer.Failure(ctx, "execute_request", fmt.Errorf("%w: %w", ErrAPIRequest, err))
 	}
 	defer res.Body.Close()
+	observer.ResponseReceived(res.StatusCode)
 
 	body, err := io.ReadAll(io.LimitReader(res.Body, maxResponseBytes+1))
 	if err != nil {
-		return &loop.ToolResponse{Err: fmt.Errorf("read Exa search response: %w", err)}
+		return observer.Failure(ctx, "read_response", fmt.Errorf("read Exa search response: %w", err))
 	}
 	if len(body) > maxResponseBytes {
-		return &loop.ToolResponse{Err: ErrResponseTooLarge}
+		return observer.Failure(ctx, "limit_response", ErrResponseTooLarge)
 	}
 	if res.StatusCode < http.StatusOK || res.StatusCode >= http.StatusMultipleChoices {
-		message := strings.TrimSpace(string(body))
-		if len(message) > maxErrorBodyBytes {
-			message = message[:maxErrorBodyBytes]
-		}
-		return &loop.ToolResponse{Err: fmt.Errorf("Exa search failed with status %d: %s", res.StatusCode, message)}
+		apiErr := decodeAPIError(res.StatusCode, res.Header.Get("x-request-id"), body)
+		observer.RequestID(apiErr.RequestID)
+		return observer.Failure(ctx, "api_response", apiErr)
 	}
 	if !json.Valid(body) {
-		return &loop.ToolResponse{Err: ErrInvalidResponse}
+		return observer.Failure(ctx, "decode_response", ErrInvalidResponse)
 	}
+	var metadata *struct {
+		RequestID string            `json:"requestId"`
+		Results   []json.RawMessage `json:"results"`
+	}
+	if err := json.Unmarshal(body, &metadata); err != nil {
+		return observer.Failure(ctx, "decode_response", fmt.Errorf("%w: %w", ErrInvalidResponse, err))
+	}
+	if metadata == nil {
+		return observer.Failure(ctx, "decode_response", ErrInvalidResponse)
+	}
+	observer.Succeeded(ctx, metadata.RequestID, len(metadata.Results), len(body))
 
 	return &loop.ToolResponse{Text: string(body)}
+}
+
+func decodeAPIError(statusCode int, requestID string, body []byte) *APIError {
+	var payload struct {
+		Error     string `json:"error"`
+		RequestID string `json:"requestId"`
+	}
+	_ = json.Unmarshal(body, &payload)
+	if requestID == "" {
+		requestID = payload.RequestID
+	}
+	message := strings.TrimSpace(payload.Error)
+	if message == "" {
+		message = strings.TrimSpace(string(body))
+	}
+	if message == "" {
+		message = http.StatusText(statusCode)
+	}
+	if len(message) > maxErrorBodyBytes {
+		message = message[:maxErrorBodyBytes]
+	}
+	return &APIError{StatusCode: statusCode, RequestID: requestID, Message: message}
 }

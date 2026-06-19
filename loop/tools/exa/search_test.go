@@ -6,10 +6,17 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
+	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
 	"github.com/lace-ai/gai/loop/tools/exa"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 func TestSearchTool(t *testing.T) {
@@ -42,7 +49,8 @@ func TestSearchTool(t *testing.T) {
 	}))
 	defer server.Close()
 
-	tool, err := exa.NewSearchTool("secret", exa.WithEndpoint(server.URL), exa.WithSearchType("fast"), exa.WithNumResults(3))
+	sink := &captureDebugSink{}
+	tool, err := exa.NewSearchTool("secret", exa.WithEndpoint(server.URL), exa.WithSearchType("fast"), exa.WithNumResults(3), exa.WithDebugSink(sink))
 	if err != nil {
 		t.Fatalf("NewSearchTool: %v", err)
 	}
@@ -59,13 +67,95 @@ func TestSearchTool(t *testing.T) {
 	if !json.Valid([]byte(response.Text)) {
 		t.Fatalf("tool response is not JSON: %s", response.Text)
 	}
+	events := sink.Events()
+	if len(events) != 2 || events[0].Name != "exa_search_started" || events[1].Name != "exa_search_finished" {
+		t.Fatalf("unexpected debug events: %#v", events)
+	}
+	if _, exists := events[0].Fields["query"]; exists {
+		t.Fatal("query leaked through a non-sensitive debug sink")
+	}
+	if got := events[1].Fields["result_count"]; got != 1 {
+		t.Fatalf("result_count = %#v, want 1", got)
+	}
 }
 
 func TestSearchToolReturnsAPIError(t *testing.T) {
 	t.Parallel()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, `{"error":"rate limited"}`, http.StatusTooManyRequests)
+		w.Header().Set("x-request-id", "request-429")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":"rate limited"}`))
+	}))
+	defer server.Close()
+
+	sink := &captureDebugSink{}
+	tool, err := exa.NewSearchTool("secret", exa.WithEndpoint(server.URL), exa.WithDebugSink(sink))
+	if err != nil {
+		t.Fatalf("NewSearchTool: %v", err)
+	}
+	response := tool.Function(context.Background(), &ai.ToolCall{
+		ID: "call-1", Type: "function", Name: tool.Name(), Args: json.RawMessage(`{"query":"news"}`),
+	})
+	if response.Err == nil {
+		t.Fatal("expected API error")
+	}
+	if !errors.Is(response.Err, exa.ErrAPIRequest) {
+		t.Fatalf("error = %v, want ErrAPIRequest", response.Err)
+	}
+	var apiErr *exa.APIError
+	if !errors.As(response.Err, &apiErr) {
+		t.Fatalf("error = %T, want *exa.APIError", response.Err)
+	}
+	if apiErr.StatusCode != http.StatusTooManyRequests || apiErr.RequestID != "request-429" || apiErr.Message != "rate limited" {
+		t.Fatalf("unexpected API error: %#v", apiErr)
+	}
+	events := sink.Events()
+	if len(events) != 2 || events[1].Name != "exa_search_failed" || events[1].Err == nil {
+		t.Fatalf("unexpected failure events: %#v", events)
+	}
+	if got := events[1].Fields["stage"]; got != "api_response" {
+		t.Fatalf("failure stage = %#v, want api_response", got)
+	}
+}
+
+func TestSearchToolSensitiveDebugIncludesQuery(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"requestId":"request-1","results":[]}`))
+	}))
+	defer server.Close()
+
+	sink := &captureDebugSink{sensitive: true}
+	tool, err := exa.NewSearchTool("secret", exa.WithEndpoint(server.URL), exa.WithDebugSink(sink))
+	if err != nil {
+		t.Fatalf("NewSearchTool: %v", err)
+	}
+	response := tool.Function(context.Background(), &ai.ToolCall{
+		ID: "call-1", Type: "function", Name: tool.Name(), Args: json.RawMessage(`{"query":"private query"}`),
+	})
+	if response.Err != nil {
+		t.Fatalf("Function: %v", response.Err)
+	}
+	if got := sink.Events()[0].Fields["query"]; got != "private query" {
+		t.Fatalf("query = %#v, want private query", got)
+	}
+}
+
+func TestSearchToolTracing(t *testing.T) {
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	previousProvider := otel.GetTracerProvider()
+	otel.SetTracerProvider(provider)
+	t.Cleanup(func() {
+		otel.SetTracerProvider(previousProvider)
+		_ = provider.Shutdown(context.Background())
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":"rate limited","requestId":"request-trace"}`))
 	}))
 	defer server.Close()
 
@@ -78,6 +168,27 @@ func TestSearchToolReturnsAPIError(t *testing.T) {
 	})
 	if response.Err == nil {
 		t.Fatal("expected API error")
+	}
+
+	var searchSpan sdktrace.ReadOnlySpan
+	for _, span := range recorder.Ended() {
+		if span.Name() == "tool.exa.search" {
+			searchSpan = span
+			break
+		}
+	}
+	if searchSpan == nil {
+		t.Fatal("tool.exa.search span was not recorded")
+	}
+	if searchSpan.Status().Code != codes.Error {
+		t.Fatalf("span status = %v, want error", searchSpan.Status().Code)
+	}
+	attrs := attributeMap(searchSpan.Attributes())
+	if attrs["tool.name"].AsString() != "web_search" || attrs["http.response.status_code"].AsInt64() != http.StatusTooManyRequests {
+		t.Fatalf("unexpected span attributes: %#v", attrs)
+	}
+	if attrs["exa.request_id"].AsString() != "request-trace" {
+		t.Fatalf("request ID attribute = %q, want request-trace", attrs["exa.request_id"].AsString())
 	}
 }
 
@@ -104,4 +215,34 @@ func TestNewSearchToolValidatesConfiguration(t *testing.T) {
 			}
 		})
 	}
+}
+
+type captureDebugSink struct {
+	mu        sync.Mutex
+	sensitive bool
+	events    []gai.DebugEvent
+}
+
+func (s *captureDebugSink) Emit(_ context.Context, event gai.DebugEvent) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, event)
+}
+
+func (s *captureDebugSink) IncludeSensitiveData() bool {
+	return s.sensitive
+}
+
+func (s *captureDebugSink) Events() []gai.DebugEvent {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]gai.DebugEvent(nil), s.events...)
+}
+
+func attributeMap(attrs []attribute.KeyValue) map[string]attribute.Value {
+	result := make(map[string]attribute.Value, len(attrs))
+	for _, attr := range attrs {
+		result[string(attr.Key)] = attr.Value
+	}
+	return result
 }
