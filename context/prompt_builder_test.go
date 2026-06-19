@@ -211,6 +211,11 @@ func TestPromptBuilderEmitsExistingEventsWithoutSensitiveFieldsByDefault(t *test
 		"prompt_builder_context_build_started",
 		"prompt_builder_source_included",
 		"prompt_builder_context_build_finished",
+		"renderer_render_started",
+		"renderer_part_rendered",
+		"renderer_part_rendered",
+		"renderer_part_rendered",
+		"renderer_render_finished",
 		"prompt_builder_render_finished",
 	}
 	if !reflect.DeepEqual(names, want) {
