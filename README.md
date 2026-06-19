@@ -227,6 +227,32 @@ gaictx.RenderMessages(messages, &builder)
 fmt.Println(builder.String()) // render the messages for display
 ```
 
+GAI also includes a prebuilt Exa web search tool. It uses `type=auto`, requests
+10 results with highlights, and reads `EXA_API_KEY` from the environment:
+
+```go
+webSearch, err := exa.NewSearchToolFromEnv()
+if err != nil {
+    // handle missing or invalid configuration
+}
+
+l := loop.New(model, []loop.Tool{webSearch}, prompt, nil)
+```
+
+The same tool can be included in a reusable agent definition:
+
+```go
+definition := agent.Definition{
+    Model: model,
+    Tools: []loop.Tool{webSearch},
+    PromptBuilderFactory: promptBuilderFactory,
+}
+```
+
+Import it with `github.com/lace-ai/gai/tools/exa`. Applications can override
+the defaults with `exa.WithSearchType(...)`, `exa.WithNumResults(...)`, and
+`exa.WithHTTPClient(...)`.
+
 <details>
 
 <summary>🧩 Implement Your Own Tool</summary>
@@ -254,7 +280,7 @@ func (t *MyTool) Params() string {
     return `{"type":"object","required":["query"],"properties":{"query":{"type":"string","description":"Search query"}}}`
 }
 
-func (t *MyTool) Function(req *ai.ToolCall) *loop.ToolResponse {
+func (t *MyTool) Function(ctx context.Context, req *ai.ToolCall) *loop.ToolResponse {
     var args myToolArgs
     if err := loop.DecodeToolArgs(req, &args); err != nil {
         return &loop.ToolResponse{Err: err}
