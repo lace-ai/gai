@@ -87,7 +87,7 @@ func Definition(model ai.Model, opts ...Option) agent.Definition {
 		Tools: config.Tools,
 		Prompt: func(ctx context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
 			return gaictx.New(gaictx.Definition{
-				Renderer:           gaictx.XMLRenderer{},
+				Renderer:           &gaictx.XMLRenderer{},
 				SystemInstructions: []gaictx.Part{gaictx.NewTextPart(systemPrompt)},
 				UserPrompt:         input.Text,
 				TokenBudget:        -1,
