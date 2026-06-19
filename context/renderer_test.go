@@ -99,6 +99,66 @@ func TestXMLRendererReturnsPartRenderError(t *testing.T) {
 	}
 }
 
+func TestSimpleRendererRendersInstructionsHistoryAndConversation(t *testing.T) {
+	t.Parallel()
+
+	rendered, err := (gaictx.SimpleRenderer{}).Render(context.Background(), []gaictx.Part{
+		gaictx.NewSystemPart([]gaictx.Part{
+			renderTestPart{
+				name: "system",
+				node: gaictx.RenderNode{Type: "text", Value: "be precise <raw> & direct"},
+			},
+			renderTestPart{
+				name: "tool",
+				node: gaictx.RenderNode{Type: "text", Value: "always call search(\"x\") if needed"},
+			},
+		}),
+		&historyPartAdapter{
+			contents: []gaictx.Message{
+				{Role: gaictx.RoleUser, Content: gaictx.NewTextContent("hi <there> & \"quoted\"")},
+				{Role: gaictx.RoleAssistant, Content: gaictx.NewToolCallContent("search", `{"q":"lace<&>"}`)},
+				{Role: gaictx.RoleTool, Content: gaictx.NewToolResultContent("search", `found <docs> & "notes"`, false, "")},
+				{Role: gaictx.RoleAssistant, Content: gaictx.NewTextContent("done")},
+			},
+		},
+		gaictx.NewMessagePart(gaictx.RoleUser, gaictx.NewTextContent("find docs")),
+		gaictx.NewMessagePart(gaictx.RoleAssistant, gaictx.NewToolCallContent("search", `{"q":"lace"}`)),
+		gaictx.NewMessagePart(gaictx.RoleTool, gaictx.NewToolResultContent("search", "found <docs>", false, "")),
+	})
+	if err != nil {
+		t.Fatalf("Render failed: %v", err)
+	}
+
+	want := `<Instructions>
+
+System:
+be precise <raw> & direct
+
+Tool:
+always call search("x") if needed
+
+</Instructions>
+
+<history>
+user: hi <there> & "quoted"
+assistant: {"q":"lace<&>"}
+tool res: found <docs> & "notes"
+assistant: done
+</history>
+
+user: find docs
+
+assistant: {"q":"lace"}
+
+tool res: found <docs>`
+	if rendered != want {
+		t.Fatalf("unexpected render output:\nwant %q\n got %q", want, rendered)
+	}
+	if strings.Contains(rendered, "&lt;") || strings.Contains(rendered, "&amp;") || strings.Contains(rendered, "&#34;") {
+		t.Fatalf("expected raw characters to be preserved: %q", rendered)
+	}
+}
+
 type failingRenderPart struct {
 	err error
 }
@@ -113,4 +173,29 @@ func (p failingRenderPart) Tokens(ctx context.Context, tokenizer ai.Tokenizer) (
 
 func (p failingRenderPart) Render(ctx context.Context) (gaictx.RenderNode, error) {
 	return gaictx.RenderNode{}, p.err
+}
+
+type historyPartAdapter struct {
+	contents []gaictx.Message
+}
+
+func (p *historyPartAdapter) Name() string {
+	return "history"
+}
+
+func (p *historyPartAdapter) Tokens(ctx context.Context, tokenizer ai.Tokenizer) (int, error) {
+	return 0, nil
+}
+
+func (p *historyPartAdapter) Render(ctx context.Context) (gaictx.RenderNode, error) {
+	node := gaictx.RenderNode{Type: "history"}
+	for _, message := range p.contents {
+		part := gaictx.NewMessagePart(message.Role, message.Content)
+		child, err := part.Render(ctx)
+		if err != nil {
+			return gaictx.RenderNode{}, err
+		}
+		node.Children = append(node.Children, child)
+	}
+	return node, nil
 }

@@ -58,6 +58,37 @@ func TestHistoryPartRendersStructuredContent(t *testing.T) {
 	}
 }
 
+func TestHistoryPartRendersSimpleContent(t *testing.T) {
+	t.Parallel()
+
+	part := &history.Part{
+		Contents: []history.Content{
+			{Role: gaictx.RoleUser, Value: gaictx.NewTextContent(`hello <world> & "quotes"`)},
+			{Role: gaictx.RoleAssistant, Value: gaictx.NewToolCallContent("search", `{"q":"lace<&>"}`)},
+			{Role: gaictx.RoleTool, Value: gaictx.NewToolResultContent("search", `found <docs> & "notes"`, false, "")},
+			{Role: "summary", Value: gaictx.NewTextContent("older turns")},
+		},
+	}
+
+	got, err := (gaictx.SimpleRenderer{}).Render(context.Background(), []gaictx.Part{part})
+	if err != nil {
+		t.Fatalf("Render failed: %v", err)
+	}
+
+	want := `<history>
+user: hello <world> & "quotes"
+assistant: {"q":"lace<&>"}
+tool res: found <docs> & "notes"
+summary: older turns
+</history>`
+	if got != want {
+		t.Fatalf("unexpected simple render output:\nwant %q\n got %q", want, got)
+	}
+	if strings.Contains(got, "&lt;") || strings.Contains(got, "&amp;") || strings.Contains(got, "&#34;") {
+		t.Fatalf("expected raw characters to be preserved: %q", got)
+	}
+}
+
 func TestHistoryPartRenderEmpty(t *testing.T) {
 	t.Parallel()
 
