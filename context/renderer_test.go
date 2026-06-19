@@ -183,13 +183,13 @@ func TestRenderersEmitDetailedTruncatedDebugEvents(t *testing.T) {
 		{
 			name: "xml",
 			renderer: func(sink *rendererDebugSink) gaictx.Renderer {
-				return gaictx.XMLRenderer{DebugSink: sink, DebugPreviewChars: 5}
+				return &gaictx.XMLRenderer{DebugSink: sink, DebugPreviewChars: 5}
 			},
 		},
 		{
 			name: "simple",
 			renderer: func(sink *rendererDebugSink) gaictx.Renderer {
-				return gaictx.SimpleRenderer{DebugSink: sink, DebugPreviewChars: 5}
+				return &gaictx.SimpleRenderer{DebugSink: sink, DebugPreviewChars: 5}
 			},
 		},
 	}
@@ -275,6 +275,79 @@ func TestRendererDebugStructureOmitsContentForNonSensitiveSink(t *testing.T) {
 	finalEvent := sink.events[len(sink.events)-1]
 	if _, ok := finalEvent.Fields["prompt"]; ok {
 		t.Fatal("non-sensitive event contains prompt content")
+	}
+}
+
+func TestRenderersNotifyRenderResultCallback(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		renderer gaictx.Renderer
+	}{
+		{name: "xml", renderer: &gaictx.XMLRenderer{}},
+		{name: "simple", renderer: &gaictx.SimpleRenderer{}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			parts := []gaictx.Part{
+				gaictx.NewMessagePart(gaictx.RoleUser, gaictx.NewTextContent("hello")),
+			}
+			returned := false
+			calls := 0
+			var callbackPrompt string
+
+			err := tt.renderer.SetRenderResultCallback(context.Background(), func(receivedParts []gaictx.Part, prompt string) {
+				if returned {
+					t.Fatal("callback ran after Render returned")
+				}
+				calls++
+				callbackPrompt = prompt
+				if len(receivedParts) != len(parts) || receivedParts[0].Name() != parts[0].Name() {
+					t.Fatalf("unexpected callback parts: %#v", receivedParts)
+				}
+			})
+			if err != nil {
+				t.Fatalf("SetRenderResultCallback failed: %v", err)
+			}
+
+			prompt, err := tt.renderer.Render(context.Background(), parts)
+			returned = true
+			if err != nil {
+				t.Fatalf("Render failed: %v", err)
+			}
+			if calls != 1 {
+				t.Fatalf("unexpected callback count: %d", calls)
+			}
+			if callbackPrompt != prompt {
+				t.Fatalf("callback prompt differs from returned prompt: got %q want %q", callbackPrompt, prompt)
+			}
+		})
+	}
+}
+
+func TestRenderersNotifyRenderResultCallbackForEmptyPrompt(t *testing.T) {
+	t.Parallel()
+
+	renderer := &gaictx.SimpleRenderer{}
+	called := false
+	if err := renderer.SetRenderResultCallback(context.Background(), func(parts []gaictx.Part, prompt string) {
+		called = true
+		if len(parts) != 0 || prompt != "" {
+			t.Fatalf("unexpected empty render result: parts=%d prompt=%q", len(parts), prompt)
+		}
+	}); err != nil {
+		t.Fatalf("SetRenderResultCallback failed: %v", err)
+	}
+
+	if _, err := renderer.Render(context.Background(), nil); err != nil {
+		t.Fatalf("Render failed: %v", err)
+	}
+	if !called {
+		t.Fatal("expected callback for empty successful render")
 	}
 }
 

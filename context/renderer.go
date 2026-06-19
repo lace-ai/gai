@@ -13,7 +13,12 @@ import (
 
 type Renderer interface {
 	Render(ctx context.Context, contextParts []Part) (string, error)
+	SetRenderResultCallback(ctx context.Context, callback RenderResultCallback) error
 }
+
+// RenderResultCallback receives the source parts and completed prompt immediately
+// before a successful Render call returns.
+type RenderResultCallback func(parts []Part, prompt string)
 
 type RenderField struct {
 	Key   string
@@ -33,14 +38,16 @@ type (
 		// when the sink's IncludeSensitiveData method returns true.
 		DebugSink gai.DebugSink
 		// DebugPreviewChars controls how much content is retained at each end of a preview.
-		DebugPreviewChars int
+		DebugPreviewChars    int
+		renderResultCallback RenderResultCallback
 	}
 	SimpleRenderer struct {
 		// DebugSink enables detailed renderer events. Prompt content is included only
 		// when the sink's IncludeSensitiveData method returns true.
 		DebugSink gai.DebugSink
 		// DebugPreviewChars controls how much content is retained at each end of a preview.
-		DebugPreviewChars int
+		DebugPreviewChars    int
+		renderResultCallback RenderResultCallback
 	}
 )
 
@@ -53,6 +60,7 @@ func (r XMLRenderer) Render(ctx context.Context, parts []Part) (string, error) {
 	obs := newRenderObserver("xml", r.DebugSink, r.DebugPreviewChars)
 	obs.started(ctx, len(parts))
 	if len(parts) == 0 {
+		r.notifyRenderResult(parts, "")
 		obs.finished(ctx, nil, "")
 		return "", nil
 	}
@@ -79,6 +87,7 @@ func (r XMLRenderer) Render(ctx context.Context, parts []Part) (string, error) {
 	}
 
 	prompt := builder.String()
+	r.notifyRenderResult(parts, prompt)
 	obs.finished(ctx, nil, prompt)
 	return prompt, nil
 }
@@ -87,6 +96,7 @@ func (r SimpleRenderer) Render(ctx context.Context, parts []Part) (string, error
 	obs := newRenderObserver("simple", r.DebugSink, r.DebugPreviewChars)
 	obs.started(ctx, len(parts))
 	if len(parts) == 0 {
+		r.notifyRenderResult(parts, "")
 		obs.finished(ctx, nil, "")
 		return "", nil
 	}
@@ -107,6 +117,7 @@ func (r SimpleRenderer) Render(ctx context.Context, parts []Part) (string, error
 	}
 
 	prompt := strings.Join(blocks, "\n\n")
+	r.notifyRenderResult(parts, prompt)
 	obs.finished(ctx, nil, prompt)
 	return prompt, nil
 }
@@ -368,4 +379,26 @@ func validXMLName(name string) bool {
 		}
 	}
 	return true
+}
+
+func (r *XMLRenderer) SetRenderResultCallback(_ context.Context, callback RenderResultCallback) error {
+	r.renderResultCallback = callback
+	return nil
+}
+
+func (r XMLRenderer) notifyRenderResult(parts []Part, prompt string) {
+	if r.renderResultCallback != nil {
+		r.renderResultCallback(parts, prompt)
+	}
+}
+
+func (r *SimpleRenderer) SetRenderResultCallback(_ context.Context, callback RenderResultCallback) error {
+	r.renderResultCallback = callback
+	return nil
+}
+
+func (r SimpleRenderer) notifyRenderResult(parts []Part, prompt string) {
+	if r.renderResultCallback != nil {
+		r.renderResultCallback(parts, prompt)
+	}
 }

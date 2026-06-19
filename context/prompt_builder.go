@@ -67,7 +67,7 @@ type Builder struct {
 func New(def Definition) *Builder {
 	renderer := def.Renderer
 	if renderer == nil {
-		renderer = XMLRenderer{
+		renderer = &XMLRenderer{
 			DebugSink:         def.DebugSink,
 			DebugPreviewChars: 100,
 		}
