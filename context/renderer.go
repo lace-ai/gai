@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"strings"
 	"unicode"
+	"unicode/utf8"
+
+	"github.com/lace-ai/gai"
 )
 
 type Renderer interface {
@@ -24,33 +27,274 @@ type RenderNode struct {
 	Children []RenderNode
 }
 
-type XMLRenderer struct{}
+type (
+	XMLRenderer struct {
+		// DebugSink enables detailed renderer events. Prompt content is included only
+		// when the sink's IncludeSensitiveData method returns true.
+		DebugSink gai.DebugSink
+		// DebugPreviewChars controls how much content is retained at each end of a preview.
+		DebugPreviewChars int
+	}
+	SimpleRenderer struct {
+		// DebugSink enables detailed renderer events. Prompt content is included only
+		// when the sink's IncludeSensitiveData method returns true.
+		DebugSink gai.DebugSink
+		// DebugPreviewChars controls how much content is retained at each end of a preview.
+		DebugPreviewChars int
+	}
+)
+
+var (
+	_ Renderer = (*XMLRenderer)(nil)
+	_ Renderer = (*SimpleRenderer)(nil)
+)
 
 func (r XMLRenderer) Render(ctx context.Context, parts []Part) (string, error) {
+	obs := newRenderObserver("xml", r.DebugSink, r.DebugPreviewChars)
+	obs.started(ctx, len(parts))
 	if len(parts) == 0 {
+		obs.finished(ctx, nil, "")
 		return "", nil
 	}
 
 	var builder strings.Builder
-	for _, part := range parts {
-		err := writeXMLPart(ctx, &builder, part)
+	for index, part := range parts {
+		if part == nil {
+			obs.partRendered(ctx, index, nil, nil, "")
+			continue
+		}
+		node, err := part.Render(ctx)
 		if err != nil {
+			obs.partFailed(ctx, index, part, err)
+			obs.finished(ctx, err, builder.String())
 			return "", err
 		}
+		start := builder.Len()
+		if err := writeXMLNode(&builder, node, 0); err != nil {
+			obs.partFailed(ctx, index, part, err)
+			obs.finished(ctx, err, builder.String())
+			return "", err
+		}
+		obs.partRendered(ctx, index, part, &node, builder.String()[start:])
 	}
 
-	return builder.String(), nil
+	prompt := builder.String()
+	obs.finished(ctx, nil, prompt)
+	return prompt, nil
 }
 
-func writeXMLPart(ctx context.Context, builder *strings.Builder, part Part) error {
-	if part == nil {
-		return nil
+func (r SimpleRenderer) Render(ctx context.Context, parts []Part) (string, error) {
+	obs := newRenderObserver("simple", r.DebugSink, r.DebugPreviewChars)
+	obs.started(ctx, len(parts))
+	if len(parts) == 0 {
+		obs.finished(ctx, nil, "")
+		return "", nil
 	}
+
+	blocks := make([]string, 0, len(parts))
+	for index, part := range parts {
+		block, node, err := renderSimplePart(ctx, part)
+		if err != nil {
+			obs.partFailed(ctx, index, part, err)
+			obs.finished(ctx, err, strings.Join(blocks, "\n\n"))
+			return "", err
+		}
+		obs.partRendered(ctx, index, part, node, block)
+		if block == "" {
+			continue
+		}
+		blocks = append(blocks, block)
+	}
+
+	prompt := strings.Join(blocks, "\n\n")
+	obs.finished(ctx, nil, prompt)
+	return prompt, nil
+}
+
+func renderSimplePart(ctx context.Context, part Part) (string, *RenderNode, error) {
+	if part == nil {
+		return "", nil, nil
+	}
+
+	switch p := part.(type) {
+	case SystemPart:
+		return renderSimpleInstructions(ctx, p)
+	case MessagePart:
+		node, err := p.Render(ctx)
+		if err != nil {
+			return "", nil, err
+		}
+		return renderSimpleMessageNode(node), &node, nil
+	}
+
 	node, err := part.Render(ctx)
 	if err != nil {
-		return err
+		return "", nil, err
 	}
-	return writeXMLNode(builder, node, 0)
+	return renderSimpleNode(node), &node, nil
+}
+
+func renderSimpleInstructions(ctx context.Context, part SystemPart) (string, *RenderNode, error) {
+	var builder strings.Builder
+	builder.WriteString("<Instructions>")
+	node := RenderNode{Type: "instructions"}
+
+	wroteInstruction := false
+	for _, instruction := range part.Instructions {
+		if instruction == nil {
+			continue
+		}
+
+		body, child, err := renderSimpleInstruction(ctx, instruction)
+		if err != nil {
+			return "", nil, err
+		}
+		node.Children = append(node.Children, child)
+		if body == "" {
+			continue
+		}
+
+		builder.WriteString("\n\n")
+		builder.WriteString(formatSimpleInstructionLabel(instruction.Name()))
+		builder.WriteString(":\n")
+		builder.WriteString(body)
+		wroteInstruction = true
+	}
+
+	if wroteInstruction {
+		builder.WriteString("\n\n")
+	} else {
+		builder.WriteString("\n")
+	}
+	builder.WriteString("</Instructions>")
+	return builder.String(), &node, nil
+}
+
+func renderSimpleInstruction(ctx context.Context, part Part) (string, RenderNode, error) {
+	switch p := part.(type) {
+	case TextPart:
+		node, err := p.Render(ctx)
+		return p.Content, node, err
+	case MessagePart:
+		node, err := p.Render(ctx)
+		if err != nil {
+			return "", RenderNode{}, err
+		}
+		return renderSimpleMessageNode(node), node, nil
+	}
+
+	node, err := part.Render(ctx)
+	if err != nil {
+		return "", RenderNode{}, err
+	}
+	return renderSimpleNodeBody(node), node, nil
+}
+
+func renderSimpleNode(node RenderNode) string {
+	switch node.Type {
+	case "history":
+		return renderSimpleHistory(node)
+	case string(RoleUser), string(RoleAssistant), string(RoleTool), string(RoleSystem), "summary", "message":
+		return renderSimpleMessageNode(node)
+	default:
+		return renderSimpleNodeBody(node)
+	}
+}
+
+func renderSimpleHistory(node RenderNode) string {
+	var builder strings.Builder
+	builder.WriteString("<history>")
+	if len(node.Children) > 0 {
+		builder.WriteString("\n")
+		for i, child := range node.Children {
+			if i > 0 {
+				builder.WriteString("\n")
+			}
+			builder.WriteString(renderSimpleMessageNode(child))
+		}
+		builder.WriteString("\n")
+	}
+	builder.WriteString("</history>")
+	return builder.String()
+}
+
+func renderSimpleMessageNode(node RenderNode) string {
+	return formatSimpleLine(simpleMessageLabel(node.Type), renderSimpleNodeBody(node))
+}
+
+func simpleMessageLabel(nodeType string) string {
+	switch nodeType {
+	case string(RoleTool):
+		return "tool res"
+	default:
+		return nodeType
+	}
+}
+
+func formatSimpleLine(label, body string) string {
+	if body == "" {
+		return label + ":"
+	}
+	if strings.Contains(body, "\n") {
+		return label + ":\n" + body
+	}
+	return label + ": " + body
+}
+
+func renderSimpleNodeBody(node RenderNode) string {
+	switch node.Type {
+	case ContentTypeText:
+		return node.Value
+	case ContentTypeToolCall:
+		return simpleNodeChildValue(node, "arguments")
+	case ContentTypeToolResult:
+		return simpleNodeChildValue(node, "result")
+	case ContentTypeToolResultErr:
+		return simpleNodeChildValue(node, "error")
+	}
+
+	parts := make([]string, 0, len(node.Children)+1)
+	if node.Value != "" {
+		parts = append(parts, node.Value)
+	}
+	for _, child := range node.Children {
+		body := renderSimpleNodeBody(child)
+		if body != "" {
+			parts = append(parts, body)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func simpleNodeChildValue(node RenderNode, childType string) string {
+	for _, child := range node.Children {
+		if child.Type == childType {
+			return child.Value
+		}
+	}
+	return node.Value
+}
+
+func formatSimpleInstructionLabel(name string) string {
+	if name == "" {
+		return "Instruction"
+	}
+
+	parts := strings.FieldsFunc(name, func(r rune) bool {
+		return r == '_' || r == '-' || unicode.IsSpace(r)
+	})
+	if len(parts) == 0 {
+		return "Instruction"
+	}
+
+	for i, part := range parts {
+		r, size := utf8.DecodeRuneInString(part)
+		if r == utf8.RuneError && size == 0 {
+			continue
+		}
+		parts[i] = string(unicode.ToUpper(r)) + strings.ToLower(part[size:])
+	}
+	return strings.Join(parts, " ")
 }
 
 func writeXMLNode(builder *strings.Builder, node RenderNode, depth int) error {
