@@ -46,7 +46,7 @@ func (m *Model) Close() error {
 
 func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.Token {
 	out := make(chan ai.Token, 1)
-	prompt := req.Prompt.CombinedPrompt()
+	prompt := req.Prompt
 
 	go func() {
 		ctx, span := gai.StartOperationSpan(ctx, geminiTracerName, "ai.gemini", "ai.operation", "model.generate_stream",
@@ -61,9 +61,8 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 				Name:   "gemini_stream_request",
 				Source: "ai:gemini.Model.GenerateStream",
 				Fields: map[string]any{
-					"prompt":          req.Prompt,
-					"combined_prompt": prompt,
-					"max_tokens":      req.MaxTokens,
+					"prompt":     req.Prompt,
+					"max_tokens": req.MaxTokens,
 				},
 			})
 		}
@@ -213,7 +212,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 }
 
 func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AIResponse, err error) {
-	prompt := req.Prompt.CombinedPrompt()
+	prompt := req.Prompt
 	ctx, span := gai.StartOperationSpan(ctx, geminiTracerName, "ai.gemini", "ai.operation", "model.generate",
 		attribute.String("ai.provider", "gemini"),
 		attribute.String("ai.model", m.name),
@@ -226,9 +225,8 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 			Name:   "gemini_generate_request",
 			Source: "ai:gemini.Model.Generate",
 			Fields: map[string]any{
-				"prompt":          req.Prompt,
-				"combined_prompt": prompt,
-				"max_tokens":      req.MaxTokens,
+				"prompt":     req.Prompt,
+				"max_tokens": req.MaxTokens,
 			},
 		})
 	}

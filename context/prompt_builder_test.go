@@ -1,630 +1,291 @@
-package context_test
+package context
 
 import (
 	"context"
 	"errors"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/lace-ai/gai"
-	gaictx "github.com/lace-ai/gai/context"
-	"github.com/lace-ai/gai/testutil/mocks"
+	"github.com/lace-ai/gai/ai"
 )
+
+type testContextSource struct {
+	name   string
+	budget int
+	text   string
+}
+
+func (s *testContextSource) Name() string {
+	return s.name
+}
+
+func (s *testContextSource) Function(ctx context.Context, tokenBudget int) (Part, error) {
+	s.budget = tokenBudget
+	return NewTextPart(s.text), nil
+}
 
 type emptyConversation struct{}
 
-func (emptyConversation) Messages() []gaictx.Message {
+func (emptyConversation) Messages() []Message {
 	return nil
 }
 
-func TestPromptBuilderBuildsStructuredPrompt(t *testing.T) {
-	t.Parallel()
+type debugTestTokenizer struct{}
 
-	sourceCalled := false
-	builder := gaictx.NewPromptBuilder().
-		System("base", "base system", gaictx.Required(), gaictx.Tokens(12)).
-		System("dynamic", "dynamic system", gaictx.Tokens(4)).
-		Source(gaictx.SectionContext, "memory", gaictx.SourceFunc(func(ctx context.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
-			sourceCalled = true
-			if _, ok := view.Entry("base"); !ok {
-				t.Fatal("expected source view to expose full configured plan")
-			}
-			return []gaictx.Part{
-				gaictx.NewPart("history", "stored history"),
-				gaictx.NewPart("current-loop", "current messages"),
-			}, nil
-		}), gaictx.Required()).
-		User("request", "answer this", gaictx.Required())
-
-	prompt, err := builder.BuildPrompt(context.Background(), emptyConversation{})
-	if err != nil {
-		t.Fatalf("BuildPrompt failed: %v", err)
-	}
-
-	if !sourceCalled {
-		t.Fatal("expected context source to be called")
-	}
-
-	assertContainsAll(t, prompt.System, "system prompt", "base system", "dynamic system")
-	assertOrdered(t, prompt.System, "base system", "dynamic system")
-	assertContainsNone(t, prompt.System, "system prompt", "stored history", "current messages", "answer this")
-
-	assertContainsAll(t, prompt.Context, "context prompt", "stored history", "current messages")
-	assertOrdered(t, prompt.Context, "stored history", "current messages")
-	assertContainsNone(t, prompt.Context, "context prompt", "base system", "dynamic system", "answer this")
-
-	assertContainsAll(t, prompt.Prompt, "user prompt", "answer this")
-	assertContainsNone(t, prompt.Prompt, "user prompt", "base system", "dynamic system", "stored history", "current messages")
-
-	trace := builder.LastTrace()
-	if len(trace.Entries) != 4 {
-		t.Fatalf("expected four traced entries, got %d", len(trace.Entries))
-	}
-	if got := len(trace.Parts[gaictx.SectionContext]); got != 2 {
-		t.Fatalf("expected two traced context parts, got %d", got)
-	}
+func (debugTestTokenizer) ID() string {
+	return "debug.test"
 }
 
-func TestPromptBuilderEscapesPartIDs(t *testing.T) {
-	t.Parallel()
-
-	prompt, err := gaictx.NewPromptBuilder().
-		User(`request "<tag>"`, "answer this").
-		BuildPrompt(context.Background(), emptyConversation{})
-	if err != nil {
-		t.Fatalf("BuildPrompt failed: %v", err)
-	}
-
-	assertContainsAll(t, prompt.Prompt, "user prompt", `request &#34;&lt;tag&gt;&#34;`, "answer this")
-	assertContainsNone(t, prompt.Prompt, "user prompt", `request "<tag>"`)
+func (debugTestTokenizer) Tokenize(ctx context.Context, text string) ([]string, error) {
+	return strings.Fields(text), nil
 }
 
-func TestPromptBuilderRejectsDuplicateIDs(t *testing.T) {
-	t.Parallel()
-
-	_, err := gaictx.NewPromptBuilder().
-		System("same", "system").
-		User("same", "user").
-		BuildPrompt(context.Background(), emptyConversation{})
-	if err == nil {
-		t.Fatal("expected duplicate ID error")
-	}
-	if !errors.Is(err, gaictx.ErrPromptEntryID) {
-		t.Fatalf("expected ErrPromptEntryID, got %v", err)
-	}
+func (debugTestTokenizer) CountTokens(ctx context.Context, text string) (int, error) {
+	return len(strings.Fields(text)), nil
 }
 
-func TestPromptBuilderRejectsDuplicateEmittedPartIDs(t *testing.T) {
+func TestNewPromptBuilderFromDefinition(t *testing.T) {
 	t.Parallel()
 
-	_, err := gaictx.NewPromptBuilder().
-		System("base", "system").
-		Source(gaictx.SectionContext, "dup-source", gaictx.SourceFunc(func(ctx context.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
-			return []gaictx.Part{gaictx.NewPart("base", "duplicate")}, nil
-		}), gaictx.Required()).
-		BuildPrompt(context.Background(), emptyConversation{})
-	if err == nil {
-		t.Fatal("expected duplicate emitted part ID error")
-	}
-	if !errors.Is(err, gaictx.ErrPromptEntryID) {
-		t.Fatalf("expected ErrPromptEntryID, got %v", err)
-	}
-}
-
-func TestPromptBuilderSourceFailurePolicy(t *testing.T) {
-	t.Parallel()
-
-	sourceErr := errors.New("source unavailable")
-	failingSource := gaictx.SourceFunc(func(ctx context.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
-		return nil, sourceErr
+	source := &testContextSource{name: "source", text: "context"}
+	builder := New(Definition{
+		SystemInstructions: []Part{NewTextPart("system")},
+		ContextSources:     []ContextSource{source},
+		UserPrompt:         "user",
+		TokenBudget:        12,
 	})
 
-	builder := gaictx.NewPromptBuilder().
-		Context("kept", "kept context").
-		Source(gaictx.SectionContext, "optional-rag", failingSource, gaictx.Optional()).
-		User("request", "answer this", gaictx.Required())
+	if builder.Renderer == nil {
+		t.Fatal("expected default renderer")
+	}
+	if got := builder.GetUserPrompt(); got != "user" {
+		t.Fatalf("expected user prompt %q, got %q", "user", got)
+	}
+
+	_, err := builder.BuildContext(context.Background())
+	if err != nil {
+		t.Fatalf("BuildContext failed: %v", err)
+	}
+	if source.budget != 12 {
+		t.Fatalf("expected source token budget 12, got %d", source.budget)
+	}
 
 	prompt, err := builder.BuildPrompt(context.Background(), emptyConversation{})
 	if err != nil {
-		t.Fatalf("optional source should be skipped, got error: %v", err)
-	}
-	if strings.Contains(prompt.Context, "optional-rag") {
-		t.Fatalf("optional failing source should not render: %q", prompt.Context)
-	}
-	if !strings.Contains(prompt.Context, "kept context") {
-		t.Fatalf("expected static context to remain: %q", prompt.Context)
-	}
-	if got := traceEntryStatus(t, builder.LastTrace(), "optional-rag"); got != "skipped" {
-		t.Fatalf("expected optional source to be traced as skipped, got %q", got)
-	}
-
-	_, err = gaictx.NewPromptBuilder().
-		Source(gaictx.SectionContext, "required-rag", failingSource, gaictx.Required()).
-		User("request", "answer this", gaictx.Required()).
-		BuildPrompt(context.Background(), emptyConversation{})
-	if err == nil {
-		t.Fatal("expected required source error")
-	}
-	if !errors.Is(err, gaictx.ErrPromptSource) {
-		t.Fatalf("expected ErrPromptSource, got %v", err)
-	}
-}
-
-func TestPromptBuilderSourceCanInspectWholePlan(t *testing.T) {
-	t.Parallel()
-
-	prompt, err := gaictx.NewPromptBuilder().
-		System("base", "base system", gaictx.Required(), gaictx.Meta("role", "base")).
-		Source(gaictx.SectionContext, "conditional", gaictx.SourceFunc(func(ctx context.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
-			entry, ok := view.Entry("base")
-			if !ok || entry.Meta["role"] != "base" {
-				return nil, nil
-			}
-			if got := len(view.SectionEntries(gaictx.SectionUser)); got != 1 {
-				t.Fatalf("expected source to see later user entry, got %d", got)
-			}
-			return []gaictx.Part{gaictx.NewPart("conditional-context", "visible from source")}, nil
-		})).
-		User("request", "answer this").
-		BuildPrompt(context.Background(), emptyConversation{})
-	if err != nil {
-		t.Fatalf("BuildPrompt failed: %v", err)
-	}
-	if !strings.Contains(prompt.Context, "visible from source") {
-		t.Fatalf("expected conditional source output: %q", prompt.Context)
-	}
-}
-
-func TestPromptBuilderUsesCustomRenderer(t *testing.T) {
-	t.Parallel()
-
-	renderer := sectionNameRenderer{}
-	prompt, err := gaictx.NewPromptBuilder().
-		Renderer(renderer).
-		System("base", "system").
-		Context("ctx", "context").
-		User("request", "user").
-		BuildPrompt(context.Background(), emptyConversation{})
-	if err != nil {
 		t.Fatalf("BuildPrompt failed: %v", err)
 	}
 
-	if prompt.System != "system:base" || prompt.Context != "context:ctx" || prompt.Prompt != "user:request" {
-		t.Fatalf("custom renderer was not used: %+v", prompt)
+	systemIndex := strings.Index(prompt, "system")
+	contextIndex := strings.Index(prompt, "context")
+	userIndex := strings.Index(prompt, "user")
+	if systemIndex < 0 || contextIndex < 0 || userIndex < 0 {
+		t.Fatalf("expected prompt to contain system, context, and user prompt: %q", prompt)
+	}
+	if !(systemIndex < contextIndex && contextIndex < userIndex) {
+		t.Fatalf("expected system, context, user prompt order: %q", prompt)
 	}
 }
 
-func TestPromptBuilderEmitsDebugEvents(t *testing.T) {
+type messageConversation struct {
+	messages []Message
+}
+
+func (c messageConversation) Messages() []Message {
+	return c.messages
+}
+
+func TestBuildPromptRendersStructuredConversationContent(t *testing.T) {
 	t.Parallel()
 
-	var events []gai.DebugEvent
-	debug := gai.DebugSinkFunc(func(ctx context.Context, event gai.DebugEvent) {
-		events = append(events, event)
+	builder := New(Definition{
+		SystemInstructions: []Part{NewTextPart("system")},
+		UserPrompt:         "find docs",
 	})
 
-	_, err := gaictx.NewPromptBuilder().
-		Debug(debug).
-		System("base", "system").
-		User("request", "user").
-		BuildPrompt(context.Background(), emptyConversation{})
-	if err != nil {
-		t.Fatalf("BuildPrompt failed: %v", err)
-	}
-
-	if len(events) == 0 {
-		t.Fatal("expected debug events")
-	}
-	if events[0].Name != "prompt_build_started" {
-		t.Fatalf("expected first debug event to start build, got %q", events[0].Name)
-	}
-	for _, event := range events {
-		if _, ok := event.Fields["emitted_parts"]; ok {
-			t.Fatalf("non-sensitive debug sink should not receive emitted part text: %+v", event)
-		}
-	}
-}
-
-func TestPromptBuilderDropsOptionalSourceOverBudget(t *testing.T) {
-	t.Parallel()
-
-	builder := gaictx.NewPromptBuilder().
-		Budget(gaictx.PromptBudget{
-			Tokenizer:           &mocks.MockTokenizer{},
-			ContextWindowTokens: 6,
-		}).
-		System("system", "system", gaictx.Required()).
-		Source(gaictx.SectionContext, "optional", gaictx.SourceFunc(func(ctx context.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
-			return []gaictx.Part{gaictx.NewPart("optional-part", "optional content that does not fit", gaictx.Tokens(5))}, nil
-		}), gaictx.Optional()).
-		User("request", "question", gaictx.Required())
-
-	prompt, err := builder.BuildPrompt(context.Background(), emptyConversation{})
-	if err != nil {
-		t.Fatalf("BuildPrompt failed: %v", err)
-	}
-	if strings.Contains(prompt.Context, "optional content") {
-		t.Fatalf("expected optional context to be dropped: %q", prompt.Context)
-	}
-	trace := builder.LastTrace()
-	if got := traceEntryStatus(t, trace, "optional"); got != "dropped" {
-		t.Fatalf("expected optional source to be dropped, got %q", got)
-	}
-}
-
-func TestPromptBuilderCountsSourcePartsWithoutExplicitTokens(t *testing.T) {
-	t.Parallel()
-
-	builder := gaictx.NewPromptBuilder().
-		Budget(gaictx.PromptBudget{
-			Tokenizer:           &mocks.MockTokenizer{},
-			ContextWindowTokens: 4,
-		}).
-		System("system", "system", gaictx.Required()).
-		Source(gaictx.SectionContext, "optional", gaictx.SourceFunc(func(ctx context.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
-			return []gaictx.Part{
-				gaictx.NewPartGroup("group", []gaictx.Part{
-					gaictx.NewPart("child", "source child exceeds budget"),
-				}),
-			}, nil
-		}), gaictx.Optional()).
-		User("request", "question", gaictx.Required())
-
-	prompt, err := builder.BuildPrompt(context.Background(), emptyConversation{})
-	if err != nil {
-		t.Fatalf("BuildPrompt failed: %v", err)
-	}
-	if strings.Contains(prompt.Context, "source child exceeds budget") {
-		t.Fatalf("expected un-tokenized source child to be counted and dropped: %q", prompt.Context)
-	}
-	optional := traceEntry(t, builder.LastTrace(), "optional")
-	if optional.Status != "dropped" {
-		t.Fatalf("expected optional source to be dropped, got %+v", optional)
-	}
-	if optional.EntryTokens != 4 {
-		t.Fatalf("expected normalized source child token count, got %+v", optional)
-	}
-}
-
-func TestPromptBuilderFailsRequiredOverBudget(t *testing.T) {
-	t.Parallel()
-
-	_, err := gaictx.NewPromptBuilder().
-		Budget(gaictx.PromptBudget{
-			Tokenizer:           &mocks.MockTokenizer{},
-			ContextWindowTokens: 2,
-		}).
-		System("system", "system prompt", gaictx.Required()).
-		User("request", "question", gaictx.Required()).
-		BuildPrompt(context.Background(), emptyConversation{})
-	if !errors.Is(err, gaictx.ErrPromptBudget) {
-		t.Fatalf("expected ErrPromptBudget, got %v", err)
-	}
-	if !strings.Contains(err.Error(), `prompt with "`) || !strings.Contains(err.Error(), "would use") {
-		t.Fatalf("expected prompt-wide budget error wording, got %v", err)
-	}
-}
-
-func TestPromptBuilderTraceSplitsEntryAndPromptTokens(t *testing.T) {
-	t.Parallel()
-
-	builder := gaictx.NewPromptBuilder().
-		Budget(gaictx.PromptBudget{
-			Tokenizer:           &mocks.MockTokenizer{},
-			ContextWindowTokens: 100,
-		}).
-		System("system", "system", gaictx.Required()).
-		User("request", "question", gaictx.Required())
-	_, err := builder.BuildPrompt(context.Background(), emptyConversation{})
-	if err != nil {
-		t.Fatalf("BuildPrompt failed: %v", err)
-	}
-
-	trace := builder.LastTrace()
-	request := traceEntry(t, trace, "request")
-	if request.EntryTokens == 0 {
-		t.Fatalf("expected entry tokens: %+v", request)
-	}
-	if request.PromptTokens < request.EntryTokens {
-		t.Fatalf("expected prompt tokens to include at least the current entry tokens: %+v", request)
-	}
-}
-
-func TestPromptBuilderPassesSourceCap(t *testing.T) {
-	t.Parallel()
-
-	sourceCalled := false
-	_, err := gaictx.NewPromptBuilder().
-		Budget(gaictx.PromptBudget{
-			Tokenizer:           &mocks.MockTokenizer{},
-			ContextWindowTokens: 50,
-		}).
-		Source(gaictx.SectionContext, "capped", gaictx.SourceFunc(func(ctx context.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
-			sourceCalled = true
-			if budget.MaxTokens != 3 {
-				t.Fatalf("expected source cap of 3, got %d", budget.MaxTokens)
-			}
-			return []gaictx.Part{gaictx.NewPart("small", "small")}, nil
-		}), gaictx.SourceTokenCap(3)).
-		User("request", "question", gaictx.Required()).
-		BuildPrompt(context.Background(), emptyConversation{})
-	if err != nil {
-		t.Fatalf("BuildPrompt failed: %v", err)
-	}
-	if !sourceCalled {
-		t.Fatal("expected capped source to be called")
-	}
-}
-
-func TestPromptBuilderReusesTokenCountForSourceBudget(t *testing.T) {
-	t.Parallel()
-
-	tokenizer := &mocks.MockTokenizer{}
-	_, err := gaictx.NewPromptBuilder().
-		Budget(gaictx.PromptBudget{
-			Tokenizer:           tokenizer,
-			ContextWindowTokens: 100,
-		}).
-		System("system", "system", gaictx.Required()).
-		Source(gaictx.SectionContext, "source", gaictx.SourceFunc(func(ctx context.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
-			if tokenizer.CountCalls != 1 {
-				t.Fatalf("source budget should reuse counted part tokens, got %d token counts before source", tokenizer.CountCalls)
-			}
-			return []gaictx.Part{gaictx.NewPart("source-part", "source", gaictx.Required(), gaictx.Tokens(1))}, nil
-		}), gaictx.Required()).
-		User("request", "question", gaictx.Required()).
-		BuildPrompt(context.Background(), emptyConversation{})
-	if err != nil {
-		t.Fatalf("BuildPrompt failed: %v", err)
-	}
-}
-
-func TestPromptBuilderDropsEarlierOptionalContextForLaterUserPrompt(t *testing.T) {
-	t.Parallel()
-
-	builder := gaictx.NewPromptBuilder().
-		Budget(gaictx.PromptBudget{
-			Tokenizer:           &mocks.MockTokenizer{},
-			ContextWindowTokens: 2,
-		}).
-		System("system", "system", gaictx.Required()).
-		Source(gaictx.SectionContext, "optional", gaictx.SourceFunc(func(ctx context.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
-			return []gaictx.Part{gaictx.NewPart("optional-part", "optional", gaictx.Tokens(1))}, nil
-		}), gaictx.Optional()).
-		User("request", "question", gaictx.Required())
-	prompt, err := builder.BuildPrompt(context.Background(), emptyConversation{})
-	if err != nil {
-		t.Fatalf("BuildPrompt failed: %v", err)
-	}
-	if strings.Contains(prompt.Context, "optional") {
-		t.Fatalf("expected earlier optional context to be dropped for user prompt: %q", prompt.Context)
-	}
-	if !strings.Contains(prompt.Prompt, "question") {
-		t.Fatalf("expected user prompt to remain: %q", prompt.Prompt)
-	}
-	if got := traceEntryStatus(t, builder.LastTrace(), "optional"); got != "dropped" {
-		t.Fatalf("expected earlier optional trace to be dropped, got %q", got)
-	}
-}
-
-func TestPromptBuilderBudgetsRequiredSourceBeforeEarlierOptionalContext(t *testing.T) {
-	t.Parallel()
-
-	requiredSourceCalled := false
-	builder := gaictx.NewPromptBuilder().
-		Budget(gaictx.PromptBudget{
-			Tokenizer:           &mocks.MockTokenizer{},
-			ContextWindowTokens: 8,
-		}).
-		System("system", "system", gaictx.Required()).
-		Source(gaictx.SectionContext, "optional", gaictx.SourceFunc(func(ctx context.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
-			return []gaictx.Part{gaictx.NewPart("optional-part", "optional content with many extra words", gaictx.Tokens(6))}, nil
-		}), gaictx.Optional()).
-		Source(gaictx.SectionContext, "required", gaictx.SourceFunc(func(ctx context.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
-			requiredSourceCalled = true
-			if budget.MaxTokens == 0 {
-				t.Fatal("required source should receive budget before optional context consumes it")
-			}
-			return []gaictx.Part{gaictx.NewPart("required-part", "required", gaictx.Required(), gaictx.Tokens(1))}, nil
-		}), gaictx.Required()).
-		User("request", "question", gaictx.Required())
-
-	prompt, err := builder.BuildPrompt(context.Background(), emptyConversation{})
-	if err != nil {
-		t.Fatalf("BuildPrompt failed: %v", err)
-	}
-	if !requiredSourceCalled {
-		t.Fatal("expected required source to be called")
-	}
-	if !strings.Contains(prompt.Context, "required") {
-		t.Fatalf("expected required source in context: %q", prompt.Context)
-	}
-	if strings.Contains(prompt.Context, "optional content") {
-		t.Fatalf("expected optional context to be dropped: %q", prompt.Context)
-	}
-}
-
-func TestPromptBuilderRendersRequiredPartsBeforeOptionalParts(t *testing.T) {
-	t.Parallel()
-
-	prompt, err := gaictx.NewPromptBuilder().
-		Context("optional", "optional").
-		Context("required", "required", gaictx.Required()).
-		User("request", "question", gaictx.Required()).
-		BuildPrompt(context.Background(), emptyConversation{})
-	if err != nil {
-		t.Fatalf("BuildPrompt failed: %v", err)
-	}
-	assertOrdered(t, prompt.Context, "required", "optional")
-}
-
-func TestPromptBuilderDropsOptionalStaticSystemPartOverBudget(t *testing.T) {
-	t.Parallel()
-
-	builder := gaictx.NewPromptBuilder().
-		Budget(gaictx.PromptBudget{
-			Tokenizer:           &mocks.MockTokenizer{},
-			ContextWindowTokens: 7,
-		}).
-		System("optional-system", "optional system prompt with too many words", gaictx.Optional()).
-		User("request", "question", gaictx.Required())
-
-	prompt, err := builder.BuildPrompt(context.Background(), emptyConversation{})
-	if err != nil {
-		t.Fatalf("BuildPrompt failed: %v", err)
-	}
-	if strings.Contains(prompt.System, "optional system prompt") {
-		t.Fatalf("expected optional system prompt to be dropped: %q", prompt.System)
-	}
-	if !strings.Contains(prompt.Prompt, "question") {
-		t.Fatalf("expected required user prompt to remain: %q", prompt.Prompt)
-	}
-	if got := traceEntryStatus(t, builder.LastTrace(), "optional-system"); got != "dropped" {
-		t.Fatalf("expected optional static system part to be dropped, got %q", got)
-	}
-}
-
-func TestPromptBuilderSummarizesOptionalStaticUserPartBeforeDropping(t *testing.T) {
-	t.Parallel()
-
-	summarizer := fakeSummarizer{summary: "tiny"}
-	builder := gaictx.NewPromptBuilder().
-		Budget(gaictx.PromptBudget{
-			Tokenizer:           &mocks.MockTokenizer{},
-			ContextWindowTokens: 3,
-			Summarizer:          summarizer,
-		}).
-		System("system", "system", gaictx.Required()).
-		User("request", "question", gaictx.Required()).
-		User("optional-user", "optional user prompt with too many words", gaictx.Optional())
-
-	prompt, err := builder.BuildPrompt(context.Background(), emptyConversation{})
-	if err != nil {
-		t.Fatalf("BuildPrompt failed: %v", err)
-	}
-	if strings.Contains(prompt.Prompt, "optional user prompt") {
-		t.Fatalf("expected original optional user prompt to be summarized: %q", prompt.Prompt)
-	}
-	if !strings.Contains(prompt.Prompt, "tiny") {
-		t.Fatalf("expected summarized optional user prompt: %q", prompt.Prompt)
-	}
-	if got := traceEntryStatus(t, builder.LastTrace(), "optional-user"); got != "summarized" {
-		t.Fatalf("expected optional static user part to be summarized, got %q", got)
-	}
-}
-
-func TestPromptSessionRebuildsSourcesWhenConversationReserveIsExceeded(t *testing.T) {
-	t.Parallel()
-
-	buildCount := 0
-	builder := gaictx.NewPromptBuilder().
-		Budget(gaictx.PromptBudget{
-			Tokenizer:                  &mocks.MockTokenizer{},
-			ContextWindowTokens:        7,
-			ConversationReserveTokens:  1,
-			RenderOverheadReserveRatio: 0,
-		}).
-		System("system", "system", gaictx.Required(), gaictx.Tokens(1)).
-		Source(gaictx.SectionContext, "optional", gaictx.SourceFunc(func(ctx context.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
-			buildCount++
-			return []gaictx.Part{gaictx.NewPart("optional-context", "optional context", gaictx.Tokens(4))}, nil
-		}), gaictx.Optional()).
-		User("request", "question", gaictx.Required(), gaictx.Tokens(1))
-
-	session, err := builder.StartPrompt(context.Background())
-	if err != nil {
-		t.Fatalf("StartPrompt failed: %v", err)
-	}
-	if !strings.Contains(session.Prompt().Context, "optional context") {
-		t.Fatalf("expected optional source before reserve overflow: %q", session.Prompt().Context)
-	}
-
-	prompt, err := session.AppendMessages(context.Background(), []gaictx.Message{
-		sessionMessageWithTokens(1, gaictx.RoleAssistant, "tool delta", "mock.tokenizer", 3),
+	prompt, err := builder.BuildPrompt(context.Background(), messageConversation{
+		messages: []Message{
+			{
+				Role:    RoleAssistant,
+				Content: NewToolCallContent("search", `{"q":"lace"}`),
+			},
+			{
+				Role:    RoleTool,
+				Content: NewToolResultContent("search", "found <docs>", true, "cached"),
+			},
+		},
 	})
 	if err != nil {
-		t.Fatalf("AppendMessages failed: %v", err)
+		t.Fatalf("BuildPrompt failed: %v", err)
 	}
-	if buildCount != 2 {
-		t.Fatalf("expected source rebuild after reserve overflow, got %d builds", buildCount)
-	}
-	if strings.Contains(prompt.Context, "optional context") {
-		t.Fatalf("expected optional source to be dropped after reserve overflow: %q", prompt.Context)
-	}
-	if !strings.Contains(prompt.Prompt, "tool delta") {
-		t.Fatalf("expected appended delta in prompt: %q", prompt.Prompt)
-	}
-}
 
-func assertContainsAll(t *testing.T, text, name string, values ...string) {
-	t.Helper()
-
-	for _, value := range values {
-		if !strings.Contains(text, value) {
-			t.Fatalf("expected %s to contain %q: %q", name, value, text)
+	expected := []string{
+		`<user>`,
+		`find docs`,
+		`</user>`,
+		`<assistant>`,
+		`<tool_call name="search">`,
+		`<arguments>`,
+		`{&#34;q&#34;:&#34;lace&#34;}`,
+		`<tool>`,
+		`<tool_result name="search">`,
+		`<result>`,
+		`found &lt;docs&gt;`,
+	}
+	for _, fragment := range expected {
+		if !strings.Contains(prompt, fragment) {
+			t.Fatalf("expected prompt to contain %q:\n%s", fragment, prompt)
+		}
+	}
+	rejected := []string{
+		`<message role=`,
+		`<user><text>`,
+		`assistant: search`,
+		`tool: search result`,
+		`{&amp;#34;`,
+		`Precomputed`,
+		`cached`,
+	}
+	for _, fragment := range rejected {
+		if strings.Contains(prompt, fragment) {
+			t.Fatalf("expected prompt not to contain %q:\n%s", fragment, prompt)
 		}
 	}
 }
 
-func traceEntryStatus(t *testing.T, trace gaictx.BuildTrace, id string) string {
-	t.Helper()
-	return traceEntry(t, trace, id).Status
+type debugEventSink struct {
+	sensitive bool
+	events    []gai.DebugEvent
 }
 
-func traceEntry(t *testing.T, trace gaictx.BuildTrace, id string) gaictx.BuildTraceEntry {
-	t.Helper()
-	for _, entry := range trace.Entries {
-		if entry.ID == id {
-			return entry
-		}
+func (s *debugEventSink) Emit(ctx context.Context, e gai.DebugEvent) {
+	s.events = append(s.events, e)
+}
+
+func (s *debugEventSink) IncludeSensitiveData() bool {
+	return s.sensitive
+}
+
+type failingPart struct{}
+
+func (failingPart) Name() string {
+	return "failing"
+}
+
+func (failingPart) Tokens(ctx context.Context, tokenizer ai.Tokenizer) (int, error) {
+	return 0, errors.New("token count failed")
+}
+
+func (failingPart) Render(ctx context.Context) (RenderNode, error) {
+	return RenderNode{}, errors.New("render failed")
+}
+
+func TestPromptBuilderEmitsExistingEventsWithoutSensitiveFieldsByDefault(t *testing.T) {
+	t.Parallel()
+
+	sink := &debugEventSink{}
+	source := &testContextSource{name: "docs", text: "context"}
+	builder := New(Definition{
+		SystemInstructions: []Part{NewTextPart("system prompt")},
+		ContextSources:     []ContextSource{source},
+		UserPrompt:         "find docs",
+		TokenBudget:        10,
+		DebugSink:          sink,
+	})
+	builder.SetTokenizer(debugTestTokenizer{})
+
+	if _, err := builder.BuildContext(context.Background()); err != nil {
+		t.Fatalf("BuildContext failed: %v", err)
 	}
-	t.Fatalf("trace entry %q not found: %+v", id, trace.Entries)
-	return gaictx.BuildTraceEntry{}
-}
+	if _, err := builder.BuildPrompt(context.Background(), emptyConversation{}); err != nil {
+		t.Fatalf("BuildPrompt failed: %v", err)
+	}
 
-func assertContainsNone(t *testing.T, text, name string, values ...string) {
-	t.Helper()
+	var names []string
+	for _, event := range sink.events {
+		names = append(names, event.Name)
+	}
+	want := []string{
+		"prompt_builder_context_build_started",
+		"prompt_builder_source_included",
+		"prompt_builder_context_build_finished",
+		"prompt_builder_render_finished",
+	}
+	if !reflect.DeepEqual(names, want) {
+		t.Fatalf("unexpected event names: got %v want %v", names, want)
+	}
 
-	for _, value := range values {
-		if strings.Contains(text, value) {
-			t.Fatalf("expected %s not to contain %q: %q", name, value, text)
-		}
+	renderEvent := sink.events[len(sink.events)-1]
+	if _, ok := renderEvent.Fields["prompt"]; ok {
+		t.Fatalf("expected prompt field to be omitted without sensitive debug")
+	}
+	if _, ok := renderEvent.Fields["prompt_structure"]; ok {
+		t.Fatalf("expected prompt_structure field to be omitted without sensitive debug")
 	}
 }
 
-func assertOrdered(t *testing.T, text string, values ...string) {
-	t.Helper()
+func TestPromptBuilderEmitsSensitiveRenderFieldsWhenEnabled(t *testing.T) {
+	t.Parallel()
 
-	previous := -1
-	for _, value := range values {
-		index := strings.Index(text, value)
-		if index == -1 {
-			t.Fatalf("expected %q to contain %q", text, value)
-		}
-		if index < previous {
-			t.Fatalf("expected values to be ordered as %q in %q", values, text)
-		}
-		previous = index
+	sink := &debugEventSink{sensitive: true}
+	builder := New(Definition{
+		SystemInstructions: []Part{NewTextPart(strings.Repeat("system ", 900))},
+		UserPrompt:         "find docs",
+		DebugSink:          sink,
+	})
+
+	if _, err := builder.BuildPrompt(context.Background(), messageConversation{
+		messages: []Message{{Role: RoleAssistant, Content: NewTextContent("assistant reply")}},
+	}); err != nil {
+		t.Fatalf("BuildPrompt failed: %v", err)
+	}
+
+	renderEvent := sink.events[len(sink.events)-1]
+	if got := renderEvent.Name; got != "prompt_builder_render_finished" {
+		t.Fatalf("expected final render event, got %q", got)
+	}
+	if got := renderEvent.Fields["prompt_render_mode"]; got != "structured" {
+		t.Fatalf("expected structured prompt render mode, got %v", got)
+	}
+	if _, ok := renderEvent.Fields["prompt_head"]; !ok {
+		t.Fatal("expected prompt_head field")
+	}
+	if _, ok := renderEvent.Fields["prompt_tail"]; !ok {
+		t.Fatal("expected prompt_tail field")
+	}
+	if _, ok := renderEvent.Fields["prompt_structure"]; !ok {
+		t.Fatal("expected prompt_structure field")
 	}
 }
 
-type sectionNameRenderer struct{}
+func TestPromptBuilderKeepsTokenErrorEvents(t *testing.T) {
+	t.Parallel()
 
-func (sectionNameRenderer) Render(section gaictx.Section, parts []gaictx.Part) string {
-	ids := make([]string, 0, len(parts))
-	for _, part := range parts {
-		ids = append(ids, part.ID)
+	sink := &debugEventSink{sensitive: true}
+	builder := New(Definition{
+		SystemInstructions: []Part{failingPart{}},
+		DebugSink:          sink,
+	})
+	builder.SetTokenizer(debugTestTokenizer{})
+
+	promptFields := promptDebugFields(context.Background(), []Part{failingPart{}}, strings.Repeat("p", promptDebugFullLimit+1))
+	structure, ok := promptFields["prompt_structure"].([]map[string]any)
+	if !ok || len(structure) != 1 {
+		t.Fatalf("expected prompt structure entry, got %#v", promptFields["prompt_structure"])
 	}
-	return string(section) + ":" + strings.Join(ids, ",")
-}
-
-type fakeSummarizer struct {
-	summary string
-	err     error
-}
-
-func (s fakeSummarizer) Summarize(ctx context.Context, req gaictx.SummaryRequest) (string, error) {
-	if s.err != nil {
-		return "", s.err
+	if got := structure[0]["render_error"]; got != "render failed" {
+		t.Fatalf("expected render_error field, got %v", got)
 	}
-	return s.summary, nil
+
+	builder.SystemInstructionsTokens(context.Background())
+
+	names := make([]string, 0, len(sink.events))
+	for _, event := range sink.events {
+		names = append(names, event.Name)
+	}
+	if !slices.Contains(names, "prompt_builder_token_count_failed") {
+		t.Fatalf("expected token count failure event, got %v", names)
+	}
 }

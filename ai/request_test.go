@@ -6,28 +6,16 @@ import (
 	"github.com/lace-ai/gai/ai"
 )
 
-func TestAIRequestCombinedPrompt(t *testing.T) {
+func TestAIRequestStoresPromptString(t *testing.T) {
 	req := ai.AIRequest{
-		Prompt: ai.Prompt{
-			System:  "system",
-			Prompt:  "user prompt",
-			Context: "<conversation>...</conversation>",
-		},
+		Prompt:    "system\n\n<context>...</context>\n\nuser prompt",
+		MaxTokens: 42,
 	}
 
-	got := req.Prompt.CombinedPrompt()
-	want := "system\n\n<conversation>...</conversation>user prompt\n\n"
-	if got != want {
-		t.Fatalf("unexpected combined prompt:\nwant: %q\ngot:  %q", want, got)
+	if req.Prompt != "system\n\n<context>...</context>\n\nuser prompt" {
+		t.Fatalf("unexpected prompt: %q", req.Prompt)
 	}
-}
-
-func TestAIRequestCombinedPromptSkipsEmptySections(t *testing.T) {
-	req := ai.AIRequest{Prompt: ai.Prompt{
-		Prompt: "only prompt",
-	}}
-	got := req.Prompt.CombinedPrompt()
-	if got != "only prompt\n\n" {
-		t.Fatalf("unexpected combined prompt for prompt-only request: %q", got)
+	if req.MaxTokens != 42 {
+		t.Fatalf("unexpected max tokens: %d", req.MaxTokens)
 	}
 }

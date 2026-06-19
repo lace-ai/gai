@@ -1,6 +1,7 @@
 package context
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -8,46 +9,35 @@ import (
 	"strings"
 )
 
-func (b *Builder) SystemPrompt(path string) (*Builder, error) {
-	sysPrompt, err := loadPromptFromFile(path)
+func (b *Builder) SystemPrompt(ctx context.Context, path string) error {
+	part, err := LoadPromptFromFile(path)
 	if err != nil {
-		return b, err
+		return err
 	}
 
-	return b.System("base", sysPrompt, Required()), nil
+	b.AppendSystemInstructions(ctx, part)
+	return nil
 }
 
-func (b *Builder) ToolSysPrompt(path string) (*Builder, error) {
-	sysPrompt, err := loadPromptFromFile(path)
-	if err != nil {
-		return b, err
-	}
-
-	return b.System("tool", sysPrompt, Required()), nil
-}
-
-func (b *Builder) UserPrompt(text string) *Builder {
-	return b.User("request", text, Required())
-}
-
-func loadPromptFromFile(path string) (string, error) {
+func LoadPromptFromFile(path string) (Part, error) {
 	cleanPath := strings.TrimSpace(path)
 	if cleanPath == "" {
-		return "", ErrPromptPathEmpty
+		return nil, ErrPromptPathEmpty
 	}
 
 	ext := strings.ToLower(filepath.Ext(cleanPath))
 	if ext != ".md" && ext != ".txt" {
-		return "", fmt.Errorf("%w: %s", ErrPromptFileType, cleanPath)
+		return nil, fmt.Errorf("%w: %s", ErrPromptFileType, cleanPath)
 	}
 
 	content, err := os.ReadFile(cleanPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return "", fmt.Errorf("%w: %s", ErrPromptMissing, cleanPath)
+			return nil, fmt.Errorf("%w: %s", ErrPromptMissing, cleanPath)
 		}
-		return "", err
+		return nil, err
 	}
 
-	return strings.TrimSpace(string(content)), nil
+	part := NewTextPart(strings.TrimSpace(string(content)))
+	return part, nil
 }
