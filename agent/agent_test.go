@@ -117,6 +117,48 @@ func TestAgentNewRunUsesInputMaxTokens(t *testing.T) {
 	}
 }
 
+func TestAgentNewRunUsesConfiguredTokenizerOverride(t *testing.T) {
+	t.Parallel()
+
+	modelTokenizer := &mocks.MockTokenizer{IDValue: "model"}
+	overrideTokenizer := &mocks.MockTokenizer{IDValue: "override"}
+	builder := &testPromptBuilder{}
+	assistant := agent.New(agent.Definition{
+		Model:     &mocks.MockModel{TokenizerValue: modelTokenizer},
+		Tokenizer: overrideTokenizer,
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return builder, nil
+		},
+	})
+
+	if _, err := assistant.NewRun(context.Background(), agent.RunInput{}); err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	if builder.tokenizer != overrideTokenizer {
+		t.Fatalf("expected configured tokenizer override, got %v", builder.tokenizer)
+	}
+}
+
+func TestAgentNewRunFallsBackToModelTokenizer(t *testing.T) {
+	t.Parallel()
+
+	modelTokenizer := &mocks.MockTokenizer{IDValue: "model"}
+	builder := &testPromptBuilder{}
+	assistant := agent.New(agent.Definition{
+		Model: &mocks.MockModel{TokenizerValue: modelTokenizer},
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return builder, nil
+		},
+	})
+
+	if _, err := assistant.NewRun(context.Background(), agent.RunInput{}); err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	if builder.tokenizer != modelTokenizer {
+		t.Fatalf("expected model tokenizer fallback, got %v", builder.tokenizer)
+	}
+}
+
 func TestAgentNewRunRequiresModelAndPrompt(t *testing.T) {
 	t.Parallel()
 

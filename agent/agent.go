@@ -59,8 +59,14 @@ func (a *Agent) NewRun(ctx context.Context, input RunInput) (*loop.Loop, error) 
 	if promptBuilder == nil {
 		return nil, loop.ErrPromptNotConfigured
 	}
-	if setter, ok := promptBuilder.(gaictx.TokenizerSetter); ok && a.def.Model.Tokenizer() != nil && a.def.Tokenizer == nil {
-		setter.SetTokenizer(a.def.Model.Tokenizer())
+	if setter, ok := promptBuilder.(gaictx.TokenizerSetter); ok {
+		tokenizer := a.def.Tokenizer
+		if tokenizer == nil {
+			tokenizer = a.def.Model.Tokenizer()
+		}
+		if tokenizer != nil {
+			setter.SetTokenizer(tokenizer)
+		}
 	}
 
 	l := loop.New(a.def.Model, a.def.Tools, promptBuilder, a.def.Preprocessor)
