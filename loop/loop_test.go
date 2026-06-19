@@ -36,13 +36,84 @@ type countingPromptBuilder struct {
 	count atomic.Int32
 }
 
-func (b *countingPromptBuilder) BuildPrompt(ctx context.Context, conv gaictx.Conversation) (ai.Prompt, error) {
-	count := b.count.Add(1)
-	return ai.Prompt{Prompt: fmt.Sprintf("prompt-%d", count)}, nil
+func (b *countingPromptBuilder) AppendContextSource(ctx context.Context, source gaictx.ContextSource) error {
+	return nil
 }
 
-func (b *countingPromptBuilder) GetUserPrompt(ctx context.Context) []string {
-	return []string{"Initial prompt"}
+func (b *countingPromptBuilder) AppendContextSources(ctx context.Context, sources ...gaictx.ContextSource) error {
+	return nil
+}
+
+func (b *countingPromptBuilder) AppendSystemInstructions(ctx context.Context, instructions ...gaictx.Part) error {
+	return nil
+}
+
+func (b *countingPromptBuilder) BuildContext(ctx context.Context) ([]gaictx.Part, error) {
+	return nil, nil
+}
+
+func (b *countingPromptBuilder) BuildPrompt(ctx context.Context, conv gaictx.Conversation) (string, error) {
+	count := b.count.Add(1)
+	return fmt.Sprintf("prompt-%d", count), nil
+}
+
+func (b *countingPromptBuilder) GetUserPrompt() string {
+	return "Initial prompt"
+}
+
+func (b *countingPromptBuilder) SetUserPrompt(prompt string) {
+}
+
+type stubPromptBuilder struct {
+	systemPrompt string
+	userPrompt   string
+	contextText  string
+	buildContext func() string
+}
+
+func (b *stubPromptBuilder) AppendContextSource(ctx context.Context, source gaictx.ContextSource) error {
+	return nil
+}
+
+func (b *stubPromptBuilder) AppendContextSources(ctx context.Context, sources ...gaictx.ContextSource) error {
+	return nil
+}
+
+func (b *stubPromptBuilder) AppendSystemInstructions(ctx context.Context, instructions ...gaictx.Part) error {
+	return nil
+}
+
+func (b *stubPromptBuilder) BuildContext(ctx context.Context) ([]gaictx.Part, error) {
+	if b.buildContext != nil {
+		b.contextText = b.buildContext()
+	}
+	return nil, nil
+}
+
+func (b *stubPromptBuilder) BuildPrompt(ctx context.Context, conv gaictx.Conversation) (string, error) {
+	var prompt strings.Builder
+	if b.systemPrompt != "" {
+		prompt.WriteString(b.systemPrompt)
+		prompt.WriteString("\n")
+	}
+	if b.contextText != "" {
+		prompt.WriteString(b.contextText)
+		prompt.WriteString("\n")
+	}
+	if b.userPrompt != "" {
+		prompt.WriteString(b.userPrompt)
+		prompt.WriteString("\n")
+	}
+	prompt.WriteString(renderTestMessages(conv.Messages()))
+	return prompt.String(), nil
+}
+
+func (b *stubPromptBuilder) GetUserPrompt() string {
+	return b.userPrompt
+}
+
+func (b *stubPromptBuilder) SetUserPrompt(prompt string) {
+	b.userPrompt = prompt
 }
 
 func (m *scriptedStreamModel) Name() string {
@@ -97,10 +168,27 @@ func (m *scriptedStreamModel) Requests() []ai.AIRequest {
 	return requests
 }
 
+func renderTestMessages(messages []gaictx.Message) string {
+	var builder strings.Builder
+	for i, message := range messages {
+		builder.WriteString("<")
+		builder.WriteString(string(message.Role))
+		builder.WriteString(" key=")
+		builder.WriteString(fmt.Sprintf("%d", i))
+		builder.WriteString(">\n")
+		builder.WriteString(message.Content.String())
+		builder.WriteString("\n</")
+		builder.WriteString(string(message.Role))
+		builder.WriteString(">")
+	}
+	return builder.String()
+}
+
 func testPromptBuilder() gaictx.PromptBuilder {
-	return gaictx.NewPromptBuilder().
-		System("system", "System prompt", gaictx.Required()).
-		User("request", "Initial prompt", gaictx.Required())
+	return &stubPromptBuilder{
+		systemPrompt: "System prompt",
+		userPrompt:   "Initial prompt",
+	}
 }
 
 func TestLoop(t *testing.T) {
@@ -395,13 +483,14 @@ func TestLoopAppendsIterationMessagesToIncrementalPrompt(t *testing.T) {
 	t.Parallel()
 
 	var buildCount atomic.Int32
-	promptBuilder := gaictx.NewPromptBuilder().
-		System("system", "System prompt", gaictx.Required()).
-		Source(gaictx.SectionContext, "dynamic-context", gaictx.SourceFunc(func(ctx context.Context, view gaictx.PromptView, budget gaictx.SourceBudget) ([]gaictx.Part, error) {
+	promptBuilder := &stubPromptBuilder{
+		systemPrompt: "System prompt",
+		userPrompt:   "Initial prompt",
+		buildContext: func() string {
 			count := buildCount.Add(1)
-			return []gaictx.Part{gaictx.NewPart("iteration", fmt.Sprintf("build-%d", count))}, nil
-		}), gaictx.Required()).
-		User("request", "Initial prompt", gaictx.Required())
+			return fmt.Sprintf("build-%d", count)
+		},
+	}
 
 	model := &scriptedStreamModel{
 		sequences: [][]ai.Token{
@@ -441,20 +530,20 @@ func TestLoopAppendsIterationMessagesToIncrementalPrompt(t *testing.T) {
 	if len(requests) != 2 {
 		t.Fatalf("expected 2 model requests, got %d", len(requests))
 	}
-	if !strings.Contains(requests[0].Prompt.System, "System prompt") {
-		t.Fatalf("expected structured system prompt in first request: %+v", requests[0].Prompt)
+	if !strings.Contains(requests[0].Prompt, "System prompt") {
+		t.Fatalf("expected system prompt in first request: %q", requests[0].Prompt)
 	}
-	if !strings.Contains(requests[0].Prompt.Context, "build-1") || !strings.Contains(requests[1].Prompt.Context, "build-1") {
-		t.Fatalf("expected dynamic context to be reused: first=%q second=%q", requests[0].Prompt.Context, requests[1].Prompt.Context)
+	if !strings.Contains(requests[0].Prompt, "build-1") || !strings.Contains(requests[1].Prompt, "build-1") {
+		t.Fatalf("expected dynamic context to be reused: first=%q second=%q", requests[0].Prompt, requests[1].Prompt)
 	}
-	if !strings.Contains(requests[0].Prompt.Prompt, "Initial prompt") {
-		t.Fatalf("expected structured user prompt in first request: %+v", requests[0].Prompt)
+	if !strings.Contains(requests[0].Prompt, "Initial prompt") {
+		t.Fatalf("expected user prompt in first request: %q", requests[0].Prompt)
 	}
-	if strings.Contains(requests[0].Prompt.Prompt, "payload") {
-		t.Fatalf("first request should not contain future tool delta: %q", requests[0].Prompt.Prompt)
+	if strings.Contains(requests[0].Prompt, "payload") {
+		t.Fatalf("first request should not contain future tool delta: %q", requests[0].Prompt)
 	}
-	if !strings.Contains(requests[1].Prompt.Prompt, "payload") {
-		t.Fatalf("second request should include appended tool delta: %q", requests[1].Prompt.Prompt)
+	if !strings.Contains(requests[1].Prompt, "payload") {
+		t.Fatalf("second request should include appended tool delta: %q", requests[1].Prompt)
 	}
 }
 
@@ -500,7 +589,7 @@ func TestLoopFallsBackToBuildPromptEveryIteration(t *testing.T) {
 	if len(requests) != 2 {
 		t.Fatalf("expected 2 model requests, got %d", len(requests))
 	}
-	if requests[0].Prompt.Prompt != "prompt-1" || requests[1].Prompt.Prompt != "prompt-2" {
-		t.Fatalf("expected rebuilt prompts, got first=%q second=%q", requests[0].Prompt.Prompt, requests[1].Prompt.Prompt)
+	if requests[0].Prompt != "prompt-1" || requests[1].Prompt != "prompt-2" {
+		t.Fatalf("expected rebuilt prompts, got first=%q second=%q", requests[0].Prompt, requests[1].Prompt)
 	}
 }

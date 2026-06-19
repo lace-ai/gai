@@ -44,7 +44,7 @@ func TestModelGenerate(t *testing.T) {
 	}
 
 	res, err := m.Generate(context.Background(), ai.AIRequest{
-		Prompt:    ai.Prompt{System: "sys", Prompt: "hello", Context: "ctx"},
+		Prompt:    "sys\n\nctx\n\nhello",
 		MaxTokens: 42,
 	})
 	if err != nil {
@@ -90,7 +90,7 @@ func TestModelGenerateNoChoices(t *testing.T) {
 		t.Fatalf("Model error: %v", err)
 	}
 
-	_, err = m.Generate(context.Background(), ai.AIRequest{Prompt: ai.Prompt{Prompt: "hello"}})
+	_, err = m.Generate(context.Background(), ai.AIRequest{Prompt: "hello"})
 	if err != ErrNoChoices {
 		t.Fatalf("expected ErrNoChoices, got %v", err)
 	}
@@ -246,7 +246,7 @@ func TestModelGenerateStream(t *testing.T) {
 	}
 
 	stream := m.GenerateStream(context.Background(), ai.AIRequest{
-		Prompt:    ai.Prompt{Prompt: "hello"},
+		Prompt:    "hello",
 		MaxTokens: 55,
 	})
 
@@ -302,7 +302,7 @@ func TestModelGenerateStreamToolCall(t *testing.T) {
 	}
 
 	stream := m.GenerateStream(context.Background(), ai.AIRequest{
-		Prompt: ai.Prompt{Prompt: "call a tool"},
+		Prompt: "call a tool",
 	})
 
 	var tokens []ai.Token
@@ -368,7 +368,7 @@ func TestModelGenerateStreamToolCallDeltas(t *testing.T) {
 	}
 
 	stream := m.GenerateStream(context.Background(), ai.AIRequest{
-		Prompt: ai.Prompt{Prompt: "call a tool"},
+		Prompt: "call a tool",
 	})
 
 	var tokens []ai.Token
@@ -434,7 +434,7 @@ func TestModelGenerateStreamDetectsTextEncodedToolCall(t *testing.T) {
 	}
 
 	stream := m.GenerateStream(context.Background(), ai.AIRequest{
-		Prompt: ai.Prompt{Prompt: "call a tool"},
+		Prompt: "call a tool",
 	})
 
 	var (

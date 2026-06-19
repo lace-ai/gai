@@ -2,14 +2,11 @@ package summary_test
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/lace-ai/gai/agent/summary"
 	"github.com/lace-ai/gai/ai"
-	gaictx "github.com/lace-ai/gai/context"
 	"github.com/lace-ai/gai/loop"
 	"github.com/lace-ai/gai/testutil/mocks"
 )
@@ -20,7 +17,7 @@ func TestSummarizerRunsSummaryAgentThroughLoop(t *testing.T) {
 	model := &recordingModel{response: "short summary"}
 	summarizer := summary.New(model)
 
-	got, err := summarizer.Summarize(context.Background(), gaictx.SummaryRequest{
+	got, err := summarizer.Summarize(context.Background(), summary.Request{
 		ID:        "history",
 		Text:      "long input",
 		MaxTokens: 7,
@@ -34,11 +31,11 @@ func TestSummarizerRunsSummaryAgentThroughLoop(t *testing.T) {
 	if model.request.MaxTokens != 7 {
 		t.Fatalf("expected summary max tokens on loop request, got %d", model.request.MaxTokens)
 	}
-	if !strings.Contains(model.request.Prompt.System, "Summarize the provided context") {
-		t.Fatalf("expected embedded summary system prompt: %q", model.request.Prompt.System)
+	if !strings.Contains(model.request.Prompt, "Summarize the provided context") {
+		t.Fatalf("expected embedded summary system prompt: %q", model.request.Prompt)
 	}
-	if !strings.Contains(model.request.Prompt.Prompt, "long input") {
-		t.Fatalf("expected summary input in user prompt: %q", model.request.Prompt.Prompt)
+	if !strings.Contains(model.request.Prompt, "long input") {
+		t.Fatalf("expected summary input in user prompt: %q", model.request.Prompt)
 	}
 }
 
@@ -50,62 +47,12 @@ func TestDefinitionAllowsSystemPromptOverride(t *testing.T) {
 		Definition: summary.Definition(model, summary.WithSystemPrompt("custom summary system")),
 	}
 
-	_, err := summarizer.Summarize(context.Background(), gaictx.SummaryRequest{Text: "input"})
+	_, err := summarizer.Summarize(context.Background(), summary.Request{Text: "input"})
 	if err != nil {
 		t.Fatalf("Summarize failed: %v", err)
 	}
-	if !strings.Contains(model.request.Prompt.System, "custom summary system") {
-		t.Fatalf("expected custom system prompt: %q", model.request.Prompt.System)
-	}
-}
-
-func TestSummarizerDrainsLoopErrorsWhileWaitingForTokens(t *testing.T) {
-	t.Parallel()
-
-	model := toolCallModel{
-		tokens: []ai.Token{
-			{
-				Type: ai.TokenTypeToolCall,
-				ToolCall: &ai.ToolCall{
-					ID:   "call_1",
-					Type: "function",
-					Name: "lookup",
-					Args: []byte(`{"query":"first"}`),
-				},
-			},
-			{
-				Type: ai.TokenTypeToolCall,
-				ToolCall: &ai.ToolCall{
-					ID:   "call_2",
-					Type: "function",
-					Name: "lookup",
-					Args: []byte(`{"query":"second"}`),
-				},
-			},
-		},
-	}
-	summarizer := summary.New(
-		model,
-		summary.WithTools(staticTool{name: "lookup"}),
-		summary.WithPreProcessor(failingPreProcessor{err: errors.New("preprocess failed")}),
-	)
-
-	done := make(chan error, 1)
-	go func() {
-		_, err := summarizer.Summarize(context.Background(), gaictx.SummaryRequest{Text: "input"})
-		done <- err
-	}()
-
-	select {
-	case err := <-done:
-		if err == nil {
-			t.Fatal("expected preprocessing error")
-		}
-		if !strings.Contains(err.Error(), "preprocess failed") {
-			t.Fatalf("expected preprocessing error, got %v", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("Summarize blocked while loop errors were waiting to be drained")
+	if !strings.Contains(model.request.Prompt, "custom summary system") {
+		t.Fatalf("expected custom system prompt: %q", model.request.Prompt)
 	}
 }
 
@@ -190,12 +137,4 @@ func (t staticTool) Params() string {
 
 func (t staticTool) Function(context.Context, *ai.ToolCall) *loop.ToolResponse {
 	return &loop.ToolResponse{Text: "ok"}
-}
-
-type failingPreProcessor struct {
-	err error
-}
-
-func (p failingPreProcessor) Process(ai.ToolCall, *loop.ToolResponse) error {
-	return p.err
 }

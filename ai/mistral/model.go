@@ -293,7 +293,7 @@ func (a *mistralToolCallAccumulator) ready(final bool) []ai.ToolCall {
 }
 
 func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.Token {
-	prompt := req.Prompt.CombinedPrompt()
+	prompt := req.Prompt
 	ctx, span := gai.StartOperationSpan(ctx, mistralTracerName, "ai.mistral", "ai.operation", "model.generate_stream",
 		attribute.String("ai.provider", "mistral"),
 		attribute.String("ai.model", m.name),
@@ -309,9 +309,8 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 				Name:   "mistral_stream_request",
 				Source: "ai:mistral.Model.GenerateStream",
 				Fields: map[string]any{
-					"prompt":          req.Prompt,
-					"combined_prompt": prompt,
-					"max_tokens":      req.MaxTokens,
+					"prompt":     req.Prompt,
+					"max_tokens": req.MaxTokens,
 				},
 			})
 		}
@@ -650,7 +649,7 @@ func intPtr(v int) *int {
 }
 
 func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AIResponse, err error) {
-	prompt := req.Prompt.CombinedPrompt()
+	prompt := req.Prompt
 	ctx, span := gai.StartOperationSpan(ctx, mistralTracerName, "ai.mistral", "ai.operation", "model.generate",
 		attribute.String("ai.provider", "mistral"),
 		attribute.String("ai.model", m.name),
@@ -663,9 +662,8 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 			Name:   "mistral_generate_request",
 			Source: "ai:mistral.Model.Generate",
 			Fields: map[string]any{
-				"prompt":          req.Prompt,
-				"combined_prompt": prompt,
-				"max_tokens":      req.MaxTokens,
+				"prompt":     req.Prompt,
+				"max_tokens": req.MaxTokens,
 			},
 		})
 	}
