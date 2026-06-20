@@ -1,0 +1,156 @@
+// Package tooldefinitions provides prompt context for agent tool definitions.
+package tooldefinitions
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"sort"
+	"strings"
+
+	"github.com/lace-ai/gai"
+	"github.com/lace-ai/gai/ai"
+	gaictx "github.com/lace-ai/gai/context"
+	"github.com/lace-ai/gai/loop"
+)
+
+var (
+	ErrToolsEmpty  = errors.New("tool definition source requires at least one tool")
+	ErrToolInvalid = errors.New("invalid tool definition")
+)
+
+// Source renders loop tools as prompt context.
+type Source struct {
+	tools []loop.Tool
+	debug gai.DebugSink
+}
+
+var _ gaictx.ContextSource = (*Source)(nil)
+
+// New creates a context source from tools. The slice is copied so callers can
+// safely reuse or modify their input slice after construction.
+func New(tools []loop.Tool, debug gai.DebugSink) (*Source, error) {
+	if len(tools) == 0 {
+		return nil, ErrToolsEmpty
+	}
+	for index, tool := range tools {
+		if tool == nil {
+			return nil, fmt.Errorf("%w: tool at index %d is nil", ErrToolInvalid, index)
+		}
+	}
+	return &Source{
+		tools: append([]loop.Tool(nil), tools...),
+		debug: debug,
+	}, nil
+}
+
+func (s *Source) Name() string {
+	return "tool_definitions"
+}
+
+func (s *Source) Function(ctx context.Context, tokenBudget int) (part gaictx.Part, err error) {
+	ctx, observer := newObserver(ctx, s.debug, len(s.tools), tokenBudget)
+	defer func() {
+		observer.Finish(err)
+	}()
+
+	observer.Started(ctx)
+	if err = ctx.Err(); err != nil {
+		observer.Failed(ctx, "context", err)
+		return nil, err
+	}
+
+	definitions := make([]definition, 0, len(s.tools))
+	for index, tool := range s.tools {
+		definition, definitionErr := definitionFromTool(tool, index)
+		if definitionErr != nil {
+			err = definitionErr
+			observer.Failed(ctx, "validate_tool", err)
+			return nil, err
+		}
+		definitions = append(definitions, definition)
+	}
+	sort.Slice(definitions, func(i, j int) bool {
+		return definitions[i].name < definitions[j].name
+	})
+
+	part = newPart(definitions, loop.RenderToolSignatures(s.tools))
+	observer.Succeeded(ctx, definitionNames(definitions))
+	return part, nil
+}
+
+type definition struct {
+	name        string
+	description string
+	parameters  string
+}
+
+func definitionFromTool(tool loop.Tool, index int) (definition, error) {
+	if tool == nil {
+		return definition{}, fmt.Errorf("%w: tool at index %d is nil", ErrToolInvalid, index)
+	}
+	result := definition{
+		name:        strings.TrimSpace(tool.Name()),
+		description: strings.TrimSpace(tool.Description()),
+		parameters:  strings.TrimSpace(tool.Params()),
+	}
+	if result.name == "" {
+		return definition{}, fmt.Errorf("%w: tool at index %d has an empty name", ErrToolInvalid, index)
+	}
+	if result.description == "" {
+		return definition{}, fmt.Errorf("%w: tool %q has an empty description", ErrToolInvalid, result.name)
+	}
+	if result.parameters == "" || !json.Valid([]byte(result.parameters)) {
+		return definition{}, fmt.Errorf("%w: tool %q has invalid parameters", ErrToolInvalid, result.name)
+	}
+	return result, nil
+}
+
+func definitionNames(definitions []definition) []string {
+	names := make([]string, 0, len(definitions))
+	for _, definition := range definitions {
+		names = append(names, definition.name)
+	}
+	return names
+}
+
+type part struct {
+	definitions []definition
+	text        gaictx.TextPart
+}
+
+func newPart(definitions []definition, tokenText string) *part {
+	return &part{
+		definitions: definitions,
+		text:        gaictx.NewTextPart(tokenText),
+	}
+}
+
+func (p *part) Name() string {
+	return "tool_definitions"
+}
+
+func (p *part) Tokens(ctx context.Context, tokenizer ai.Tokenizer) (int, error) {
+	return p.text.Tokens(ctx, tokenizer)
+}
+
+func (p *part) Render(ctx context.Context) (gaictx.RenderNode, error) {
+	if err := ctx.Err(); err != nil {
+		return gaictx.RenderNode{}, err
+	}
+	node := gaictx.RenderNode{Type: "tools"}
+	for _, definition := range p.definitions {
+		node.Children = append(node.Children, gaictx.RenderNode{
+			Type: "tool",
+			Fields: []gaictx.RenderField{
+				{Key: "name", Value: definition.name},
+			},
+			Children: []gaictx.RenderNode{
+				{Type: "description", Value: definition.description},
+				{Type: "signature", Value: definition.parameters},
+			},
+		})
+	}
+	return node, nil
+}
