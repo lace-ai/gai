@@ -134,8 +134,6 @@ func WithEndpoint(endpoint string) Option {
 		return nil
 	}
 }
-	}
-}
 
 // NewSearchTool constructs an Exa web search tool.
 func NewSearchTool(apiKey string, options ...Option) (*SearchTool, error) {
