@@ -32,12 +32,12 @@ type echoArgs struct {
 func (t *EchoTool) Function(ctx context.Context, req *ai.ToolCall) *ToolResponse {
 	var args echoArgs
 	if err := DecodeToolArgs(req, &args); err != nil {
-		return &ToolResponse{Err: err}
+		return NewToolError(err)
 	}
 
 	text := strings.TrimSpace(args.Text)
 	if text == "" {
 		text = "(empty)"
 	}
-	return &ToolResponse{Text: text}
+	return NewToolSuccess(text)
 }
