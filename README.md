@@ -67,9 +67,9 @@ assistant := agent.New(agent.Definition{
   },
 })
 
-run, err := assistant.NewRun(ctx, agent.RunInput{Text: "What is the capital of France?"})
+workflow, err := assistant.NewRun(ctx, agent.RunInput{Text: "What is the capital of France?"})
 
-tokens, statuses, errs := run.Loop(ctx)
+tokens, statuses, errs := workflow.Run(ctx)
 go func() {
     for range statuses {
     }
@@ -82,6 +82,57 @@ for err := range errs {
         panic(err)
     }
 }
+```
+
+Agents can include stream middleware in their definition. Agent middleware sees
+the complete upstream result through `input.Result` and can preserve, append, or
+replace the visible token output. This memory agent records its own output while
+passing the assistant response through unchanged.
+
+```go
+memoryAgent := agent.New(agent.Definition{
+  Name:  "memory",
+  Model: model,
+  Tools: []loop.Tool{saveMemoryTool},
+  Prompt: func(ctx context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
+    // input.Text is the current visible output. input.Result also contains the
+    // original input, primary transcript, iterations, errors, and prior stages.
+    return memoryPrompt(input), nil
+  },
+})
+
+assistant := agent.New(agent.Definition{
+  Name:   "assistant",
+  Model:  model,
+  Prompt: assistantPrompt,
+  Middleware: []agent.Middleware{
+    agent.NewAgentMiddleware(memoryAgent, agent.AgentMiddlewareConfig{
+      Output: agent.PreserveOutput,
+    }),
+  },
+})
+
+workflow, err := assistant.NewRun(ctx, agent.RunInput{
+  Text: "What is the capital of France?",
+  Meta: map[string]any{"session_id": sessionID},
+})
+tokens, statuses, errs := workflow.Run(ctx)
+
+go func() {
+  for range statuses {
+  }
+}()
+for token := range tokens {
+  fmt.Print(token.Text)
+}
+for err := range errs {
+  if err != nil {
+    panic(err)
+  }
+}
+
+result := workflow.Result()
+fmt.Printf("memory stage output: %s\n", result.Stages[0].Result.Text)
 ```
 
 For a single non-agent request, call the model directly with `model.Generate(ctx, ai.AIRequest{Prompt: "...", MaxTokens: 100})`.
@@ -335,11 +386,12 @@ Use `history.New(sessionID, store, summarizerDefinition)` when older turns shoul
 
 The `agent` package turns reusable configuration into independent loop runs:
 
-- `Definition` combines a name, model, tools, prompt factory, limits, optional tokenizer override, and optional tool-response preprocessor.
+- `Definition` combines a name, model, tools, prompt factory, limits, optional tokenizer override, optional tool-response preprocessor, and ordered stream middleware.
 - `Prompt` builds a `context.PromptBuilder` for one `RunInput`.
-- `RunInput` carries an ID, user text, per-run output-token override, and metadata.
+- `RunInput` carries an ID, user text, per-run output-token override, metadata, and the upstream result when an agent runs as middleware.
 - `Limits` configures maximum loop iterations, retries, and default output tokens.
-- `Agent` is created with `agent.New`; `NewRun` validates the definition, builds the prompt, injects the tokenizer when supported, and returns a configured `loop.Loop`.
+- `Agent` is created with `agent.New`; `NewRun` returns a `Workflow`, and `Workflow.Run` streams the loop through each configured middleware.
+- `AgentMiddleware` adapts an ordinary agent with preserve, append, or replace output behavior. `Workflow.Result` exposes the primary result, final output, and named middleware stages.
 
 The `agent/summary` package is a built-in component. `summary.Definition` returns a reusable agent definition, while `summary.New` returns a `Summarizer` that runs that agent and can be attached to a history source.
 

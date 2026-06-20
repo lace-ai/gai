@@ -13,6 +13,7 @@ type RunInput struct {
 	Text      string
 	MaxTokens int
 	Meta      map[string]any
+	Result    *WorkflowResult
 }
 
 type Prompt func(ctx context.Context, input RunInput) (gaictx.PromptBuilder, error)
@@ -31,6 +32,7 @@ type Definition struct {
 	Limits       Limits
 	Tokenizer    ai.Tokenizer
 	Preprocessor loop.ToolResPreProcessor
+	Middleware   []Middleware
 }
 
 type Agent struct {
@@ -41,7 +43,20 @@ func New(def Definition) *Agent {
 	return &Agent{def: def}
 }
 
-func (a *Agent) NewRun(ctx context.Context, input RunInput) (*loop.Loop, error) {
+func (a *Agent) NewRun(ctx context.Context, input RunInput) (*Workflow, error) {
+	if a != nil {
+		if err := validateMiddleware(a.def.Middleware); err != nil {
+			return nil, err
+		}
+	}
+	l, err := a.newLoop(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+	return newWorkflow(input, l, a.def.Middleware), nil
+}
+
+func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error) {
 	if a == nil {
 		return nil, loop.ErrNilAgent
 	}
