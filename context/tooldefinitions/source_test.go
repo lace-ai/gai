@@ -1,0 +1,163 @@
+package tooldefinitions_test
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/lace-ai/gai"
+	"github.com/lace-ai/gai/ai"
+	gaictx "github.com/lace-ai/gai/context"
+	"github.com/lace-ai/gai/context/tooldefinitions"
+	"github.com/lace-ai/gai/loop"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+)
+
+func TestSourceBuildsToolDefinitionsPart(t *testing.T) {
+	sink := &captureSink{}
+	source, err := tooldefinitions.New([]loop.Tool{
+		staticTool{name: "weather", description: "Gets current weather.", params: `{"type":"object","properties":{"city":{"type":"string"}}}`},
+		staticTool{name: "search", description: "Searches documentation.", params: `{"type":"object","properties":{"query":{"type":"string"}}}`},
+	}, sink)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if source.Name() != "tool_definitions" {
+		t.Fatalf("Name = %q, want tool_definitions", source.Name())
+	}
+
+	part, err := source.Function(context.Background(), 2048)
+	if err != nil {
+		t.Fatalf("Function: %v", err)
+	}
+	rendered, err := (gaictx.XMLRenderer{}).Render(context.Background(), []gaictx.Part{part})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	for _, expected := range []string{
+		`<tools>`, `<tool name="search">`, `<description>`, "Searches documentation.", `<signature>`, `query`, `<tool name="weather">`,
+	} {
+		if !strings.Contains(rendered, expected) {
+			t.Errorf("rendered definitions missing %q:\n%s", expected, rendered)
+		}
+	}
+	if strings.Index(rendered, `name="search"`) > strings.Index(rendered, `name="weather"`) {
+		t.Fatalf("tools are not rendered deterministically:\n%s", rendered)
+	}
+
+	events := sink.Events()
+	if len(events) != 2 || events[0].Name != "tool_definitions_build_started" || events[1].Name != "tool_definitions_build_finished" {
+		t.Fatalf("unexpected debug events: %#v", events)
+	}
+	if got := events[1].Fields["tool_count"]; got != 2 {
+		t.Fatalf("tool_count = %#v, want 2", got)
+	}
+}
+
+func TestSourceErrorHandling(t *testing.T) {
+	tests := []struct {
+		name    string
+		tools   []loop.Tool
+		wantErr error
+	}{
+		{name: "empty", wantErr: tooldefinitions.ErrToolsEmpty},
+		{name: "nil tool", tools: []loop.Tool{nil}, wantErr: tooldefinitions.ErrToolInvalid},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := tooldefinitions.New(test.tools, nil)
+			if !errors.Is(err, test.wantErr) {
+				t.Fatalf("error = %v, want %v", err, test.wantErr)
+			}
+		})
+	}
+
+	sink := &captureSink{}
+	source, err := tooldefinitions.New([]loop.Tool{
+		staticTool{name: "broken", description: "Broken definition.", params: `{not-json}`},
+	}, sink)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = source.Function(context.Background(), 100)
+	if !errors.Is(err, tooldefinitions.ErrToolInvalid) {
+		t.Fatalf("Function error = %v, want ErrToolInvalid", err)
+	}
+	events := sink.Events()
+	if len(events) != 2 || events[1].Name != "tool_definitions_build_failed" || events[1].Err == nil {
+		t.Fatalf("unexpected failure events: %#v", events)
+	}
+}
+
+func TestSourceTracing(t *testing.T) {
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	previousProvider := otel.GetTracerProvider()
+	otel.SetTracerProvider(provider)
+	t.Cleanup(func() {
+		otel.SetTracerProvider(previousProvider)
+		_ = provider.Shutdown(context.Background())
+	})
+
+	source, err := tooldefinitions.New([]loop.Tool{
+		staticTool{name: "broken", description: "Broken definition.", params: "bad"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, callErr := source.Function(context.Background(), 99)
+	if callErr == nil {
+		t.Fatal("expected source error")
+	}
+
+	var found bool
+	for _, span := range recorder.Ended() {
+		if span.Name() != "context.tool_definitions.build" {
+			continue
+		}
+		found = true
+		if span.Status().Code != codes.Error {
+			t.Fatalf("span status = %v, want error", span.Status().Code)
+		}
+	}
+	if !found {
+		t.Fatal("context.tool_definitions.build span was not recorded")
+	}
+}
+
+type staticTool struct {
+	name        string
+	description string
+	params      string
+}
+
+func (t staticTool) Name() string        { return t.name }
+func (t staticTool) Description() string { return t.description }
+func (t staticTool) Params() string      { return t.params }
+func (t staticTool) Function(context.Context, *ai.ToolCall) *loop.ToolResponse {
+	return &loop.ToolResponse{}
+}
+
+type captureSink struct {
+	mu     sync.Mutex
+	events []gai.DebugEvent
+}
+
+func (s *captureSink) Emit(_ context.Context, event gai.DebugEvent) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, event)
+}
+
+func (s *captureSink) IncludeSensitiveData() bool { return false }
+
+func (s *captureSink) Events() []gai.DebugEvent {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]gai.DebugEvent(nil), s.events...)
+}
