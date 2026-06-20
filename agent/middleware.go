@@ -21,15 +21,25 @@ var (
 type OutputPolicy uint8
 
 const (
+	// PreserveOutput forwards upstream tokens and records the middleware agent's
+	// result without exposing its tokens to the caller.
 	PreserveOutput OutputPolicy = iota
+	// AppendOutput forwards upstream tokens followed by middleware-agent tokens.
 	AppendOutput
+	// ReplaceOutput buffers upstream tokens and, when the stage runs, emits
+	// middleware-agent tokens instead.
 	ReplaceOutput
 )
 
 // AgentMiddlewareConfig configures an agent as stream middleware.
 type AgentMiddlewareConfig struct {
-	Name      string
-	Output    OutputPolicy
+	// Name identifies the stage in WorkflowResult.Stages. The agent name is used
+	// when Name is empty.
+	Name string
+	// Output controls how the nested agent changes visible workflow tokens.
+	Output OutputPolicy
+	// ShouldRun overrides the default success-only policy. It receives the full
+	// upstream result and may enable stages such as failure auditing.
 	ShouldRun func(result WorkflowResult) bool
 }
 
@@ -39,7 +49,9 @@ type AgentMiddleware struct {
 	config AgentMiddlewareConfig
 }
 
-// NewAgentMiddleware adapts an ordinary agent into workflow middleware.
+// NewAgentMiddleware adapts an ordinary agent into workflow middleware. The
+// nested agent receives the current output in RunInput.Text and the complete
+// upstream snapshot in RunInput.Result.
 func NewAgentMiddleware(agent *Agent, config AgentMiddlewareConfig) *AgentMiddleware {
 	return &AgentMiddleware{agent: agent, config: config}
 }
@@ -57,6 +69,7 @@ func (m *AgentMiddleware) validate() error {
 	return nil
 }
 
+// Process implements Middleware.
 func (m *AgentMiddleware) Process(ctx context.Context, run *MiddlewareContext, upstream Stream) Stream {
 	tokens := make(chan ai.Token, 16)
 	statuses := make(chan loop.IterationInformation, 16)

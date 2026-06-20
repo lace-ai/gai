@@ -16,14 +16,20 @@ var (
 	ErrMiddlewareNotConfigured = errors.New("middleware is not configured")
 )
 
-// Stream is the streaming output transformed by middleware.
+// Stream is the streaming output transformed by middleware. Implementations
+// must consume or forward all three channels and close every returned channel.
 type Stream struct {
-	Tokens   <-chan ai.Token
+	// Tokens contains model text, thoughts, and tool-call tokens.
+	Tokens <-chan ai.Token
+	// Statuses contains primary-agent iteration updates. AgentMiddleware does not
+	// expose iteration updates from its nested agent.
 	Statuses <-chan loop.IterationInformation
-	Errors   <-chan error
+	// Errors contains primary and middleware failures.
+	Errors <-chan error
 }
 
-// AgentResult is the captured result of one agent execution.
+// AgentResult is the captured result of one agent execution. Text contains only
+// the concatenated text-token content; Tokens retains the complete token stream.
 type AgentResult struct {
 	Tokens     []ai.Token
 	Text       string
@@ -32,14 +38,16 @@ type AgentResult struct {
 	Errors     []error
 }
 
-// StageResult is the named result produced by agent middleware.
+// StageResult is the named result produced by agent middleware. Output records
+// how the stage affected the visible workflow tokens.
 type StageResult struct {
 	Name   string
 	Output OutputPolicy
 	Result AgentResult
 }
 
-// WorkflowResult is a snapshot of the complete workflow state.
+// WorkflowResult is a snapshot of the complete workflow state. Primary never
+// changes, while Tokens and Text represent the output after the latest stage.
 type WorkflowResult struct {
 	Input    RunInput
 	Primary  AgentResult
@@ -63,7 +71,9 @@ func (c *MiddlewareContext) Result() WorkflowResult {
 	return c.workflow.Result()
 }
 
-// Middleware transforms one workflow stream into another.
+// Middleware transforms one workflow stream into another. Middleware is applied
+// in Definition.Middleware order and may forward, buffer, append, or replace any
+// part of the upstream stream.
 type Middleware interface {
 	Process(ctx context.Context, run *MiddlewareContext, upstream Stream) Stream
 }
@@ -79,7 +89,8 @@ type middlewareValidator interface {
 	validate() error
 }
 
-// Workflow runs a configured agent loop and its stream middleware.
+// Workflow runs a configured agent loop and its stream middleware. A Workflow
+// is single-use; create another with Agent.NewRun for a subsequent invocation.
 type Workflow struct {
 	Loop       *loop.Loop
 	middleware []Middleware
@@ -115,7 +126,8 @@ func validateMiddleware(middleware []Middleware) error {
 	return nil
 }
 
-// Run starts the workflow. It can be called only once.
+// Run starts the workflow and returns the final transformed stream. Callers must
+// consume all three channels. It can be called only once.
 func (w *Workflow) Run(ctx context.Context) (<-chan ai.Token, <-chan loop.IterationInformation, <-chan error) {
 	if w == nil || w.Loop == nil {
 		return failedStream(ErrWorkflowNotConfigured)
@@ -139,7 +151,8 @@ func (w *Workflow) Run(ctx context.Context) (<-chan ai.Token, <-chan loop.Iterat
 	return stream.Tokens, stream.Statuses, stream.Errors
 }
 
-// Result returns a safe snapshot. Complete is true after Run's channels close.
+// Result returns a concurrency-safe snapshot. Complete is true after all three
+// channels returned by Run have closed.
 func (w *Workflow) Result() WorkflowResult {
 	if w == nil {
 		return WorkflowResult{}
@@ -203,13 +216,15 @@ func (w *Workflow) captureFinal(ctx context.Context, upstream Stream) Stream {
 		w.result.Tokens = cloneTokens(capturedTokens)
 		w.result.Text = tokenText(capturedTokens)
 		w.result.Errors = append([]error(nil), capturedErrs...)
-		w.result.Complete = true
 		w.mu.Unlock()
 		close(tokens)
 		close(statuses)
 		for _, err := range capturedErrs {
 			errs <- err
 		}
+		w.mu.Lock()
+		w.result.Complete = true
+		w.mu.Unlock()
 		close(errs)
 	}()
 

@@ -395,6 +395,60 @@ The `agent/summary` package is a built-in component. `summary.Definition` return
 
 <summary>
 
+### 🔗 Agent Workflows and Middleware
+
+</summary>
+
+`Agent.NewRun` creates a single-use `Workflow`. Calling `Workflow.Run` starts the
+primary loop and passes its stream through every entry in `Definition.Middleware`
+in declaration order. Callers must consume the token, status, and error channels.
+After they close, `Workflow.Result()` contains the immutable primary result, the
+final visible output, accumulated errors, and named middleware stages.
+
+An ordinary agent can become middleware with `NewAgentMiddleware`. It receives
+the current visible text in `RunInput.Text` and a typed upstream snapshot in
+`RunInput.Result`:
+
+- `PreserveOutput` streams the upstream output unchanged and keeps the nested
+  agent result only in `WorkflowResult.Stages`.
+- `AppendOutput` streams the upstream output followed by the nested agent output.
+- `ReplaceOutput` buffers the upstream output and, when the stage runs, emits
+  only the nested agent output.
+
+Agent middleware runs only after a successful upstream result by default. Set
+`AgentMiddlewareConfig.ShouldRun` to implement policies such as failure auditing.
+Nested-agent errors are sent through the workflow error channel.
+
+For transformations that do not require another agent, use `MiddlewareFunc`:
+
+```go
+passthrough := agent.MiddlewareFunc(func(
+  ctx context.Context,
+  run *agent.MiddlewareContext,
+  upstream agent.Stream,
+) agent.Stream {
+  // A custom middleware owns all three streams. Returning upstream is a
+  // zero-overhead pass-through; a transformer may return replacement channels.
+  return upstream
+})
+
+assistant := agent.New(agent.Definition{
+  Name:       "assistant",
+  Model:      model,
+  Prompt:     assistantPrompt,
+  Middleware: []agent.Middleware{passthrough},
+})
+```
+
+`MiddlewareContext.Result()` returns a concurrency-safe snapshot for custom
+middleware. `Complete` becomes true only after the final workflow streams close.
+
+</details>
+
+<details>
+
+<summary>
+
 ### 📄 Prompt Files
 
 </summary>
