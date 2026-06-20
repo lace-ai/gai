@@ -31,9 +31,9 @@ const (
 var (
 	ErrAPIKeyMissing    = errors.New("exa API key is missing")
 	ErrInvalidOption    = errors.New("invalid Exa search option")
-	ErrResponseTooLarge = errors.New("Exa response is too large")
-	ErrInvalidResponse  = errors.New("Exa returned invalid JSON")
-	ErrAPIRequest       = errors.New("Exa search API request failed")
+	ErrResponseTooLarge = errors.New("exa response is too large")
+	ErrInvalidResponse  = errors.New("exa returned invalid JSON")
+	ErrAPIRequest       = errors.New("exa search API request failed")
 )
 
 // APIError is returned when Exa responds with a non-success HTTP status.
