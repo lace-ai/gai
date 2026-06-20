@@ -146,14 +146,15 @@ func rendererNodeStructure(node RenderNode, previewSize int, includeContent bool
 }
 
 func addRendererPreview(fields map[string]any, key, content string, previewSize int) {
-	if len(content) <= previewSize*2 {
+	runes := []rune(content)
+	if len(runes) <= previewSize*2 {
 		fields[key] = content
 		fields[key+"_mode"] = "full"
 		return
 	}
-	omitted := len(content) - previewSize*2
+	omitted := len(runes) - previewSize*2
 	fields[key+"_mode"] = "truncated"
-	fields[key+"_head"] = content[:previewSize]
+	fields[key+"_head"] = string(runes[:previewSize])
 	fields[key+"_omitted"] = fmt.Sprintf("[%d chars omitted]", omitted)
-	fields[key+"_tail"] = content[len(content)-previewSize:]
+	fields[key+"_tail"] = string(runes[len(runes)-previewSize:])
 }
