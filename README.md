@@ -317,10 +317,6 @@ type Conversation interface {
 
 </details>
 
-
-
-
-
 <details>
 
 <summary>
@@ -373,8 +369,6 @@ Use `AppendSystemInstructions`, `AppendContextSource`, and `SetUserPrompt` when 
 Use `history.New(sessionID, store, summarizerDefinition)` when older turns should be summarized under token pressure. A `SummarizerDefinition` can use an existing `summary.Summarizer` or construct one from a model. Summarized state is saved back through the history store.
 
 </details>
-
-
 
 <details>
 
