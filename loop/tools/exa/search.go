@@ -126,11 +126,14 @@ func WithDebugSink(debug gai.DebugSink) Option {
 // default; this option also supports compatible gateways and local tests.
 func WithEndpoint(endpoint string) Option {
 	return func(tool *SearchTool) error {
-		if strings.TrimSpace(endpoint) == "" {
+		endpoint = strings.TrimSpace(endpoint)
+		if endpoint == "" {
 			return fmt.Errorf("%w: endpoint is empty", ErrInvalidOption)
 		}
 		tool.endpoint = endpoint
 		return nil
+	}
+}
 	}
 }
 
