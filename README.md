@@ -422,7 +422,7 @@ Tool call IDs are generated internally by the runtime and are not model-controll
 - `DetectToolCallsInStream` detects tool-call JSON objects in streamed text tokens.
 - `CallTool` runs a tool by name.
 - `DecodeToolArgs` unmarshals tool arguments into a typed struct.
-- `RenderToolSignatures` formats tool metadata for prompting.
+- `Renderer.RenderToolSignatures` formats tool metadata for prompting.
 
 </details>
 

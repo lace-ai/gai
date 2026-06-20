@@ -136,5 +136,5 @@ func (t staticTool) Params() string {
 }
 
 func (t staticTool) Function(context.Context, *ai.ToolCall) *loop.ToolResponse {
-	return &loop.ToolResponse{Text: "ok"}
+	return loop.NewToolSuccess("ok")
 }

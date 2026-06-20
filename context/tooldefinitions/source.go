@@ -22,15 +22,16 @@ var (
 
 // Source renders loop tools as prompt context.
 type Source struct {
-	tools []loop.Tool
-	debug gai.DebugSink
+	tools    []loop.Tool
+	renderer gaictx.Renderer
+	debug    gai.DebugSink
 }
 
 var _ gaictx.ContextSource = (*Source)(nil)
 
-// New creates a context source from tools. The slice is copied so callers can
-// safely reuse or modify their input slice after construction.
-func New(tools []loop.Tool, debug gai.DebugSink) (*Source, error) {
+// New creates a context source from tools and a renderer. The slice is copied
+// so callers can safely reuse or modify their input slice after construction.
+func New(renderer gaictx.Renderer, tools []loop.Tool, debug gai.DebugSink) (*Source, error) {
 	if len(tools) == 0 {
 		return nil, ErrToolsEmpty
 	}
@@ -40,8 +41,9 @@ func New(tools []loop.Tool, debug gai.DebugSink) (*Source, error) {
 		}
 	}
 	return &Source{
-		tools: append([]loop.Tool(nil), tools...),
-		debug: debug,
+		tools:    append([]loop.Tool(nil), tools...),
+		renderer: renderer,
+		debug:    debug,
 	}, nil
 }
 
@@ -75,9 +77,21 @@ func (s *Source) Function(ctx context.Context, tokenBudget int) (part gaictx.Par
 		return definitions[i].name < definitions[j].name
 	})
 
-	part = newPart(definitions, loop.RenderToolSignatures(s.tools))
+	renderer := s.renderer
+	if renderer == nil {
+		renderer = &gaictx.XMLRenderer{}
+	}
+	part = newPart(definitions, renderer.RenderToolSignatures(toToolSignatures(s.tools)))
 	observer.Succeeded(ctx, definitionNames(definitions))
 	return part, nil
+}
+
+func toToolSignatures(tools []loop.Tool) []gaictx.ToolSignature {
+	signatures := make([]gaictx.ToolSignature, 0, len(tools))
+	for _, tool := range tools {
+		signatures = append(signatures, tool)
+	}
+	return signatures
 }
 
 type definition struct {

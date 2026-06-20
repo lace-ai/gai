@@ -67,15 +67,15 @@ func (i *Iteration) partMessages() []gaictx.Message {
 					Content: gaictx.NewToolCallContent(part.ToolReq.Name, string(part.ToolReq.Args)),
 				})
 				if part.ToolResp != nil {
-					if part.ToolResp.Err != nil {
+					if err := part.ToolResp.ErrorValue(); err != nil {
 						msgs = append(msgs, gaictx.Message{
 							Role:    gaictx.RoleTool,
-							Content: gaictx.NewToolResultErrContent(part.ToolReq.Name, part.ToolResp.Err.Error()),
+							Content: gaictx.NewToolResultErrContent(part.ToolReq.Name, err.Error()),
 						})
 					} else {
 						msgs = append(msgs, gaictx.Message{
 							Role:    gaictx.RoleTool,
-							Content: gaictx.NewToolResultContent(part.ToolReq.Name, part.ToolResp.Text, false, ""),
+							Content: gaictx.NewToolResultContent(part.ToolReq.Name, part.ToolResp.TextValue(), false, ""),
 						})
 					}
 				}
@@ -122,10 +122,8 @@ func (i *Iteration) AppendToken(t ai.Token) {
 		}
 	case ai.TokenTypeErr:
 		i.Parts = append(i.Parts, IterationPart{
-			Type: IterationTypeToolError,
-			ToolResp: &ToolResponse{
-				Err: t.Err,
-			},
+			Type:     IterationTypeToolError,
+			ToolResp: NewToolError(t.Err),
 		})
 	case ai.TokenTypeThought:
 		if last != nil && last.Type == IterationTypeResponse {

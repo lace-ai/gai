@@ -199,7 +199,7 @@ func (t *SearchTool) Function(ctx context.Context, call *ai.ToolCall) (response 
 			observer.Finish(errors.New("Exa search returned no tool response"))
 			return
 		}
-		observer.Finish(response.Err)
+		observer.Finish(response.ErrorValue())
 	}()
 
 	var args searchArgs
@@ -263,7 +263,7 @@ func (t *SearchTool) Function(ctx context.Context, call *ai.ToolCall) (response 
 	}
 	observer.Succeeded(ctx, metadata.RequestID, len(metadata.Results), len(body))
 
-	return &loop.ToolResponse{Text: string(body)}
+	return loop.NewToolSuccess(string(body))
 }
 
 func decodeAPIError(statusCode int, requestID string, body []byte) *APIError {

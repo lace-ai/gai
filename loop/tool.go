@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/lace-ai/gai/ai"
@@ -17,8 +16,37 @@ type ToolArg struct {
 }
 
 type ToolResponse struct {
-	Text string
-	Err  error
+	Status string // "success" or "error"
+	Text   *string
+	Err    *error
+}
+
+func NewToolSuccess(text string) *ToolResponse {
+	return &ToolResponse{
+		Status: "success",
+		Text:   &text,
+	}
+}
+
+func NewToolError(err error) *ToolResponse {
+	return &ToolResponse{
+		Status: "error",
+		Err:    &err,
+	}
+}
+
+func (r *ToolResponse) TextValue() string {
+	if r == nil || r.Text == nil {
+		return ""
+	}
+	return *r.Text
+}
+
+func (r *ToolResponse) ErrorValue() error {
+	if r == nil || r.Err == nil {
+		return nil
+	}
+	return *r.Err
 }
 
 type Tool interface {
@@ -30,20 +58,20 @@ type Tool interface {
 
 func CallTool(ctx context.Context, req *ai.ToolCall, tools []Tool) *ToolResponse {
 	if err := req.Validate(); err != nil {
-		return &ToolResponse{Err: err}
+		return NewToolError(err)
 	}
 
 	for _, tool := range tools {
 		if tool.Name() == req.Name {
 			res := tool.Function(ctx, req)
 			if res == nil {
-				return &ToolResponse{Err: fmt.Errorf("tool %s returned nil response", req.Name)}
+				return NewToolError(fmt.Errorf("tool %s returned nil response", req.Name))
 			}
 			return res
 		}
 	}
 
-	return &ToolResponse{Err: fmt.Errorf("%w: %s", ErrToolNotFound, req.Name)}
+	return NewToolError(fmt.Errorf("%w: %s", ErrToolNotFound, req.Name))
 }
 
 func DecodeToolArgs[T any](req *ai.ToolCall, target *T) error {
@@ -57,37 +85,6 @@ func DecodeToolArgs[T any](req *ai.ToolCall, target *T) error {
 		return fmt.Errorf("%w: %w", ErrToolCallMalformed, err)
 	}
 	return nil
-}
-
-func RenderToolSignatures(tools []Tool) string {
-	if len(tools) == 0 {
-		return ""
-	}
-
-	sorted := make([]Tool, 0, len(tools))
-	for _, tool := range tools {
-		if tool != nil {
-			sorted = append(sorted, tool)
-		}
-	}
-	sort.Slice(sorted, func(i, j int) bool {
-		return sorted[i].Name() < sorted[j].Name()
-	})
-
-	var builder strings.Builder
-	for _, t := range sorted {
-		builder.WriteString("\n<tool name=\"")
-		builder.WriteString(t.Name())
-		builder.WriteString("\">")
-		builder.WriteString("\n<description>")
-		builder.WriteString(t.Description())
-		builder.WriteString("</description>")
-		builder.WriteString("\n<signature>")
-		builder.WriteString(t.Params())
-		builder.WriteString("</signature>")
-		builder.WriteString("\n</tool>")
-	}
-	return builder.String()
 }
 
 func ToolCallToString(tc ai.ToolCall) string {
@@ -115,7 +112,14 @@ func toolCallSignature(tc ai.ToolCall) string {
 }
 
 func (r *ToolResponse) String() string {
-	var builder strings.Builder
-	builder.WriteString(r.Text)
-	return builder.String()
+	if r == nil {
+		return ""
+	}
+	if r.Text != nil {
+		return *r.Text
+	}
+	if r.Err != nil {
+		return (*r.Err).Error()
+	}
+	return ""
 }
