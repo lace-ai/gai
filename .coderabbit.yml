@@ -1,0 +1,19 @@
+language: "en-US"
+tone_instructions: "Be helpful and encouraging. Explain why changes are suggested, not just what to change."
+
+reviews:
+  profile: "chill"
+  request_changes_workflow: false # Keep human approval mandatory for OSS
+  high_level_summary: true
+  sequence_diagrams: true
+
+  path_filters:
+    - "!graphify-out/**"
+    - "!**/*.lock"
+    - "!docs/**"
+
+  tools:
+    gitleaks:
+      enabled: true
+    semgrep:
+      enabled: true
