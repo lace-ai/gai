@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 
+	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
 	gaictx "github.com/lace-ai/gai/context"
 	"github.com/lace-ai/gai/loop"
@@ -50,6 +51,8 @@ type Definition struct {
 	Tokenizer ai.Tokenizer
 	// Preprocessor can transform tool responses before they enter the transcript.
 	Preprocessor loop.ToolResPreProcessor
+	// DebugSink receives agent and workflow lifecycle events.
+	DebugSink gai.DebugSink
 	// Middleware transforms the run stream in declaration order.
 	Middleware []Middleware
 }
@@ -69,16 +72,45 @@ func New(def Definition) *Agent {
 // Prompt construction happens before NewRun returns. Model execution and
 // middleware processing begin when Workflow.Run is called.
 func (a *Agent) NewRun(ctx context.Context, input RunInput) (*Workflow, error) {
+	ctx, obs := newRunCreationObserver(ctx, a, input)
 	if a != nil {
 		if err := validateMiddleware(a.def.Middleware); err != nil {
+			obs.Failed(ctx, "middleware_validation", err)
+			obs.Finish(err)
 			return nil, err
 		}
 	}
 	l, err := a.newLoop(ctx, input)
 	if err != nil {
+		obs.Failed(ctx, "loop_creation", err)
+		obs.Finish(err)
 		return nil, err
 	}
-	return newWorkflow(input, l, a.def.Middleware), nil
+	workflow := newWorkflow(input, l, a.name(), a.debugSink(), a.middleware())
+	obs.Created(ctx)
+	obs.Finish(nil)
+	return workflow, nil
+}
+
+func (a *Agent) name() string {
+	if a == nil {
+		return ""
+	}
+	return a.def.Name
+}
+
+func (a *Agent) debugSink() gai.DebugSink {
+	if a == nil {
+		return nil
+	}
+	return a.def.DebugSink
+}
+
+func (a *Agent) middleware() []Middleware {
+	if a == nil {
+		return nil
+	}
+	return a.def.Middleware
 }
 
 func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error) {

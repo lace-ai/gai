@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 
+	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
 	gaictx "github.com/lace-ai/gai/context"
 	"github.com/lace-ai/gai/loop"
@@ -94,17 +95,21 @@ type middlewareValidator interface {
 type Workflow struct {
 	Loop       *loop.Loop
 	middleware []Middleware
+	name       string
+	debug      gai.DebugSink
 
 	mu      sync.RWMutex
 	started bool
 	result  WorkflowResult
 }
 
-func newWorkflow(input RunInput, l *loop.Loop, middleware []Middleware) *Workflow {
+func newWorkflow(input RunInput, l *loop.Loop, name string, debug gai.DebugSink, middleware []Middleware) *Workflow {
 	input = cloneRunInput(input)
 	return &Workflow{
 		Loop:       l,
 		middleware: append([]Middleware(nil), middleware...),
+		name:       name,
+		debug:      debug,
 		result:     WorkflowResult{Input: input},
 	}
 }
@@ -141,13 +146,15 @@ func (w *Workflow) Run(ctx context.Context) (<-chan ai.Token, <-chan loop.Iterat
 	w.started = true
 	w.mu.Unlock()
 
+	ctx, obs := newWorkflowObserver(ctx, w)
+	obs.Started(ctx)
 	tokens, statuses, errs := w.Loop.Loop(ctx)
-	stream := w.capturePrimary(ctx, Stream{Tokens: tokens, Statuses: statuses, Errors: errs})
+	stream := w.capturePrimary(ctx, Stream{Tokens: tokens, Statuses: statuses, Errors: errs}, obs)
 	run := &MiddlewareContext{workflow: w}
 	for _, middleware := range w.middleware {
 		stream = middleware.Process(ctx, run, stream)
 	}
-	stream = w.captureFinal(ctx, stream)
+	stream = w.captureFinal(ctx, stream, obs)
 	return stream.Tokens, stream.Statuses, stream.Errors
 }
 
@@ -162,7 +169,7 @@ func (w *Workflow) Result() WorkflowResult {
 	return cloneWorkflowResult(w.result)
 }
 
-func (w *Workflow) capturePrimary(ctx context.Context, upstream Stream) Stream {
+func (w *Workflow) capturePrimary(ctx context.Context, upstream Stream, obs *workflowObserver) Stream {
 	return captureStream(ctx, upstream, func(tokens []ai.Token, errs []error) {
 		result := AgentResult{
 			Tokens:     cloneTokens(tokens),
@@ -177,17 +184,20 @@ func (w *Workflow) capturePrimary(ctx context.Context, upstream Stream) Stream {
 		w.result.Text = result.Text
 		w.result.Errors = append([]error(nil), errs...)
 		w.mu.Unlock()
+		obs.PrimaryFinished(ctx, result)
 	})
 }
 
-func (w *Workflow) captureFinal(ctx context.Context, upstream Stream) Stream {
+func (w *Workflow) captureFinal(ctx context.Context, upstream Stream, obs *workflowObserver) Stream {
 	return captureStream(ctx, upstream, func(tokens []ai.Token, errs []error) {
 		w.mu.Lock()
-		defer w.mu.Unlock()
 		w.result.Tokens = cloneTokens(tokens)
 		w.result.Text = tokenText(tokens)
 		w.result.Errors = append([]error(nil), errs...)
 		w.result.Complete = true
+		result := cloneWorkflowResult(w.result)
+		w.mu.Unlock()
+		obs.Finished(ctx, result)
 	})
 }
 

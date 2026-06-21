@@ -461,6 +461,13 @@ assistant := agent.New(agent.Definition{
 `MiddlewareContext.Result()` returns a concurrency-safe snapshot for custom
 middleware. `Complete` becomes true only after the final workflow streams close.
 
+Set `Definition.DebugSink` to receive structured agent lifecycle events for run
+creation, workflow start/completion, primary completion, and middleware
+start/skip/success/failure. Agent execution also emits `agent.run.create`,
+`agent.workflow.run`, and `agent.middleware.run` OpenTelemetry spans. Event
+payloads contain counts and policy names by default; input and output text are
+included only when `DebugSink.IncludeSensitiveData()` returns true.
+
 </details>
 
 <details>

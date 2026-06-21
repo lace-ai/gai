@@ -108,21 +108,28 @@ func (m *AgentMiddleware) Process(ctx context.Context, run *MiddlewareContext, u
 			upstreamRelay.Tokens = tokens
 		}
 		upstreamResult := drainStream(ctx, upstream, upstreamRelay)
+		stageCtx, obs := newMiddlewareObserver(ctx, run, m, upstreamResult)
+		obs.Started(stageCtx)
 		result := m.upstreamResult(run, upstreamResult)
 
 		if !m.shouldRun(result) {
-			m.restoreReplacement(ctx, tokens, upstreamResult.Tokens)
+			m.restoreReplacement(stageCtx, tokens, upstreamResult.Tokens)
+			reason := "predicate"
+			if m.config.ShouldRun == nil && len(result.Errors) > 0 {
+				reason = "upstream_error"
+			}
+			obs.Skipped(stageCtx, reason)
 			return
 		}
 
-		input, err := m.input(ctx, result)
+		input, err := m.input(stageCtx, result)
 		if err != nil {
-			m.finishStage(ctx, run, tokens, errs, upstreamResult.Tokens, AgentResult{Errors: []error{err}})
+			m.finishStage(stageCtx, run, tokens, errs, upstreamResult.Tokens, AgentResult{Errors: []error{err}}, obs)
 			return
 		}
 
-		stageResult := m.runStage(ctx, input)
-		m.finishStage(ctx, run, tokens, errs, upstreamResult.Tokens, stageResult)
+		stageResult := m.runStage(stageCtx, input)
+		m.finishStage(stageCtx, run, tokens, errs, upstreamResult.Tokens, stageResult, obs)
 	}()
 
 	return Stream{Tokens: tokens, Statuses: statuses, Errors: errs}
@@ -175,6 +182,7 @@ func (m *AgentMiddleware) finishStage(
 	errs chan<- error,
 	upstreamTokens []ai.Token,
 	result AgentResult,
+	obs *middlewareObserver,
 ) {
 	failed := len(result.Errors) > 0
 	visible := cloneTokens(upstreamTokens)
@@ -198,6 +206,7 @@ func (m *AgentMiddleware) finishStage(
 		Output: m.config.Output,
 		Result: result,
 	}, visible)
+	obs.Finished(ctx, result, !failed && m.config.Output != PreserveOutput)
 }
 
 func (m *AgentMiddleware) restoreReplacement(ctx context.Context, tokens chan<- ai.Token, upstream []ai.Token) {
