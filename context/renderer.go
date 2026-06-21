@@ -210,11 +210,42 @@ func renderSimpleNode(node RenderNode) string {
 	switch node.Type {
 	case "history":
 		return renderSimpleHistory(node)
+	case "tools":
+		return renderSimpleTools(node)
 	case string(RoleUser), string(RoleAssistant), string(RoleTool), string(RoleSystem), "summary", "message":
 		return renderSimpleMessageNode(node)
 	default:
 		return renderSimpleNodeBody(node)
 	}
+}
+
+func renderSimpleTools(node RenderNode) string {
+	var builder strings.Builder
+	builder.WriteString("<tools>")
+	for _, tool := range node.Children {
+		if tool.Type != "tool" {
+			continue
+		}
+
+		builder.WriteString("\n")
+		builder.WriteString("tool: ")
+		builder.WriteString(simpleNodeFieldValue(tool, "name"))
+		for _, child := range tool.Children {
+			body := renderSimpleNodeBody(child)
+			if body == "" {
+				continue
+			}
+			builder.WriteString("\n")
+			builder.WriteString(child.Type)
+			builder.WriteString(": ")
+			builder.WriteString(body)
+		}
+	}
+	if len(node.Children) > 0 {
+		builder.WriteString("\n")
+	}
+	builder.WriteString("</tools>")
+	return builder.String()
 }
 
 func renderSimpleHistory(node RenderNode) string {
@@ -289,6 +320,15 @@ func simpleNodeChildValue(node RenderNode, childType string) string {
 		}
 	}
 	return node.Value
+}
+
+func simpleNodeFieldValue(node RenderNode, key string) string {
+	for _, field := range node.Fields {
+		if field.Key == key {
+			return field.Value
+		}
+	}
+	return ""
 }
 
 func formatSimpleInstructionLabel(name string) string {

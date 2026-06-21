@@ -59,6 +59,34 @@ func TestSourceBuildsToolDefinitionsPart(t *testing.T) {
 	}
 }
 
+func TestSourceRendersClearSimpleToolDefinitions(t *testing.T) {
+	t.Parallel()
+
+	source, err := tooldefinitions.New([]loop.Tool{
+		staticTool{name: "search", description: "Searches the web.", params: `{"type":"object","properties":{"query":{"type":"string"}}}`},
+	}, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	part, err := source.Function(context.Background(), 2048)
+	if err != nil {
+		t.Fatalf("Function: %v", err)
+	}
+
+	rendered, err := (gaictx.SimpleRenderer{}).Render(context.Background(), []gaictx.Part{part})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	want := `<tools>
+tool: search
+description: Searches the web.
+signature: {"type":"object","properties":{"query":{"type":"string"}}}
+</tools>`
+	if rendered != want {
+		t.Fatalf("unexpected tool definitions:\nwant %q\n got %q", want, rendered)
+	}
+}
+
 func TestSourceErrorHandling(t *testing.T) {
 	tests := []struct {
 		name    string
