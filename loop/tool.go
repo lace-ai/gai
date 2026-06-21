@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/lace-ai/gai/ai"
@@ -21,10 +20,41 @@ type ToolArg struct {
 
 // ToolResponse is the result of a tool invocation.
 type ToolResponse struct {
+	// Status indicates whether the tool invocation was successful or resulted in an error.
+	Status string // "success" or "error"
 	// Text contains successful tool output to return to the model.
-	Text string
+	Text   *string
 	// Err contains an invocation or tool error.
-	Err error
+	Err    *error
+}
+
+func NewToolSuccess(text string) *ToolResponse {
+	return &ToolResponse{
+		Status: "success",
+		Text:   &text,
+	}
+}
+
+func NewToolError(err error) *ToolResponse {
+	return &ToolResponse{
+		Status: "error",
+		Err:    &err,
+	}
+}
+
+func (r *ToolResponse) TextValue() string {
+	if r == nil || r.Text == nil {
+		return ""
+	}
+	return *r.Text
+}
+
+func (r *ToolResponse) ErrorValue() error {
+	if r == nil || r.Err == nil {
+		return nil
+	}
+	return *r.Err
+>>>>>>> feat/post_agent
 }
 
 // Tool defines a function that a model may request during a loop run.
@@ -44,20 +74,20 @@ type Tool interface {
 // tool returns nil.
 func CallTool(ctx context.Context, req *ai.ToolCall, tools []Tool) *ToolResponse {
 	if err := req.Validate(); err != nil {
-		return &ToolResponse{Err: err}
+		return NewToolError(err)
 	}
 
 	for _, tool := range tools {
 		if tool.Name() == req.Name {
 			res := tool.Function(ctx, req)
 			if res == nil {
-				return &ToolResponse{Err: fmt.Errorf("tool %s returned nil response", req.Name)}
+				return NewToolError(fmt.Errorf("tool %s returned nil response", req.Name))
 			}
 			return res
 		}
 	}
 
-	return &ToolResponse{Err: fmt.Errorf("%w: %s", ErrToolNotFound, req.Name)}
+	return NewToolError(fmt.Errorf("%w: %s", ErrToolNotFound, req.Name))
 }
 
 // DecodeToolArgs validates req and decodes its JSON arguments into target.
@@ -74,6 +104,7 @@ func DecodeToolArgs[T any](req *ai.ToolCall, target *T) error {
 	return nil
 }
 
+<<<<<<< HEAD
 // RenderToolSignatures renders non-nil tools as deterministic XML fragments,
 // sorted by tool name.
 func RenderToolSignatures(tools []Tool) string {
@@ -108,6 +139,8 @@ func RenderToolSignatures(tools []Tool) string {
 }
 
 // ToolCallToString returns a diagnostic representation of tc.
+=======
+>>>>>>> feat/post_agent
 func ToolCallToString(tc ai.ToolCall) string {
 	var builder strings.Builder
 	builder.WriteString("id: ")
@@ -134,7 +167,14 @@ func toolCallSignature(tc ai.ToolCall) string {
 
 // String returns the response text.
 func (r *ToolResponse) String() string {
-	var builder strings.Builder
-	builder.WriteString(r.Text)
-	return builder.String()
+	if r == nil {
+		return ""
+	}
+	if r.Text != nil {
+		return *r.Text
+	}
+	if r.Err != nil {
+		return (*r.Err).Error()
+	}
+	return ""
 }

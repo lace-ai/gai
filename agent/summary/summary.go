@@ -129,13 +129,13 @@ func (s Summarizer) Summarize(ctx context.Context, req Request) (string, error) 
 		MaxTokens: req.MaxTokens,
 		Meta:      req.Meta,
 	}
-	l, err := agent.New(def).NewRun(ctx, input)
+	workflow, err := agent.New(def).NewRun(ctx, input)
 	if err != nil {
 		return "", err
 	}
 
 	runCtx := context.WithValue(ctx, activeKey{}, true)
-	tokenCh, statusCh, errCh := l.Loop(runCtx)
+	tokenCh, statusCh, errCh := workflow.Run(runCtx)
 	statusDone := make(chan struct{})
 	go func() {
 		defer close(statusDone)

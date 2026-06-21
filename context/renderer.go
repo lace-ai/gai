@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
+	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -15,6 +16,14 @@ import (
 type Renderer interface {
 	Render(ctx context.Context, contextParts []Part) (string, error)
 	SetRenderResultCallback(ctx context.Context, callback RenderResultCallback) error
+	RenderToolSignatures(tools []ToolSignature) string
+}
+
+// ToolSignature is the minimal tool metadata required for prompt formatting.
+type ToolSignature interface {
+	Name() string
+	Description() string
+	Params() string
 }
 
 // RenderResultCallback receives the source parts and completed prompt immediately
@@ -60,6 +69,37 @@ var (
 	_ Renderer = (*XMLRenderer)(nil)
 	_ Renderer = (*SimpleRenderer)(nil)
 )
+
+func renderToolSignatures(tools []ToolSignature) string {
+	if len(tools) == 0 {
+		return ""
+	}
+
+	sorted := make([]ToolSignature, 0, len(tools))
+	for _, tool := range tools {
+		if tool != nil {
+			sorted = append(sorted, tool)
+		}
+	}
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].Name() < sorted[j].Name()
+	})
+
+	var builder strings.Builder
+	for _, t := range sorted {
+		builder.WriteString("\n<tool name=\"")
+		builder.WriteString(t.Name())
+		builder.WriteString("\">")
+		builder.WriteString("\n<description>")
+		builder.WriteString(t.Description())
+		builder.WriteString("</description>")
+		builder.WriteString("\n<signature>")
+		builder.WriteString(t.Params())
+		builder.WriteString("</signature>")
+		builder.WriteString("\n</tool>")
+	}
+	return builder.String()
+}
 
 func (r XMLRenderer) Render(ctx context.Context, parts []Part) (string, error) {
 	obs := newRenderObserver("xml", r.DebugSink, r.DebugPreviewChars)
@@ -125,6 +165,14 @@ func (r SimpleRenderer) Render(ctx context.Context, parts []Part) (string, error
 	r.notifyRenderResult(parts, prompt)
 	obs.finished(ctx, nil, prompt)
 	return prompt, nil
+}
+
+func (r XMLRenderer) RenderToolSignatures(tools []ToolSignature) string {
+	return renderToolSignatures(tools)
+}
+
+func (r SimpleRenderer) RenderToolSignatures(tools []ToolSignature) string {
+	return renderToolSignatures(tools)
 }
 
 func renderSimplePart(ctx context.Context, part Part) (string, *RenderNode, error) {

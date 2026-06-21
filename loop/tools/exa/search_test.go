@@ -61,11 +61,11 @@ func TestSearchTool(t *testing.T) {
 	response := tool.Function(context.Background(), &ai.ToolCall{
 		ID: "call-1", Type: "function", Name: tool.Name(), Args: json.RawMessage(`{"query":" current Go release "}`),
 	})
-	if response.Err != nil {
-		t.Fatalf("Function: %v", response.Err)
+	if err := response.ErrorValue(); err != nil {
+		t.Fatalf("Function: %v", err)
 	}
-	if !json.Valid([]byte(response.Text)) {
-		t.Fatalf("tool response is not JSON: %s", response.Text)
+	if !json.Valid([]byte(response.TextValue())) {
+		t.Fatalf("tool response is not JSON: %s", response.TextValue())
 	}
 	events := sink.Events()
 	if len(events) != 2 || events[0].Name != "exa_search_started" || events[1].Name != "exa_search_finished" {
@@ -97,15 +97,15 @@ func TestSearchToolReturnsAPIError(t *testing.T) {
 	response := tool.Function(context.Background(), &ai.ToolCall{
 		ID: "call-1", Type: "function", Name: tool.Name(), Args: json.RawMessage(`{"query":"news"}`),
 	})
-	if response.Err == nil {
+	if response.ErrorValue() == nil {
 		t.Fatal("expected API error")
 	}
-	if !errors.Is(response.Err, exa.ErrAPIRequest) {
-		t.Fatalf("error = %v, want ErrAPIRequest", response.Err)
+	if !errors.Is(response.ErrorValue(), exa.ErrAPIRequest) {
+		t.Fatalf("error = %v, want ErrAPIRequest", response.ErrorValue())
 	}
 	var apiErr *exa.APIError
-	if !errors.As(response.Err, &apiErr) {
-		t.Fatalf("error = %T, want *exa.APIError", response.Err)
+	if !errors.As(response.ErrorValue(), &apiErr) {
+		t.Fatalf("error = %T, want *exa.APIError", response.ErrorValue())
 	}
 	if apiErr.StatusCode != http.StatusTooManyRequests || apiErr.RequestID != "request-429" || apiErr.Message != "rate limited" {
 		t.Fatalf("unexpected API error: %#v", apiErr)
@@ -135,8 +135,8 @@ func TestSearchToolSensitiveDebugIncludesQuery(t *testing.T) {
 	response := tool.Function(context.Background(), &ai.ToolCall{
 		ID: "call-1", Type: "function", Name: tool.Name(), Args: json.RawMessage(`{"query":"private query"}`),
 	})
-	if response.Err != nil {
-		t.Fatalf("Function: %v", response.Err)
+	if err := response.ErrorValue(); err != nil {
+		t.Fatalf("Function: %v", err)
 	}
 	if got := sink.Events()[0].Fields["query"]; got != "private query" {
 		t.Fatalf("query = %#v, want private query", got)
@@ -166,7 +166,7 @@ func TestSearchToolTracing(t *testing.T) {
 	response := tool.Function(context.Background(), &ai.ToolCall{
 		ID: "call-1", Type: "function", Name: tool.Name(), Args: json.RawMessage(`{"query":"news"}`),
 	})
-	if response.Err == nil {
+	if response.ErrorValue() == nil {
 		t.Fatal("expected API error")
 	}
 
