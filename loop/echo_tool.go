@@ -7,20 +7,25 @@ import (
 	"github.com/lace-ai/gai/ai"
 )
 
+// EchoTool is a small Tool implementation that returns its text argument.
 type EchoTool struct{}
 
+// NewEchoTool creates an EchoTool.
 func NewEchoTool() *EchoTool {
 	return &EchoTool{}
 }
 
+// Name returns the tool name exposed to models.
 func (t *EchoTool) Name() string {
 	return "echo"
 }
 
+// Description describes the echo operation.
 func (t *EchoTool) Description() string {
 	return "Returns the same text passed in arguments."
 }
 
+// Params returns the echo tool's JSON Schema parameters.
 func (t *EchoTool) Params() string {
 	return `{"type":"object","required":["text"],"properties":{"text":{"type":"string","description":"Text to echo back"}}}`
 }
@@ -29,6 +34,7 @@ type echoArgs struct {
 	Text string `json:"text"`
 }
 
+// Function decodes and returns the requested text.
 func (t *EchoTool) Function(ctx context.Context, req *ai.ToolCall) *ToolResponse {
 	var args echoArgs
 	if err := DecodeToolArgs(req, &args); err != nil {
