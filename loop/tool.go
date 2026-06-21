@@ -23,9 +23,9 @@ type ToolResponse struct {
 	// Status indicates whether the tool invocation was successful or resulted in an error.
 	Status string // "success" or "error"
 	// Text contains successful tool output to return to the model.
-	Text   *string
+	Text *string
 	// Err contains an invocation or tool error.
-	Err    *error
+	Err *error
 }
 
 func NewToolSuccess(text string) *ToolResponse {
@@ -54,7 +54,6 @@ func (r *ToolResponse) ErrorValue() error {
 		return nil
 	}
 	return *r.Err
->>>>>>> feat/post_agent
 }
 
 // Tool defines a function that a model may request during a loop run.
@@ -104,43 +103,7 @@ func DecodeToolArgs[T any](req *ai.ToolCall, target *T) error {
 	return nil
 }
 
-<<<<<<< HEAD
-// RenderToolSignatures renders non-nil tools as deterministic XML fragments,
-// sorted by tool name.
-func RenderToolSignatures(tools []Tool) string {
-	if len(tools) == 0 {
-		return ""
-	}
-
-	sorted := make([]Tool, 0, len(tools))
-	for _, tool := range tools {
-		if tool != nil {
-			sorted = append(sorted, tool)
-		}
-	}
-	sort.Slice(sorted, func(i, j int) bool {
-		return sorted[i].Name() < sorted[j].Name()
-	})
-
-	var builder strings.Builder
-	for _, t := range sorted {
-		builder.WriteString("\n<tool name=\"")
-		builder.WriteString(t.Name())
-		builder.WriteString("\">")
-		builder.WriteString("\n<description>")
-		builder.WriteString(t.Description())
-		builder.WriteString("</description>")
-		builder.WriteString("\n<signature>")
-		builder.WriteString(t.Params())
-		builder.WriteString("</signature>")
-		builder.WriteString("\n</tool>")
-	}
-	return builder.String()
-}
-
 // ToolCallToString returns a diagnostic representation of tc.
-=======
->>>>>>> feat/post_agent
 func ToolCallToString(tc ai.ToolCall) string {
 	var builder strings.Builder
 	builder.WriteString("id: ")

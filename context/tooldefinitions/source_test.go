@@ -62,7 +62,7 @@ func TestSourceBuildsToolDefinitionsPart(t *testing.T) {
 func TestSourceRendersClearSimpleToolDefinitions(t *testing.T) {
 	t.Parallel()
 
-	source, err := tooldefinitions.New([]loop.Tool{
+	source, err := tooldefinitions.New(&gaictx.SimpleRenderer{}, []loop.Tool{
 		staticTool{name: "search", description: "Searches the web.", params: `{"type":"object","properties":{"query":{"type":"string"}}}`},
 	}, nil)
 	if err != nil {
