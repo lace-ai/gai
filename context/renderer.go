@@ -11,6 +11,7 @@ import (
 	"github.com/lace-ai/gai"
 )
 
+// Renderer converts ordered prompt parts into the model-facing prompt string.
 type Renderer interface {
 	Render(ctx context.Context, contextParts []Part) (string, error)
 	SetRenderResultCallback(ctx context.Context, callback RenderResultCallback) error
@@ -20,11 +21,13 @@ type Renderer interface {
 // before a successful Render call returns.
 type RenderResultCallback func(parts []Part, prompt string)
 
+// RenderField is a named scalar attribute on a RenderNode.
 type RenderField struct {
 	Key   string
 	Value string
 }
 
+// RenderNode is the renderer-neutral tree emitted by Part and Content values.
 type RenderNode struct {
 	Type     string
 	Fields   []RenderField
@@ -33,6 +36,7 @@ type RenderNode struct {
 }
 
 type (
+	// XMLRenderer renders nodes as structured XML.
 	XMLRenderer struct {
 		// DebugSink enables detailed renderer events. Prompt content is included only
 		// when the sink's IncludeSensitiveData method returns true.
@@ -41,6 +45,7 @@ type (
 		DebugPreviewChars    int
 		renderResultCallback RenderResultCallback
 	}
+	// SimpleRenderer renders nodes as compact role-labelled plain text.
 	SimpleRenderer struct {
 		// DebugSink enables detailed renderer events. Prompt content is included only
 		// when the sink's IncludeSensitiveData method returns true.

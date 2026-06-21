@@ -14,15 +14,19 @@ const (
 	promptDebugPreviewLimit = 160
 )
 
+// ContextSource produces one prompt part using the remaining context budget.
+// Sources are evaluated in declaration order by Builder.BuildContext.
 type ContextSource interface {
 	Name() string
 	Function(ctx context.Context, TokenBudget int) (Part, error)
 }
 
+// TokenizerSetter is implemented by components that accept tokenizer injection.
 type TokenizerSetter interface {
 	SetTokenizer(tokenizer ai.Tokenizer)
 }
 
+// PromptBuilder is the prompt-construction contract consumed by agent loops.
 type PromptBuilder interface {
 	AppendContextSource(ctx context.Context, source ContextSource) error
 	AppendContextSources(ctx context.Context, sources ...ContextSource) error
@@ -33,6 +37,7 @@ type PromptBuilder interface {
 	SetUserPrompt(prompt string)
 }
 
+// TokenBudget exposes prompt-window configuration and remaining capacity.
 type TokenBudget interface {
 	SetTokenLimit(limit int) error
 	SetOutputTokenReserve(reserve int) error
@@ -40,17 +45,29 @@ type TokenBudget interface {
 	Tokenizer() ai.Tokenizer
 }
 
+// Definition configures a Builder.
 type Definition struct {
-	Renderer           Renderer
+	// Renderer converts the final ordered parts into a model prompt. XMLRenderer
+	// is used when Renderer is nil.
+	Renderer Renderer
+	// SystemInstructions are placed before context, user, and conversation parts.
 	SystemInstructions []Part
-	ContextSources     []ContextSource
-	UserPrompt         string
-	TokenBudget        int
+	// ContextSources dynamically produce context during BuildContext.
+	ContextSources []ContextSource
+	// UserPrompt is the current user input.
+	UserPrompt string
+	// TokenBudget is the total prompt window. Non-positive values disable budgeting.
+	TokenBudget int
+	// OutputTokenReserve is withheld from the prompt budget for model output.
 	OutputTokenReserve int
-	Tokenizer          ai.Tokenizer
-	DebugSink          gai.DebugSink
+	// Tokenizer counts parts and is propagated to compatible context sources.
+	Tokenizer ai.Tokenizer
+	// DebugSink receives prompt-building diagnostics.
+	DebugSink gai.DebugSink
 }
 
+// Builder assembles system instructions, dynamic context, user input, and loop
+// iterations into a rendered model prompt.
 type Builder struct {
 	SystemInstructions []Part
 	ContextSources     []ContextSource
@@ -64,6 +81,7 @@ type Builder struct {
 	OutputTokenReserve int
 }
 
+// New creates a prompt builder from def.
 func New(def Definition) *Builder {
 	renderer := def.Renderer
 	if renderer == nil {
@@ -86,6 +104,7 @@ func New(def Definition) *Builder {
 	}
 }
 
+// NewBuilder creates a builder with a renderer and total token budget.
 func NewBuilder(renderer Renderer, tokenBudget int) *Builder {
 	return New(Definition{
 		Renderer:    renderer,
