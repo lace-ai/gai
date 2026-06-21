@@ -15,6 +15,7 @@ var (
 	ErrMiddlewareAgentNotConfigured = errors.New("middleware agent is not configured")
 	ErrMiddlewareNameMissing        = errors.New("middleware name is missing")
 	ErrMiddlewareOutputInvalid      = errors.New("middleware output policy is invalid")
+	ErrMiddlewareFailureInvalid     = errors.New("middleware failure policy is invalid")
 )
 
 // OutputPolicy controls how an agent middleware transforms upstream tokens.
@@ -31,6 +32,22 @@ const (
 	ReplaceOutput
 )
 
+// FailurePolicy controls whether an agent-middleware failure fails the workflow.
+type FailurePolicy uint8
+
+const (
+	// PropagateFailure sends middleware failures through the workflow error stream
+	// and includes them in WorkflowResult.Errors.
+	PropagateFailure FailurePolicy = iota
+	// RecordFailure records middleware failures in StageResult without failing the
+	// surrounding workflow.
+	RecordFailure
+)
+
+// MiddlewareInputMapper projects the typed upstream workflow state into the
+// ordinary RunInput accepted by a nested agent.
+type MiddlewareInputMapper func(ctx context.Context, result WorkflowResult) (RunInput, error)
+
 // AgentMiddlewareConfig configures an agent as stream middleware.
 type AgentMiddlewareConfig struct {
 	// Name identifies the stage in WorkflowResult.Stages. The agent name is used
@@ -38,6 +55,12 @@ type AgentMiddlewareConfig struct {
 	Name string
 	// Output controls how the nested agent changes visible workflow tokens.
 	Output OutputPolicy
+	// MapInput controls exactly what the nested agent receives. When nil, the
+	// current visible text, original run ID, and metadata are forwarded.
+	MapInput MiddlewareInputMapper
+	// Failure controls whether nested-agent and input-mapping failures propagate
+	// to the surrounding workflow. The zero value is PropagateFailure.
+	Failure FailurePolicy
 	// ShouldRun overrides the default success-only policy. It receives the full
 	// upstream result and may enable stages such as failure auditing.
 	ShouldRun func(result WorkflowResult) bool
@@ -49,9 +72,9 @@ type AgentMiddleware struct {
 	config AgentMiddlewareConfig
 }
 
-// NewAgentMiddleware adapts an ordinary agent into workflow middleware. The
-// nested agent receives the current output in RunInput.Text and the complete
-// upstream snapshot in RunInput.Result.
+// NewAgentMiddleware adapts an ordinary agent into workflow middleware. Use
+// AgentMiddlewareConfig.MapInput when the nested agent needs a deliberate
+// projection of the upstream workflow state.
 func NewAgentMiddleware(agent *Agent, config AgentMiddlewareConfig) *AgentMiddleware {
 	return &AgentMiddleware{agent: agent, config: config}
 }
@@ -65,6 +88,9 @@ func (m *AgentMiddleware) validate() error {
 	}
 	if m.config.Output > ReplaceOutput {
 		return fmt.Errorf("%w: %d", ErrMiddlewareOutputInvalid, m.config.Output)
+	}
+	if m.config.Failure > RecordFailure {
+		return fmt.Errorf("%w: %d", ErrMiddlewareFailureInvalid, m.config.Failure)
 	}
 	return nil
 }
@@ -100,31 +126,26 @@ func (m *AgentMiddleware) Process(ctx context.Context, run *MiddlewareContext, u
 		}
 
 		postInput := RunInput{
-			ID:     result.Input.ID,
-			Text:   result.Text,
-			Meta:   cloneRunInput(result.Input, false).Meta,
-			Result: &result,
+			ID:   result.Input.ID,
+			Text: result.Text,
+			Meta: cloneRunInput(result.Input).Meta,
+		}
+		var err error
+		if m.config.MapInput != nil {
+			postInput, err = m.config.MapInput(ctx, result)
+		}
+		if err != nil {
+			m.finishSetupFailure(ctx, run, tokens, errs, upstreamTokens, upstreamErrs, err)
+			return
 		}
 		postWorkflow, err := m.agent.NewRun(ctx, postInput)
 		if err != nil {
-			send(ctx, errs, err)
-			if m.config.Output == ReplaceOutput {
-				for _, token := range upstreamTokens {
-					send(ctx, tokens, token)
-				}
-			}
-			stage := StageResult{
-				Name:   m.name(),
-				Output: m.config.Output,
-				Result: AgentResult{Errors: []error{err}},
-			}
-			visible := cloneTokens(upstreamTokens)
-			run.workflow.addStage(stage, visible, append(upstreamErrs, err))
+			m.finishSetupFailure(ctx, run, tokens, errs, upstreamTokens, upstreamErrs, err)
 			return
 		}
 
 		postTokens, postStatuses, postErrs := postWorkflow.Run(ctx)
-		stageTokens, stageErrs := consumePostAgent(ctx, postTokens, postStatuses, postErrs, tokens, errs, m.config.Output != PreserveOutput)
+		stageTokens, stageErrs := consumePostAgent(ctx, postTokens, postStatuses, postErrs, tokens, errs, m.config.Output != PreserveOutput, m.config.Failure == PropagateFailure)
 		postResult := postWorkflow.Result()
 		stage := StageResult{
 			Name:   m.name(),
@@ -138,10 +159,43 @@ func (m *AgentMiddleware) Process(ctx context.Context, run *MiddlewareContext, u
 			},
 		}
 		visible := visibleTokens(m.config.Output, upstreamTokens, stageTokens)
-		run.workflow.addStage(stage, visible, append(append([]error(nil), upstreamErrs...), stageErrs...))
+		workflowErrs := append([]error(nil), upstreamErrs...)
+		if m.config.Failure == PropagateFailure {
+			workflowErrs = append(workflowErrs, stageErrs...)
+		}
+		run.workflow.addStage(stage, visible, workflowErrs)
 	}()
 
 	return Stream{Tokens: tokens, Statuses: statuses, Errors: errs}
+}
+
+func (m *AgentMiddleware) finishSetupFailure(
+	ctx context.Context,
+	run *MiddlewareContext,
+	tokens chan<- ai.Token,
+	errs chan<- error,
+	upstreamTokens []ai.Token,
+	upstreamErrs []error,
+	err error,
+) {
+	if m.config.Failure == PropagateFailure {
+		send(ctx, errs, err)
+	}
+	if m.config.Output == ReplaceOutput {
+		for _, token := range upstreamTokens {
+			send(ctx, tokens, token)
+		}
+	}
+	stage := StageResult{
+		Name:   m.name(),
+		Output: m.config.Output,
+		Result: AgentResult{Errors: []error{err}},
+	}
+	workflowErrs := append([]error(nil), upstreamErrs...)
+	if m.config.Failure == PropagateFailure {
+		workflowErrs = append(workflowErrs, err)
+	}
+	run.workflow.addStage(stage, cloneTokens(upstreamTokens), workflowErrs)
 }
 
 func (m *AgentMiddleware) name() string {
@@ -205,6 +259,7 @@ func consumePostAgent(
 	outputTokens chan<- ai.Token,
 	outputErrs chan<- error,
 	forwardTokens bool,
+	forwardErrors bool,
 ) ([]ai.Token, []error) {
 	var capturedTokens []ai.Token
 	var capturedErrs []error
@@ -230,7 +285,9 @@ func consumePostAgent(
 			if err != nil {
 				capturedErrs = append(capturedErrs, err)
 			}
-			send(ctx, outputErrs, err)
+			if forwardErrors {
+				send(ctx, outputErrs, err)
+			}
 		}
 	}()
 	wg.Wait()

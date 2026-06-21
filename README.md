@@ -84,10 +84,10 @@ for err := range errs {
 }
 ```
 
-Agents can include stream middleware in their definition. Agent middleware sees
-the complete upstream result through `input.Result` and can preserve, append, or
-replace the visible token output. This memory agent records its own output while
-passing the assistant response through unchanged.
+Agents can include stream middleware in their definition. An input mapper can
+project the typed upstream workflow result into the ordinary `RunInput` accepted
+by the nested agent. This memory agent records its own output while passing the
+assistant response through unchanged.
 
 ```go
 memoryAgent := agent.New(agent.Definition{
@@ -95,8 +95,6 @@ memoryAgent := agent.New(agent.Definition{
   Model: model,
   Tools: []loop.Tool{saveMemoryTool},
   Prompt: func(ctx context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
-    // input.Text is the current visible output. input.Result also contains the
-    // original input, primary transcript, iterations, errors, and prior stages.
     return memoryPrompt(input), nil
   },
 })
@@ -107,7 +105,19 @@ assistant := agent.New(agent.Definition{
   Prompt: assistantPrompt,
   Middleware: []agent.Middleware{
     agent.NewAgentMiddleware(memoryAgent, agent.AgentMiddlewareConfig{
-      Output: agent.PreserveOutput,
+      Output:  agent.PreserveOutput,
+      Failure: agent.RecordFailure,
+      MapInput: func(ctx context.Context, result agent.WorkflowResult) (agent.RunInput, error) {
+        observation, err := buildMemoryObservation(ctx, result)
+        if err != nil {
+          return agent.RunInput{}, err
+        }
+        return agent.RunInput{
+          ID:   result.Input.ID,
+          Text: observation,
+          Meta: result.Input.Meta,
+        }, nil
+      },
     }),
   },
 })
@@ -405,9 +415,10 @@ in declaration order. Callers must consume the token, status, and error channels
 After they close, `Workflow.Result()` contains the immutable primary result, the
 final visible output, accumulated errors, and named middleware stages.
 
-An ordinary agent can become middleware with `NewAgentMiddleware`. It receives
-the current visible text in `RunInput.Text` and a typed upstream snapshot in
-`RunInput.Result`:
+An ordinary agent can become middleware with `NewAgentMiddleware`. By default it
+receives the current visible text, original run ID, and metadata. Set
+`AgentMiddlewareConfig.MapInput` to deliberately project the typed upstream
+`WorkflowResult` into a different `RunInput`:
 
 - `PreserveOutput` streams the upstream output unchanged and keeps the nested
   agent result only in `WorkflowResult.Stages`.
@@ -417,7 +428,9 @@ the current visible text in `RunInput.Text` and a typed upstream snapshot in
 
 Agent middleware runs only after a successful upstream result by default. Set
 `AgentMiddlewareConfig.ShouldRun` to implement policies such as failure auditing.
-Nested-agent errors are sent through the workflow error channel.
+Nested-agent errors are sent through the workflow error channel by default. Set
+`Failure: RecordFailure` for best-effort stages whose failures should remain in
+`StageResult.Result.Errors` without failing the surrounding workflow.
 
 For transformations that do not require another agent, use `MiddlewareFunc`:
 

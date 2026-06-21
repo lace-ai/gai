@@ -101,7 +101,7 @@ type Workflow struct {
 }
 
 func newWorkflow(input RunInput, l *loop.Loop, middleware []Middleware) *Workflow {
-	input = cloneRunInput(input, false)
+	input = cloneRunInput(input)
 	return &Workflow{
 		Loop:       l,
 		middleware: append([]Middleware(nil), middleware...),
@@ -316,16 +316,13 @@ func tokenText(tokens []ai.Token) string {
 	return string(text)
 }
 
-func cloneRunInput(input RunInput, includeResult bool) RunInput {
+func cloneRunInput(input RunInput) RunInput {
 	cloned := input
 	if input.Meta != nil {
 		cloned.Meta = make(map[string]any, len(input.Meta))
 		for key, value := range input.Meta {
 			cloned.Meta[key] = value
 		}
-	}
-	if !includeResult {
-		cloned.Result = nil
 	}
 	return cloned
 }
@@ -348,7 +345,7 @@ func cloneStageResult(stage StageResult) StageResult {
 }
 
 func cloneWorkflowResult(result WorkflowResult) WorkflowResult {
-	result.Input = cloneRunInput(result.Input, false)
+	result.Input = cloneRunInput(result.Input)
 	result.Primary = cloneAgentResult(result.Primary)
 	result.Tokens = cloneTokens(result.Tokens)
 	result.Errors = append([]error(nil), result.Errors...)

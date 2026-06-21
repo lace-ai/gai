@@ -9,9 +9,6 @@ import (
 )
 
 // RunInput contains the application input for one agent run.
-//
-// When an agent is executed through AgentMiddleware, Result contains a snapshot
-// of the upstream workflow. Result is nil for the primary agent.
 type RunInput struct {
 	ID string
 	// Text is the user input for a primary agent and the current visible output
@@ -21,9 +18,6 @@ type RunInput struct {
 	MaxTokens int
 	// Meta carries application data such as user, session, or request IDs.
 	Meta map[string]any
-	// Result gives middleware agents typed access to the original input, primary
-	// transcript, current output, errors, and results from earlier stages.
-	Result *WorkflowResult
 }
 
 // Prompt creates the prompt builder used by one run.

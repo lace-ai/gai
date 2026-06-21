@@ -121,19 +121,13 @@ func TestAgentMiddlewareOutputPolicies(t *testing.T) {
 			if len(consumed.statuses) != 1 {
 				t.Fatalf("expected only the primary status, got %d", len(consumed.statuses))
 			}
-			if postInput.Result == nil || postInput.Result.Input.Text != "question" || postInput.Result.Text != "main" {
-				t.Fatalf("post-agent did not receive the workflow result: %+v", postInput.Result)
-			}
-			if postInput.Text != "main" || postInput.Meta["session_id"] != "session-1" {
+			if postInput.ID != "run-1" || postInput.Text != "main" || postInput.Meta["session_id"] != "session-1" {
 				t.Fatalf("unexpected automatic post input: %+v", postInput)
 			}
 
 			result := workflow.Result()
 			if !result.Complete || result.Text != tt.wantOutput || result.Primary.Text != "main" {
 				t.Fatalf("unexpected workflow result: %+v", result)
-			}
-			if result.Input.Result != nil {
-				t.Fatal("primary workflow input retained a parent result")
 			}
 			if len(result.Stages) != 1 || result.Stages[0].Name != "post" || result.Stages[0].Result.Text != "post" {
 				t.Fatalf("unexpected stage result: %+v", result.Stages)
@@ -142,16 +136,47 @@ func TestAgentMiddlewareOutputPolicies(t *testing.T) {
 	}
 }
 
+func TestAgentMiddlewareMapsWorkflowResult(t *testing.T) {
+	var mappedResult agent.WorkflowResult
+	var postInput agent.RunInput
+	post := agent.New(agent.Definition{
+		Name:  "post",
+		Model: &mocks.MockModel{Responses: []mocks.MockModelResponse{{Res: ai.AIResponse{Text: "post"}}}},
+		Prompt: func(_ context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
+			postInput = input
+			return &testPromptBuilder{prompt: input.Text}, nil
+		},
+	})
+	main := workflowAgent("main", "main", agent.NewAgentMiddleware(post, agent.AgentMiddlewareConfig{
+		Output: agent.PreserveOutput,
+		MapInput: func(_ context.Context, result agent.WorkflowResult) (agent.RunInput, error) {
+			mappedResult = result
+			return agent.RunInput{ID: "mapped", Text: "observation"}, nil
+		},
+	}))
+	workflow, err := main.NewRun(context.Background(), agent.RunInput{Text: "question"})
+	if err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	consumeWorkflow(t, workflow)
+	if mappedResult.Input.Text != "question" || mappedResult.Text != "main" {
+		t.Fatalf("input mapper did not receive the workflow result: %+v", mappedResult)
+	}
+	if postInput.ID != "mapped" || postInput.Text != "observation" {
+		t.Fatalf("post agent did not receive mapped input: %+v", postInput)
+	}
+}
+
 func TestAgentMiddlewareRunsInOrderWithPriorStageResults(t *testing.T) {
 	var order []string
+	firstStageCount := -1
+	secondStageCount := -1
+	secondPriorText := ""
 	first := agent.New(agent.Definition{
 		Name:  "first",
 		Model: &mocks.MockModel{Responses: []mocks.MockModelResponse{{Res: ai.AIResponse{Text: "memory"}}}},
 		Prompt: func(_ context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
 			order = append(order, "first")
-			if input.Result == nil || len(input.Result.Stages) != 0 {
-				t.Fatalf("unexpected first-stage input: %+v", input.Result)
-			}
 			return &testPromptBuilder{prompt: input.Text}, nil
 		},
 	})
@@ -160,15 +185,27 @@ func TestAgentMiddlewareRunsInOrderWithPriorStageResults(t *testing.T) {
 		Model: &mocks.MockModel{Responses: []mocks.MockModelResponse{{Res: ai.AIResponse{Text: "audit"}}}},
 		Prompt: func(_ context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
 			order = append(order, "second")
-			if input.Result == nil || len(input.Result.Stages) != 1 || input.Result.Stages[0].Result.Text != "memory" {
-				t.Fatalf("second stage did not receive first stage: %+v", input.Result)
-			}
 			return &testPromptBuilder{prompt: input.Text}, nil
 		},
 	})
 	main := workflowAgent("main", "main",
-		agent.NewAgentMiddleware(first, agent.AgentMiddlewareConfig{Output: agent.PreserveOutput}),
-		agent.NewAgentMiddleware(second, agent.AgentMiddlewareConfig{Output: agent.AppendOutput}),
+		agent.NewAgentMiddleware(first, agent.AgentMiddlewareConfig{
+			Output: agent.PreserveOutput,
+			MapInput: func(_ context.Context, result agent.WorkflowResult) (agent.RunInput, error) {
+				firstStageCount = len(result.Stages)
+				return agent.RunInput{Text: result.Text}, nil
+			},
+		}),
+		agent.NewAgentMiddleware(second, agent.AgentMiddlewareConfig{
+			Output: agent.AppendOutput,
+			MapInput: func(_ context.Context, result agent.WorkflowResult) (agent.RunInput, error) {
+				secondStageCount = len(result.Stages)
+				if len(result.Stages) > 0 {
+					secondPriorText = result.Stages[0].Result.Text
+				}
+				return agent.RunInput{Text: result.Text}, nil
+			},
+		}),
 	)
 
 	workflow, err := main.NewRun(context.Background(), agent.RunInput{Text: "question"})
@@ -182,8 +219,95 @@ func TestAgentMiddlewareRunsInOrderWithPriorStageResults(t *testing.T) {
 	if !reflect.DeepEqual(order, []string{"first", "second"}) {
 		t.Fatalf("unexpected middleware order: %v", order)
 	}
+	if firstStageCount != 0 || secondStageCount != 1 || secondPriorText != "memory" {
+		t.Fatalf("unexpected mapped stage state: first=%d second=%d prior=%q", firstStageCount, secondStageCount, secondPriorText)
+	}
 	if got := workflow.Result().Stages; len(got) != 2 || got[0].Name != "first" || got[1].Name != "second" {
 		t.Fatalf("unexpected stages: %+v", got)
+	}
+}
+
+func TestAgentMiddlewareFailurePropagation(t *testing.T) {
+	stageErr := errors.New("stage failed")
+	newPost := func() *agent.Agent {
+		return agent.New(agent.Definition{
+			Name: "post",
+			Model: &mocks.MockModel{Responses: []mocks.MockModelResponse{
+				{Err: stageErr},
+				{Err: stageErr},
+			}},
+			Prompt: func(_ context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
+				return &testPromptBuilder{prompt: input.Text}, nil
+			},
+			Limits: agent.Limits{RetryCount: 1},
+		})
+	}
+
+	for _, tt := range []struct {
+		name      string
+		failure   agent.FailurePolicy
+		wantError bool
+	}{
+		{name: "propagate", failure: agent.PropagateFailure, wantError: true},
+		{name: "record", failure: agent.RecordFailure, wantError: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			main := workflowAgent("main", "main", agent.NewAgentMiddleware(newPost(), agent.AgentMiddlewareConfig{
+				Output:  agent.PreserveOutput,
+				Failure: tt.failure,
+			}))
+			workflow, err := main.NewRun(context.Background(), agent.RunInput{Text: "question"})
+			if err != nil {
+				t.Fatalf("NewRun failed: %v", err)
+			}
+			consumed := consumeWorkflow(t, workflow)
+			if got := tokensText(consumed.tokens); got != "main" {
+				t.Fatalf("unexpected output: %q", got)
+			}
+			if (len(consumed.errs) > 0) != tt.wantError {
+				t.Fatalf("unexpected streamed errors: %v", consumed.errs)
+			}
+			result := workflow.Result()
+			if (len(result.Errors) > 0) != tt.wantError {
+				t.Fatalf("unexpected workflow errors: %v", result.Errors)
+			}
+			if len(result.Stages) != 1 || len(result.Stages[0].Result.Errors) == 0 {
+				t.Fatalf("stage failure was not recorded: %+v", result.Stages)
+			}
+		})
+	}
+}
+
+func TestAgentMiddlewareRecordsInputMappingFailure(t *testing.T) {
+	mapErr := errors.New("map input")
+	postCalled := false
+	post := agent.New(agent.Definition{
+		Name:  "post",
+		Model: &mocks.MockModel{},
+		Prompt: func(_ context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
+			postCalled = true
+			return &testPromptBuilder{prompt: input.Text}, nil
+		},
+	})
+	main := workflowAgent("main", "main", agent.NewAgentMiddleware(post, agent.AgentMiddlewareConfig{
+		Output:  agent.PreserveOutput,
+		Failure: agent.RecordFailure,
+		MapInput: func(context.Context, agent.WorkflowResult) (agent.RunInput, error) {
+			return agent.RunInput{}, mapErr
+		},
+	}))
+
+	workflow, err := main.NewRun(context.Background(), agent.RunInput{Text: "question"})
+	if err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	consumed := consumeWorkflow(t, workflow)
+	if len(consumed.errs) != 0 || postCalled {
+		t.Fatalf("mapping failure propagated or ran post agent: errors=%v called=%v", consumed.errs, postCalled)
+	}
+	result := workflow.Result()
+	if len(result.Errors) != 0 || len(result.Stages) != 1 || len(result.Stages[0].Result.Errors) != 1 || !errors.Is(result.Stages[0].Result.Errors[0], mapErr) {
+		t.Fatalf("mapping failure was not isolated to the stage: %+v", result)
 	}
 }
 
@@ -258,5 +382,17 @@ func TestAgentValidatesMiddleware(t *testing.T) {
 	}).NewRun(context.Background(), agent.RunInput{})
 	if !errors.Is(err, agent.ErrMiddlewareNotConfigured) {
 		t.Fatalf("expected middleware validation error, got %v", err)
+	}
+
+	post := workflowAgent("post", "post")
+	_, err = agent.New(agent.Definition{
+		Model:  &mocks.MockModel{},
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) { return &testPromptBuilder{}, nil },
+		Middleware: []agent.Middleware{agent.NewAgentMiddleware(post, agent.AgentMiddlewareConfig{
+			Failure: agent.FailurePolicy(255),
+		})},
+	}).NewRun(context.Background(), agent.RunInput{})
+	if !errors.Is(err, agent.ErrMiddlewareFailureInvalid) {
+		t.Fatalf("expected middleware failure-policy error, got %v", err)
 	}
 }
