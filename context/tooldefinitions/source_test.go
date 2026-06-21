@@ -20,7 +20,7 @@ import (
 
 func TestSourceBuildsToolDefinitionsPart(t *testing.T) {
 	sink := &captureSink{}
-	source, err := tooldefinitions.New([]loop.Tool{
+	source, err := tooldefinitions.New(&gaictx.XMLRenderer{}, []loop.Tool{
 		staticTool{name: "weather", description: "Gets current weather.", params: `{"type":"object","properties":{"city":{"type":"string"}}}`},
 		staticTool{name: "search", description: "Searches documentation.", params: `{"type":"object","properties":{"query":{"type":"string"}}}`},
 	}, sink)
@@ -70,7 +70,7 @@ func TestSourceErrorHandling(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := tooldefinitions.New(test.tools, nil)
+			_, err := tooldefinitions.New(&gaictx.XMLRenderer{}, test.tools, nil)
 			if !errors.Is(err, test.wantErr) {
 				t.Fatalf("error = %v, want %v", err, test.wantErr)
 			}
@@ -78,7 +78,7 @@ func TestSourceErrorHandling(t *testing.T) {
 	}
 
 	sink := &captureSink{}
-	source, err := tooldefinitions.New([]loop.Tool{
+	source, err := tooldefinitions.New(&gaictx.XMLRenderer{}, []loop.Tool{
 		staticTool{name: "broken", description: "Broken definition.", params: `{not-json}`},
 	}, sink)
 	if err != nil {
@@ -104,7 +104,7 @@ func TestSourceTracing(t *testing.T) {
 		_ = provider.Shutdown(context.Background())
 	})
 
-	source, err := tooldefinitions.New([]loop.Tool{
+	source, err := tooldefinitions.New(&gaictx.XMLRenderer{}, []loop.Tool{
 		staticTool{name: "broken", description: "Broken definition.", params: "bad"},
 	}, nil)
 	if err != nil {

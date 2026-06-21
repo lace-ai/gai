@@ -351,6 +351,30 @@ func TestRenderersNotifyRenderResultCallbackForEmptyPrompt(t *testing.T) {
 	}
 }
 
+func TestRenderToolSignatures(t *testing.T) {
+	t.Parallel()
+
+	tools := []toolSignatureTestTool{
+		{name: "weather", description: "Gets weather.", params: `{"type":"object"}`},
+		{name: "search", description: "Searches docs.", params: `{"type":"object"}`},
+	}
+	want := "\n<tool name=\"search\">\n<description>Searches docs.</description>\n<signature>{\"type\":\"object\"}</signature>\n</tool>\n<tool name=\"weather\">\n<description>Gets weather.</description>\n<signature>{\"type\":\"object\"}</signature>\n</tool>"
+
+	renderers := []gaictx.Renderer{
+		&gaictx.XMLRenderer{},
+		&gaictx.SimpleRenderer{},
+	}
+	for _, renderer := range renderers {
+		renderTools := make([]gaictx.ToolSignature, 0, len(tools))
+		for _, tool := range tools {
+			renderTools = append(renderTools, tool)
+		}
+		if got := renderer.RenderToolSignatures(renderTools); got != want {
+			t.Fatalf("%T.RenderToolSignatures() = %q, want %q", renderer, got, want)
+		}
+	}
+}
+
 type failingRenderPart struct {
 	err error
 }
@@ -391,3 +415,11 @@ func (p *historyPartAdapter) Render(ctx context.Context) (gaictx.RenderNode, err
 	}
 	return node, nil
 }
+
+type toolSignatureTestTool struct {
+	name, description, params string
+}
+
+func (t toolSignatureTestTool) Name() string        { return t.name }
+func (t toolSignatureTestTool) Description() string { return t.description }
+func (t toolSignatureTestTool) Params() string      { return t.params }

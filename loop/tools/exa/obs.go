@@ -111,7 +111,7 @@ func (o *searchObserver) Failure(ctx context.Context, stage string, err error) *
 		fields["request_id"] = o.requestID
 	}
 	o.emit(ctx, "exa_search_failed", fields, err)
-	return &loop.ToolResponse{Err: err}
+	return loop.NewToolError(err)
 }
 
 func (o *searchObserver) baseFields() map[string]any {
