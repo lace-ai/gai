@@ -89,6 +89,29 @@ summary: older turns
 	}
 }
 
+func TestHistoryPartTruncatesToolResultToPrefix(t *testing.T) {
+	t.Parallel()
+
+	result := strings.Repeat("a", 499) + "👋" + "discarded"
+	part := &history.Part{
+		Contents: []history.Content{
+			{Role: gaictx.RoleTool, Value: gaictx.NewToolResultContent("search", result, false, "")},
+		},
+	}
+
+	got, err := (gaictx.SimpleRenderer{}).Render(context.Background(), []gaictx.Part{part})
+	if err != nil {
+		t.Fatalf("Render failed: %v", err)
+	}
+	want := "<history>\ntool res:\n" + strings.Repeat("a", 499) + "👋\n[tool result truncated]\n</history>"
+	if got != want {
+		t.Fatalf("unexpected truncated tool result:\nwant %q\n got %q", want, got)
+	}
+	if strings.Contains(got, "discarded") {
+		t.Fatalf("history contains the discarded tool-result suffix: %q", got)
+	}
+}
+
 func TestHistoryPartRenderEmpty(t *testing.T) {
 	t.Parallel()
 
