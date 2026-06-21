@@ -167,8 +167,8 @@ func (w *Workflow) capturePrimary(ctx context.Context, upstream Stream) Stream {
 		result := AgentResult{
 			Tokens:     cloneTokens(tokens),
 			Text:       tokenText(tokens),
-			Messages:   append([]gaictx.Message(nil), w.Loop.Messages()...),
-			Iterations: append([]loop.Iteration(nil), w.Loop.Iterations...),
+			Messages:   cloneMessages(w.Loop.Messages()),
+			Iterations: cloneIterations(w.Loop.Iterations),
 			Errors:     append([]error(nil), errs...),
 		}
 		w.mu.Lock()
@@ -181,63 +181,70 @@ func (w *Workflow) capturePrimary(ctx context.Context, upstream Stream) Stream {
 }
 
 func (w *Workflow) captureFinal(ctx context.Context, upstream Stream) Stream {
-	tokens := make(chan ai.Token, 16)
-	statuses := make(chan loop.IterationInformation, 16)
-	errs := make(chan error)
-
-	var capturedTokens []ai.Token
-	var capturedErrs []error
-	var wg sync.WaitGroup
-	wg.Add(3)
-	go func() {
-		defer wg.Done()
-		for token := range upstream.Tokens {
-			capturedTokens = append(capturedTokens, token)
-			send(ctx, tokens, token)
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		for status := range upstream.Statuses {
-			send(ctx, statuses, status)
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		for err := range upstream.Errors {
-			if err != nil {
-				capturedErrs = append(capturedErrs, err)
-			}
-		}
-	}()
-	go func() {
-		wg.Wait()
+	return captureStream(ctx, upstream, func(tokens []ai.Token, errs []error) {
 		w.mu.Lock()
-		w.result.Tokens = cloneTokens(capturedTokens)
-		w.result.Text = tokenText(capturedTokens)
-		w.result.Errors = append([]error(nil), capturedErrs...)
-		w.mu.Unlock()
-		close(tokens)
-		close(statuses)
-		for _, err := range capturedErrs {
-			errs <- err
-		}
-		w.mu.Lock()
+		defer w.mu.Unlock()
+		w.result.Tokens = cloneTokens(tokens)
+		w.result.Text = tokenText(tokens)
+		w.result.Errors = append([]error(nil), errs...)
 		w.result.Complete = true
-		w.mu.Unlock()
-		close(errs)
-	}()
-
-	return Stream{Tokens: tokens, Statuses: statuses, Errors: errs}
+	})
 }
 
-func (w *Workflow) addStage(stage StageResult, tokens []ai.Token, errs []error) {
+func (w *Workflow) addStage(stage StageResult, tokens []ai.Token) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.result.Stages = append(w.result.Stages, cloneStageResult(stage))
 	w.result.Tokens = cloneTokens(tokens)
 	w.result.Text = tokenText(tokens)
-	w.result.Errors = append([]error(nil), errs...)
+}
+
+type streamRelay struct {
+	Tokens   chan<- ai.Token
+	Statuses chan<- loop.IterationInformation
+	Errors   chan<- error
+}
+
+type capturedStream struct {
+	Tokens []ai.Token
+	Errors []error
+}
+
+func drainStream(ctx context.Context, upstream Stream, relay streamRelay) capturedStream {
+	var captured capturedStream
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		for token := range upstream.Tokens {
+			captured.Tokens = append(captured.Tokens, token)
+			if relay.Tokens != nil {
+				send(ctx, relay.Tokens, token)
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for status := range upstream.Statuses {
+			if relay.Statuses != nil {
+				send(ctx, relay.Statuses, status)
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for err := range upstream.Errors {
+			if err == nil {
+				continue
+			}
+			captured.Errors = append(captured.Errors, err)
+			if relay.Errors != nil {
+				send(ctx, relay.Errors, err)
+			}
+		}
+	}()
+	wg.Wait()
+	return captured
 }
 
 func captureStream(ctx context.Context, upstream Stream, completed func([]ai.Token, []error)) Stream {
@@ -245,36 +252,13 @@ func captureStream(ctx context.Context, upstream Stream, completed func([]ai.Tok
 	statuses := make(chan loop.IterationInformation, 16)
 	errs := make(chan error, 1)
 
-	var capturedTokens []ai.Token
-	var capturedErrs []error
-	var wg sync.WaitGroup
-	wg.Add(3)
-
 	go func() {
-		defer wg.Done()
-		for token := range upstream.Tokens {
-			capturedTokens = append(capturedTokens, token)
-			send(ctx, tokens, token)
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		for status := range upstream.Statuses {
-			send(ctx, statuses, status)
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		for err := range upstream.Errors {
-			if err != nil {
-				capturedErrs = append(capturedErrs, err)
-			}
-			send(ctx, errs, err)
-		}
-	}()
-	go func() {
-		wg.Wait()
-		completed(capturedTokens, capturedErrs)
+		captured := drainStream(ctx, upstream, streamRelay{
+			Tokens:   tokens,
+			Statuses: statuses,
+			Errors:   errs,
+		})
+		completed(captured.Tokens, captured.Errors)
 		close(tokens)
 		close(statuses)
 		close(errs)
@@ -328,13 +312,76 @@ func cloneRunInput(input RunInput) RunInput {
 }
 
 func cloneTokens(tokens []ai.Token) []ai.Token {
-	return append([]ai.Token(nil), tokens...)
+	cloned := make([]ai.Token, len(tokens))
+	for i, token := range tokens {
+		cloned[i] = token
+		cloned[i].Data = append([]byte(nil), token.Data...)
+		cloned[i].ToolCall = cloneToolCall(token.ToolCall)
+	}
+	return cloned
+}
+
+func cloneToolCall(call *ai.ToolCall) *ai.ToolCall {
+	if call == nil {
+		return nil
+	}
+	cloned := *call
+	cloned.Args = append([]byte(nil), call.Args...)
+	return &cloned
+}
+
+func cloneMessages(messages []gaictx.Message) []gaictx.Message {
+	cloned := make([]gaictx.Message, len(messages))
+	for i, message := range messages {
+		cloned[i] = message
+		if message.TokenCount != nil {
+			cloned[i].TokenCount = make(map[string]int, len(message.TokenCount))
+			for tokenizer, count := range message.TokenCount {
+				cloned[i].TokenCount[tokenizer] = count
+			}
+		}
+	}
+	return cloned
+}
+
+func cloneIterations(iterations []loop.Iteration) []loop.Iteration {
+	cloned := make([]loop.Iteration, len(iterations))
+	for i, iteration := range iterations {
+		cloned[i] = iteration
+		cloned[i].Parts = make([]loop.IterationPart, len(iteration.Parts))
+		for j, part := range iteration.Parts {
+			cloned[i].Parts[j] = part
+			if part.Response != nil {
+				response := *part.Response
+				cloned[i].Parts[j].Response = &response
+			}
+			cloned[i].Parts[j].ToolReq = cloneToolCall(part.ToolReq)
+			cloned[i].Parts[j].ToolResp = cloneToolResponse(part.ToolResp)
+		}
+	}
+	return cloned
+}
+
+func cloneToolResponse(response *loop.ToolResponse) *loop.ToolResponse {
+	if response == nil {
+		return nil
+	}
+	cloned := *response
+	if response.Text != nil {
+		text := *response.Text
+		cloned.Text = &text
+	}
+	if response.Err != nil {
+		err := *response.Err
+		cloned.Err = &err
+	}
+	return &cloned
 }
 
 func cloneAgentResult(result AgentResult) AgentResult {
 	result.Tokens = cloneTokens(result.Tokens)
-	result.Messages = append([]gaictx.Message(nil), result.Messages...)
-	result.Iterations = append([]loop.Iteration(nil), result.Iterations...)
+	result.Messages = cloneMessages(result.Messages)
+	result.Iterations = cloneIterations(result.Iterations)
 	result.Errors = append([]error(nil), result.Errors...)
 	return result
 }

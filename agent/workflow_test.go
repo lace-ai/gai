@@ -227,7 +227,7 @@ func TestAgentMiddlewareRunsInOrderWithPriorStageResults(t *testing.T) {
 	}
 }
 
-func TestAgentMiddlewareFailurePropagation(t *testing.T) {
+func TestAgentMiddlewareErrorPolicy(t *testing.T) {
 	stageErr := errors.New("stage failed")
 	newPost := func() *agent.Agent {
 		return agent.New(agent.Definition{
@@ -244,17 +244,19 @@ func TestAgentMiddlewareFailurePropagation(t *testing.T) {
 	}
 
 	for _, tt := range []struct {
-		name      string
-		failure   agent.FailurePolicy
-		wantError bool
+		name        string
+		output      agent.OutputPolicy
+		errorPolicy agent.ErrorPolicy
+		wantError   bool
 	}{
-		{name: "propagate", failure: agent.PropagateFailure, wantError: true},
-		{name: "record", failure: agent.RecordFailure, wantError: false},
+		{name: "preserve and propagate", output: agent.PreserveOutput, errorPolicy: agent.PropagateError, wantError: true},
+		{name: "append and record", output: agent.AppendOutput, errorPolicy: agent.RecordError, wantError: false},
+		{name: "replace and record", output: agent.ReplaceOutput, errorPolicy: agent.RecordError, wantError: false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			main := workflowAgent("main", "main", agent.NewAgentMiddleware(newPost(), agent.AgentMiddlewareConfig{
-				Output:  agent.PreserveOutput,
-				Failure: tt.failure,
+				Output:      tt.output,
+				ErrorPolicy: tt.errorPolicy,
 			}))
 			workflow, err := main.NewRun(context.Background(), agent.RunInput{Text: "question"})
 			if err != nil {
@@ -290,8 +292,8 @@ func TestAgentMiddlewareRecordsInputMappingFailure(t *testing.T) {
 		},
 	})
 	main := workflowAgent("main", "main", agent.NewAgentMiddleware(post, agent.AgentMiddlewareConfig{
-		Output:  agent.PreserveOutput,
-		Failure: agent.RecordFailure,
+		Output:      agent.PreserveOutput,
+		ErrorPolicy: agent.RecordError,
 		MapInput: func(context.Context, agent.WorkflowResult) (agent.RunInput, error) {
 			return agent.RunInput{}, mapErr
 		},
@@ -311,7 +313,7 @@ func TestAgentMiddlewareRecordsInputMappingFailure(t *testing.T) {
 	}
 }
 
-func TestAgentMiddlewareFailurePolicy(t *testing.T) {
+func TestAgentMiddlewareRunPolicy(t *testing.T) {
 	modelErr := errors.New("model failed")
 	newMain := func(middleware agent.Middleware) *agent.Agent {
 		return agent.New(agent.Definition{
@@ -389,10 +391,21 @@ func TestAgentValidatesMiddleware(t *testing.T) {
 		Model:  &mocks.MockModel{},
 		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) { return &testPromptBuilder{}, nil },
 		Middleware: []agent.Middleware{agent.NewAgentMiddleware(post, agent.AgentMiddlewareConfig{
-			Failure: agent.FailurePolicy(255),
+			ErrorPolicy: agent.ErrorPolicy(255),
 		})},
 	}).NewRun(context.Background(), agent.RunInput{})
-	if !errors.Is(err, agent.ErrMiddlewareFailureInvalid) {
+	if !errors.Is(err, agent.ErrMiddlewareErrorPolicyInvalid) {
 		t.Fatalf("expected middleware failure-policy error, got %v", err)
+	}
+
+	nested := workflowAgent("nested", "nested")
+	postWithMiddleware := workflowAgent("post", "post", agent.NewAgentMiddleware(nested, agent.AgentMiddlewareConfig{}))
+	_, err = agent.New(agent.Definition{
+		Model:      &mocks.MockModel{},
+		Prompt:     func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) { return &testPromptBuilder{}, nil },
+		Middleware: []agent.Middleware{agent.NewAgentMiddleware(postWithMiddleware, agent.AgentMiddlewareConfig{})},
+	}).NewRun(context.Background(), agent.RunInput{})
+	if !errors.Is(err, agent.ErrMiddlewareAgentNested) {
+		t.Fatalf("expected nested middleware-agent error, got %v", err)
 	}
 }

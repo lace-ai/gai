@@ -105,8 +105,8 @@ assistant := agent.New(agent.Definition{
   Prompt: assistantPrompt,
   Middleware: []agent.Middleware{
     agent.NewAgentMiddleware(memoryAgent, agent.AgentMiddlewareConfig{
-      Output:  agent.PreserveOutput,
-      Failure: agent.RecordFailure,
+      Output:      agent.PreserveOutput,
+      ErrorPolicy: agent.RecordError,
       MapInput: func(ctx context.Context, result agent.WorkflowResult) (agent.RunInput, error) {
         observation, err := buildMemoryObservation(ctx, result)
         if err != nil {
@@ -422,14 +422,19 @@ receives the current visible text, original run ID, and metadata. Set
 
 - `PreserveOutput` streams the upstream output unchanged and keeps the nested
   agent result only in `WorkflowResult.Stages`.
-- `AppendOutput` streams the upstream output followed by the nested agent output.
-- `ReplaceOutput` buffers the upstream output and, when the stage runs, emits
-  only the nested agent output.
+- `AppendOutput` streams the upstream output, then emits the nested agent output
+  after that stage completes successfully.
+- `ReplaceOutput` buffers the upstream output and emits the nested agent output
+  only after the stage completes successfully.
+
+Failed append and replace stages leave the upstream output unchanged. An agent
+used through `NewAgentMiddleware` cannot define middleware of its own; compose
+stages on the parent workflow instead.
 
 Agent middleware runs only after a successful upstream result by default. Set
 `AgentMiddlewareConfig.ShouldRun` to implement policies such as failure auditing.
 Nested-agent errors are sent through the workflow error channel by default. Set
-`Failure: RecordFailure` for best-effort stages whose failures should remain in
+`ErrorPolicy: RecordError` for best-effort stages whose failures should remain in
 `StageResult.Result.Errors` without failing the surrounding workflow.
 
 For transformations that do not require another agent, use `MiddlewareFunc`:

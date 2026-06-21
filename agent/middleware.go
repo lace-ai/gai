@@ -4,18 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 
 	"github.com/lace-ai/gai/ai"
-	gaictx "github.com/lace-ai/gai/context"
 	"github.com/lace-ai/gai/loop"
 )
 
 var (
 	ErrMiddlewareAgentNotConfigured = errors.New("middleware agent is not configured")
+	ErrMiddlewareAgentNested        = errors.New("middleware agent cannot define middleware")
 	ErrMiddlewareNameMissing        = errors.New("middleware name is missing")
 	ErrMiddlewareOutputInvalid      = errors.New("middleware output policy is invalid")
-	ErrMiddlewareFailureInvalid     = errors.New("middleware failure policy is invalid")
+	ErrMiddlewareErrorPolicyInvalid = errors.New("middleware error policy is invalid")
 )
 
 // OutputPolicy controls how an agent middleware transforms upstream tokens.
@@ -27,26 +26,21 @@ const (
 	PreserveOutput OutputPolicy = iota
 	// AppendOutput forwards upstream tokens followed by middleware-agent tokens.
 	AppendOutput
-	// ReplaceOutput buffers upstream tokens and, when the stage runs, emits
-	// middleware-agent tokens instead.
+	// ReplaceOutput buffers upstream tokens and emits middleware-agent tokens only
+	// when the middleware agent completes successfully.
 	ReplaceOutput
 )
 
-// FailurePolicy controls whether an agent-middleware failure fails the workflow.
-type FailurePolicy uint8
+// ErrorPolicy controls whether an agent-middleware failure fails the workflow.
+type ErrorPolicy uint8
 
 const (
-	// PropagateFailure sends middleware failures through the workflow error stream
-	// and includes them in WorkflowResult.Errors.
-	PropagateFailure FailurePolicy = iota
-	// RecordFailure records middleware failures in StageResult without failing the
+	// PropagateError sends middleware failures through the workflow error stream.
+	PropagateError ErrorPolicy = iota
+	// RecordError records middleware failures in StageResult without failing the
 	// surrounding workflow.
-	RecordFailure
+	RecordError
 )
-
-// MiddlewareInputMapper projects the typed upstream workflow state into the
-// ordinary RunInput accepted by a nested agent.
-type MiddlewareInputMapper func(ctx context.Context, result WorkflowResult) (RunInput, error)
 
 // AgentMiddlewareConfig configures an agent as stream middleware.
 type AgentMiddlewareConfig struct {
@@ -57,10 +51,10 @@ type AgentMiddlewareConfig struct {
 	Output OutputPolicy
 	// MapInput controls exactly what the nested agent receives. When nil, the
 	// current visible text, original run ID, and metadata are forwarded.
-	MapInput MiddlewareInputMapper
-	// Failure controls whether nested-agent and input-mapping failures propagate
-	// to the surrounding workflow. The zero value is PropagateFailure.
-	Failure FailurePolicy
+	MapInput func(ctx context.Context, result WorkflowResult) (RunInput, error)
+	// ErrorPolicy controls whether input-mapping and nested-agent failures
+	// propagate. The zero value is PropagateError.
+	ErrorPolicy ErrorPolicy
 	// ShouldRun overrides the default success-only policy. It receives the full
 	// upstream result and may enable stages such as failure auditing.
 	ShouldRun func(result WorkflowResult) bool
@@ -83,14 +77,17 @@ func (m *AgentMiddleware) validate() error {
 	if m == nil || m.agent == nil {
 		return ErrMiddlewareAgentNotConfigured
 	}
+	if len(m.agent.def.Middleware) > 0 {
+		return ErrMiddlewareAgentNested
+	}
 	if m.name() == "" {
 		return ErrMiddlewareNameMissing
 	}
 	if m.config.Output > ReplaceOutput {
 		return fmt.Errorf("%w: %d", ErrMiddlewareOutputInvalid, m.config.Output)
 	}
-	if m.config.Failure > RecordFailure {
-		return fmt.Errorf("%w: %d", ErrMiddlewareFailureInvalid, m.config.Failure)
+	if m.config.ErrorPolicy > RecordError {
+		return fmt.Errorf("%w: %d", ErrMiddlewareErrorPolicyInvalid, m.config.ErrorPolicy)
 	}
 	return nil
 }
@@ -106,96 +103,107 @@ func (m *AgentMiddleware) Process(ctx context.Context, run *MiddlewareContext, u
 		defer close(statuses)
 		defer close(errs)
 
-		upstreamTokens, upstreamErrs := consumeUpstream(ctx, upstream, tokens, statuses, errs, m.config.Output != ReplaceOutput)
-		result := run.Result()
-		result.Tokens = cloneTokens(upstreamTokens)
-		result.Text = tokenText(upstreamTokens)
-		result.Errors = append([]error(nil), upstreamErrs...)
-
-		shouldRun := len(upstreamErrs) == 0
-		if m.config.ShouldRun != nil {
-			shouldRun = m.config.ShouldRun(result)
+		upstreamRelay := streamRelay{Statuses: statuses, Errors: errs}
+		if m.config.Output != ReplaceOutput {
+			upstreamRelay.Tokens = tokens
 		}
-		if !shouldRun {
-			if m.config.Output == ReplaceOutput {
-				for _, token := range upstreamTokens {
-					send(ctx, tokens, token)
-				}
-			}
+		upstreamResult := drainStream(ctx, upstream, upstreamRelay)
+		result := m.upstreamResult(run, upstreamResult)
+
+		if !m.shouldRun(result) {
+			m.restoreReplacement(ctx, tokens, upstreamResult.Tokens)
 			return
 		}
 
-		postInput := RunInput{
-			ID:   result.Input.ID,
-			Text: result.Text,
-			Meta: cloneRunInput(result.Input).Meta,
-		}
-		var err error
-		if m.config.MapInput != nil {
-			postInput, err = m.config.MapInput(ctx, result)
-		}
+		input, err := m.input(ctx, result)
 		if err != nil {
-			m.finishSetupFailure(ctx, run, tokens, errs, upstreamTokens, upstreamErrs, err)
-			return
-		}
-		postWorkflow, err := m.agent.NewRun(ctx, postInput)
-		if err != nil {
-			m.finishSetupFailure(ctx, run, tokens, errs, upstreamTokens, upstreamErrs, err)
+			m.finishStage(ctx, run, tokens, errs, upstreamResult.Tokens, AgentResult{Errors: []error{err}})
 			return
 		}
 
-		postTokens, postStatuses, postErrs := postWorkflow.Run(ctx)
-		stageTokens, stageErrs := consumePostAgent(ctx, postTokens, postStatuses, postErrs, tokens, errs, m.config.Output != PreserveOutput, m.config.Failure == PropagateFailure)
-		postResult := postWorkflow.Result()
-		stage := StageResult{
-			Name:   m.name(),
-			Output: m.config.Output,
-			Result: AgentResult{
-				Tokens:     cloneTokens(stageTokens),
-				Text:       tokenText(stageTokens),
-				Messages:   append([]gaictx.Message(nil), postResult.Primary.Messages...),
-				Iterations: append([]loop.Iteration(nil), postResult.Primary.Iterations...),
-				Errors:     append([]error(nil), stageErrs...),
-			},
-		}
-		visible := visibleTokens(m.config.Output, upstreamTokens, stageTokens)
-		workflowErrs := append([]error(nil), upstreamErrs...)
-		if m.config.Failure == PropagateFailure {
-			workflowErrs = append(workflowErrs, stageErrs...)
-		}
-		run.workflow.addStage(stage, visible, workflowErrs)
+		stageResult := m.runStage(ctx, input)
+		m.finishStage(ctx, run, tokens, errs, upstreamResult.Tokens, stageResult)
 	}()
 
 	return Stream{Tokens: tokens, Statuses: statuses, Errors: errs}
 }
 
-func (m *AgentMiddleware) finishSetupFailure(
+func (m *AgentMiddleware) upstreamResult(run *MiddlewareContext, captured capturedStream) WorkflowResult {
+	result := run.Result()
+	result.Tokens = cloneTokens(captured.Tokens)
+	result.Text = tokenText(captured.Tokens)
+	result.Errors = append([]error(nil), captured.Errors...)
+	return result
+}
+
+func (m *AgentMiddleware) shouldRun(result WorkflowResult) bool {
+	if m.config.ShouldRun != nil {
+		return m.config.ShouldRun(result)
+	}
+	return len(result.Errors) == 0
+}
+
+func (m *AgentMiddleware) input(ctx context.Context, result WorkflowResult) (RunInput, error) {
+	if m.config.MapInput != nil {
+		return m.config.MapInput(ctx, result)
+	}
+	return RunInput{
+		ID:   result.Input.ID,
+		Text: result.Text,
+		Meta: cloneRunInput(result.Input).Meta,
+	}, nil
+}
+
+func (m *AgentMiddleware) runStage(ctx context.Context, input RunInput) AgentResult {
+	workflow, err := m.agent.NewRun(ctx, input)
+	if err != nil {
+		return AgentResult{Errors: []error{err}}
+	}
+	tokens, statuses, errs := workflow.Run(ctx)
+	captured := drainStream(ctx, Stream{Tokens: tokens, Statuses: statuses, Errors: errs}, streamRelay{})
+	result := workflow.Result().Primary
+	result.Tokens = cloneTokens(captured.Tokens)
+	result.Text = tokenText(captured.Tokens)
+	result.Errors = append([]error(nil), captured.Errors...)
+	return result
+}
+
+func (m *AgentMiddleware) finishStage(
 	ctx context.Context,
 	run *MiddlewareContext,
 	tokens chan<- ai.Token,
 	errs chan<- error,
 	upstreamTokens []ai.Token,
-	upstreamErrs []error,
-	err error,
+	result AgentResult,
 ) {
-	if m.config.Failure == PropagateFailure {
-		send(ctx, errs, err)
-	}
-	if m.config.Output == ReplaceOutput {
-		for _, token := range upstreamTokens {
-			send(ctx, tokens, token)
+	failed := len(result.Errors) > 0
+	visible := cloneTokens(upstreamTokens)
+	if failed {
+		if m.config.ErrorPolicy == PropagateError {
+			forwardErrors(ctx, errs, result.Errors)
+		}
+		m.restoreReplacement(ctx, tokens, upstreamTokens)
+	} else {
+		switch m.config.Output {
+		case AppendOutput:
+			forwardTokens(ctx, tokens, result.Tokens)
+			visible = append(visible, cloneTokens(result.Tokens)...)
+		case ReplaceOutput:
+			forwardTokens(ctx, tokens, result.Tokens)
+			visible = cloneTokens(result.Tokens)
 		}
 	}
-	stage := StageResult{
+	run.workflow.addStage(StageResult{
 		Name:   m.name(),
 		Output: m.config.Output,
-		Result: AgentResult{Errors: []error{err}},
+		Result: result,
+	}, visible)
+}
+
+func (m *AgentMiddleware) restoreReplacement(ctx context.Context, tokens chan<- ai.Token, upstream []ai.Token) {
+	if m.config.Output == ReplaceOutput {
+		forwardTokens(ctx, tokens, upstream)
 	}
-	workflowErrs := append([]error(nil), upstreamErrs...)
-	if m.config.Failure == PropagateFailure {
-		workflowErrs = append(workflowErrs, err)
-	}
-	run.workflow.addStage(stage, cloneTokens(upstreamTokens), workflowErrs)
 }
 
 func (m *AgentMiddleware) name() string {
@@ -211,97 +219,16 @@ func (m *AgentMiddleware) name() string {
 	return ""
 }
 
-func consumeUpstream(
-	ctx context.Context,
-	stream Stream,
-	tokens chan<- ai.Token,
-	statuses chan<- loop.IterationInformation,
-	errs chan<- error,
-	forwardTokens bool,
-) ([]ai.Token, []error) {
-	var capturedTokens []ai.Token
-	var capturedErrs []error
-	var wg sync.WaitGroup
-	wg.Add(3)
-	go func() {
-		defer wg.Done()
-		for token := range stream.Tokens {
-			capturedTokens = append(capturedTokens, token)
-			if forwardTokens {
-				send(ctx, tokens, token)
-			}
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		for status := range stream.Statuses {
-			send(ctx, statuses, status)
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		for err := range stream.Errors {
-			if err != nil {
-				capturedErrs = append(capturedErrs, err)
-			}
-			send(ctx, errs, err)
-		}
-	}()
-	wg.Wait()
-	return capturedTokens, capturedErrs
+func forwardTokens(ctx context.Context, output chan<- ai.Token, tokens []ai.Token) {
+	for _, token := range tokens {
+		send(ctx, output, token)
+	}
 }
 
-func consumePostAgent(
-	ctx context.Context,
-	tokens <-chan ai.Token,
-	statuses <-chan loop.IterationInformation,
-	errs <-chan error,
-	outputTokens chan<- ai.Token,
-	outputErrs chan<- error,
-	forwardTokens bool,
-	forwardErrors bool,
-) ([]ai.Token, []error) {
-	var capturedTokens []ai.Token
-	var capturedErrs []error
-	var wg sync.WaitGroup
-	wg.Add(3)
-	go func() {
-		defer wg.Done()
-		for token := range tokens {
-			capturedTokens = append(capturedTokens, token)
-			if forwardTokens {
-				send(ctx, outputTokens, token)
-			}
+func forwardErrors(ctx context.Context, output chan<- error, errs []error) {
+	for _, err := range errs {
+		if err != nil {
+			send(ctx, output, err)
 		}
-	}()
-	go func() {
-		defer wg.Done()
-		for range statuses {
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		for err := range errs {
-			if err != nil {
-				capturedErrs = append(capturedErrs, err)
-			}
-			if forwardErrors {
-				send(ctx, outputErrs, err)
-			}
-		}
-	}()
-	wg.Wait()
-	return capturedTokens, capturedErrs
-}
-
-func visibleTokens(policy OutputPolicy, upstream, stage []ai.Token) []ai.Token {
-	switch policy {
-	case AppendOutput:
-		visible := cloneTokens(upstream)
-		return append(visible, stage...)
-	case ReplaceOutput:
-		return cloneTokens(stage)
-	default:
-		return cloneTokens(upstream)
 	}
 }
