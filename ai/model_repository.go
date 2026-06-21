@@ -7,11 +7,18 @@ import (
 	"github.com/lace-ai/gai"
 )
 
+// ModelRepository stores providers and resolves their models.
+//
+// A repository is safe to use only after construction with
+// NewModelRepository. It is not safe for concurrent mutation.
 type ModelRepository struct {
 	providers map[string]Provider
 	debug     gai.DebugSink
 }
 
+// NewModelRepository creates an empty provider registry.
+//
+// When debug is non-nil, repository operations emit diagnostic events.
 func NewModelRepository(debug gai.DebugSink) *ModelRepository {
 	return &ModelRepository{
 		providers: make(map[string]Provider),
@@ -19,6 +26,7 @@ func NewModelRepository(debug gai.DebugSink) *ModelRepository {
 	}
 }
 
+// Validate checks whether the repository can be used.
 func (r *ModelRepository) Validate() error {
 	if r == nil {
 		return ErrNilModelRepository
@@ -26,6 +34,8 @@ func (r *ModelRepository) Validate() error {
 	return nil
 }
 
+// RegisterProvider validates and registers provider under Provider.Name.
+// It returns ErrProviderAlreadyExists when that name is already registered.
 func (r *ModelRepository) RegisterProvider(ctx context.Context, provider Provider) error {
 	if err := r.Validate(); err != nil {
 		return err
@@ -71,6 +81,8 @@ func (r *ModelRepository) RegisterProvider(ctx context.Context, provider Provide
 	return nil
 }
 
+// UnregisterProvider removes the named provider.
+// It returns ErrProviderNotFound when no such provider is registered.
 func (r *ModelRepository) UnregisterProvider(ctx context.Context, providerName string) error {
 	if err := r.Validate(); err != nil {
 		return err
@@ -102,6 +114,7 @@ func (r *ModelRepository) UnregisterProvider(ctx context.Context, providerName s
 	return nil
 }
 
+// GetModel resolves modelName through the named provider.
 func (r *ModelRepository) GetModel(ctx context.Context, providerName, modelName string) (Model, error) {
 	if err := r.Validate(); err != nil {
 		return nil, err
@@ -134,6 +147,7 @@ func (r *ModelRepository) GetModel(ctx context.Context, providerName, modelName 
 	return provider.Model(modelName)
 }
 
+// ListModels returns all registered models as sorted "provider:model" names.
 func (r *ModelRepository) ListModels(ctx context.Context) ([]string, error) {
 	if err := r.Validate(); err != nil {
 		return nil, err
