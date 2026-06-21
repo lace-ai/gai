@@ -2,6 +2,7 @@ package context
 
 import (
 	"context"
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"strings"
@@ -304,7 +305,7 @@ func renderSimpleNodeBody(node RenderNode) string {
 	case ContentTypeText:
 		return node.Value
 	case ContentTypeToolCall:
-		return simpleNodeChildValue(node, "arguments")
+		return renderSimpleToolCall(node)
 	case ContentTypeToolResult:
 		return simpleNodeChildValue(node, "result")
 	case ContentTypeToolResultErr:
@@ -322,6 +323,16 @@ func renderSimpleNodeBody(node RenderNode) string {
 		}
 	}
 	return strings.Join(parts, "\n")
+}
+
+func renderSimpleToolCall(node RenderNode) string {
+	name := simpleNodeFieldValue(node, "name")
+	arguments := simpleNodeChildValue(node, "arguments")
+	if name == "" {
+		return arguments
+	}
+	encodedName, _ := json.Marshal(name)
+	return `{"type":"function","name":` + string(encodedName) + `,"arguments":` + arguments + `}`
 }
 
 func simpleNodeChildValue(node RenderNode, childType string) string {
