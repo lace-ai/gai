@@ -176,6 +176,37 @@ tool res: found <docs>`
 	}
 }
 
+func TestSimpleRendererPreservesGenericNodeStructure(t *testing.T) {
+	t.Parallel()
+
+	rendered, err := (gaictx.SimpleRenderer{}).Render(context.Background(), []gaictx.Part{
+		renderTestPart{
+			name: "memory_profile",
+			node: gaictx.RenderNode{
+				Type:   "memory_profile",
+				Fields: []gaictx.RenderField{{Key: "version", Value: "2"}},
+				Value:  `{"preferred_name":"Sam"}`,
+				Children: []gaictx.RenderNode{
+					{Type: "source", Value: "persisted"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Render failed: %v", err)
+	}
+
+	want := `<memory_profile version="2">
+{"preferred_name":"Sam"}
+<source>
+persisted
+</source>
+</memory_profile>`
+	if rendered != want {
+		t.Fatalf("unexpected generic node render:\nwant %q\n got %q", want, rendered)
+	}
+}
+
 func TestRenderersEmitDetailedTruncatedDebugEvents(t *testing.T) {
 	t.Parallel()
 

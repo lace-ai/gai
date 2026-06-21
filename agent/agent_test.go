@@ -3,11 +3,13 @@ package agent_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/lace-ai/gai/agent"
 	"github.com/lace-ai/gai/ai"
 	gaictx "github.com/lace-ai/gai/context"
+	"github.com/lace-ai/gai/context/tooldefinitions"
 	"github.com/lace-ai/gai/loop"
 	"github.com/lace-ai/gai/testutil/mocks"
 )
@@ -92,6 +94,78 @@ func TestAgentNewRunCreatesLoop(t *testing.T) {
 	}
 	if builder == nil || builder.tokenizer == nil {
 		t.Fatal("expected model tokenizer to be set on prompt builder")
+	}
+}
+
+func TestAgentToolsAutomaticallyAddPromptContract(t *testing.T) {
+	t.Parallel()
+
+	builder := gaictx.New(gaictx.Definition{
+		Renderer:   &gaictx.SimpleRenderer{},
+		UserPrompt: "remember my name",
+	})
+	assistant := agent.New(agent.Definition{
+		Model: &mocks.MockModel{},
+		Tools: []loop.Tool{loop.NewEchoTool()},
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return builder, nil
+		},
+	})
+
+	run, err := assistant.NewRun(context.Background(), agent.RunInput{})
+	if err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	if _, err := run.Loop.PromptBuilder.BuildContext(context.Background()); err != nil {
+		t.Fatalf("BuildContext failed: %v", err)
+	}
+	prompt, err := run.Loop.PromptBuilder.BuildPrompt(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("BuildPrompt failed: %v", err)
+	}
+	for _, expected := range []string{
+		"tool: echo",
+		`{"type":"function","name":"<tool-name>","arguments":{...}}`,
+	} {
+		if !strings.Contains(prompt, expected) {
+			t.Fatalf("automatic tool prompt missing %q:\n%s", expected, prompt)
+		}
+	}
+}
+
+func TestAgentDoesNotDuplicateExistingToolDefinitions(t *testing.T) {
+	t.Parallel()
+
+	tool := loop.NewEchoTool()
+	source, err := tooldefinitions.New(&gaictx.SimpleRenderer{}, []loop.Tool{tool}, nil)
+	if err != nil {
+		t.Fatalf("new tool source: %v", err)
+	}
+	builder := gaictx.New(gaictx.Definition{
+		Renderer:       &gaictx.SimpleRenderer{},
+		ContextSources: []gaictx.ContextSource{source},
+	})
+	assistant := agent.New(agent.Definition{
+		Model: &mocks.MockModel{},
+		Tools: []loop.Tool{tool},
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return builder, nil
+		},
+	})
+
+	run, err := assistant.NewRun(context.Background(), agent.RunInput{})
+	if err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	if _, err := run.Loop.PromptBuilder.BuildContext(context.Background()); err != nil {
+		t.Fatalf("BuildContext failed: %v", err)
+	}
+	prompt, err := run.Loop.PromptBuilder.BuildPrompt(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("BuildPrompt failed: %v", err)
+	}
+	if got := strings.Count(prompt, "tool: echo"); got != 1 {
+		t.Fatalf("tool definitions rendered %d times:\n%s", got, prompt)
 	}
 }
 

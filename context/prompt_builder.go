@@ -3,6 +3,7 @@ package context
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
@@ -131,6 +132,22 @@ func (b *Builder) AppendContextSources(ctx context.Context, sources ...ContextSo
 		}
 	}
 	return nil
+}
+
+// HasContextSource reports whether a source with name is already configured.
+// It allows higher-level components to provide default sources without
+// duplicating application-provided prompt context.
+func (b *Builder) HasContextSource(name string) bool {
+	name = strings.TrimSpace(name)
+	if b == nil || name == "" {
+		return false
+	}
+	for _, source := range b.ContextSources {
+		if source != nil && source.Name() == name {
+			return true
+		}
+	}
+	return false
 }
 
 func (b *Builder) AppendSystemInstructions(ctx context.Context, instructions ...Part) error {

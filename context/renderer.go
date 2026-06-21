@@ -268,6 +268,8 @@ func renderSimpleInstruction(ctx context.Context, part Part) (string, RenderNode
 
 func renderSimpleNode(node RenderNode) string {
 	switch node.Type {
+	case ContentTypeText:
+		return node.Value
 	case "history":
 		return renderSimpleHistory(node)
 	case "tools":
@@ -275,28 +277,37 @@ func renderSimpleNode(node RenderNode) string {
 	case string(RoleUser), string(RoleAssistant), string(RoleTool), string(RoleSystem), "summary", "message":
 		return renderSimpleMessageNode(node)
 	default:
-		return renderSimpleNodeBody(node)
+		return renderSimpleGenericNode(node)
 	}
 }
 
 func renderSimpleTools(node RenderNode) string {
 	var builder strings.Builder
 	builder.WriteString("<tools>")
-	for _, tool := range node.Children {
-		if tool.Type != "tool" {
+	for _, child := range node.Children {
+		if child.Type == "tool_usage" {
+			body := renderSimpleNodeBody(child)
+			if body != "" {
+				builder.WriteString("\n")
+				builder.WriteString("usage:\n")
+				builder.WriteString(body)
+			}
+			continue
+		}
+		if child.Type != "tool" {
 			continue
 		}
 
 		builder.WriteString("\n")
 		builder.WriteString("tool: ")
-		builder.WriteString(simpleNodeFieldValue(tool, "name"))
-		for _, child := range tool.Children {
-			body := renderSimpleNodeBody(child)
+		builder.WriteString(simpleNodeFieldValue(child, "name"))
+		for _, toolChild := range child.Children {
+			body := renderSimpleNodeBody(toolChild)
 			if body == "" {
 				continue
 			}
 			builder.WriteString("\n")
-			builder.WriteString(child.Type)
+			builder.WriteString(toolChild.Type)
 			builder.WriteString(": ")
 			builder.WriteString(body)
 		}
@@ -305,6 +316,45 @@ func renderSimpleTools(node RenderNode) string {
 		builder.WriteString("\n")
 	}
 	builder.WriteString("</tools>")
+	return builder.String()
+}
+
+func renderSimpleGenericNode(node RenderNode) string {
+	bodyParts := make([]string, 0, len(node.Children)+1)
+	if node.Value != "" {
+		bodyParts = append(bodyParts, node.Value)
+	}
+	for _, child := range node.Children {
+		if rendered := renderSimpleNode(child); rendered != "" {
+			bodyParts = append(bodyParts, rendered)
+		}
+	}
+	body := strings.Join(bodyParts, "\n")
+	if node.Type == "" {
+		return body
+	}
+
+	var builder strings.Builder
+	builder.WriteString("<")
+	builder.WriteString(node.Type)
+	for _, field := range node.Fields {
+		if field.Key == "" {
+			continue
+		}
+		builder.WriteString(" ")
+		builder.WriteString(field.Key)
+		builder.WriteString("=")
+		encoded, _ := json.Marshal(field.Value)
+		builder.Write(encoded)
+	}
+	builder.WriteString(">")
+	if body != "" {
+		builder.WriteString("\n")
+		builder.WriteString(body)
+	}
+	builder.WriteString("\n</")
+	builder.WriteString(node.Type)
+	builder.WriteString(">")
 	return builder.String()
 }
 
