@@ -8,6 +8,8 @@ import (
 	gaictx "github.com/lace-ai/gai/context"
 )
 
+const historyToolResultPreviewRunes = 500
+
 // Content is a minimal persisted history message representation.
 type Content struct {
 	Text  string
@@ -72,6 +74,9 @@ func (p *Part) Render(ctx context.Context) (gaictx.RenderNode, error) {
 		if err != nil {
 			return gaictx.RenderNode{}, err
 		}
+		if content.Type() == gaictx.ContentTypeToolResult {
+			truncateToolResult(&child)
+		}
 		if content.Role == "summary" {
 			node.Children = append(node.Children, wrapContentNode("summary", child))
 			continue
@@ -79,6 +84,20 @@ func (p *Part) Render(ctx context.Context) (gaictx.RenderNode, error) {
 		node.Children = append(node.Children, wrapContentNode(roleRenderType(content.Role), child))
 	}
 	return node, nil
+}
+
+func truncateToolResult(node *gaictx.RenderNode) {
+	for index := range node.Children {
+		if node.Children[index].Type != "result" {
+			continue
+		}
+		runes := []rune(node.Children[index].Value)
+		if len(runes) <= historyToolResultPreviewRunes {
+			return
+		}
+		node.Children[index].Value = string(runes[:historyToolResultPreviewRunes]) + "\n[tool result truncated]"
+		return
+	}
 }
 
 func wrapContentNode(nodeType string, child gaictx.RenderNode) gaictx.RenderNode {
