@@ -118,6 +118,7 @@ func TestSimpleRendererRendersInstructionsHistoryAndConversation(t *testing.T) {
 
 	rendered, err := (gaictx.SimpleRenderer{}).Render(context.Background(), []gaictx.Part{
 		gaictx.NewSystemPart([]gaictx.Part{
+			gaictx.NewTextPart("follow the instructions carefully"),
 			renderTestPart{
 				name: "system",
 				node: gaictx.RenderNode{Type: "text", Value: "be precise <raw> & direct"},
@@ -144,6 +145,8 @@ func TestSimpleRendererRendersInstructionsHistoryAndConversation(t *testing.T) {
 	}
 
 	want := `<Instructions>
+
+follow the instructions carefully
 
 System:
 be precise <raw> & direct

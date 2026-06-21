@@ -171,8 +171,10 @@ func renderSimpleInstructions(ctx context.Context, part SystemPart) (string, *Re
 		}
 
 		builder.WriteString("\n\n")
-		builder.WriteString(formatSimpleInstructionLabel(instruction.Name()))
-		builder.WriteString(":\n")
+		if !isSimpleTextInstruction(instruction) {
+			builder.WriteString(formatSimpleInstructionLabel(instruction.Name()))
+			builder.WriteString(":\n")
+		}
 		builder.WriteString(body)
 		wroteInstruction = true
 	}
@@ -184,6 +186,15 @@ func renderSimpleInstructions(ctx context.Context, part SystemPart) (string, *Re
 	}
 	builder.WriteString("</Instructions>")
 	return builder.String(), &node, nil
+}
+
+func isSimpleTextInstruction(part Part) bool {
+	switch part.(type) {
+	case TextPart, *TextPart:
+		return true
+	default:
+		return false
+	}
 }
 
 func renderSimpleInstruction(ctx context.Context, part Part) (string, RenderNode, error) {
