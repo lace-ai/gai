@@ -28,16 +28,32 @@ The name must match a listed tool, type must be exactly "function" and arguments
 // Source renders loop tools and their text-based invocation protocol as prompt
 // context.
 type Source struct {
-	tools    []loop.Tool
-	renderer gaictx.Renderer
-	debug    gai.DebugSink
+	tools         []loop.Tool
+	renderer      gaictx.Renderer
+	debug         gai.DebugSink
+	usageProtocol string
 }
 
 var _ gaictx.ContextSource = (*Source)(nil)
 
+// Option configures a Source.
+type Option func(*Source) error
+
+// WithUsageProtocol overrides the default tool-call instruction prompt.
+func WithUsageProtocol(protocol string) Option {
+	return func(source *Source) error {
+		protocol = strings.TrimSpace(protocol)
+		if protocol == "" {
+			return fmt.Errorf("%w: usage protocol is empty", ErrToolInvalid)
+		}
+		source.usageProtocol = protocol
+		return nil
+	}
+}
+
 // New creates a context source from tools and a renderer. The slice is copied
 // so callers can safely reuse or modify their input slice after construction.
-func New(renderer gaictx.Renderer, tools []loop.Tool, debug gai.DebugSink) (*Source, error) {
+func New(renderer gaictx.Renderer, tools []loop.Tool, debug gai.DebugSink, options ...Option) (*Source, error) {
 	if len(tools) == 0 {
 		return nil, ErrToolsEmpty
 	}
@@ -46,11 +62,21 @@ func New(renderer gaictx.Renderer, tools []loop.Tool, debug gai.DebugSink) (*Sou
 			return nil, fmt.Errorf("%w: tool at index %d is nil", ErrToolInvalid, index)
 		}
 	}
-	return &Source{
-		tools:    append([]loop.Tool(nil), tools...),
-		renderer: renderer,
-		debug:    debug,
-	}, nil
+	source := &Source{
+		tools:         append([]loop.Tool(nil), tools...),
+		renderer:      renderer,
+		debug:         debug,
+		usageProtocol: toolUseProtocol,
+	}
+	for _, option := range options {
+		if option == nil {
+			return nil, fmt.Errorf("%w: option is nil", ErrToolInvalid)
+		}
+		if err := option(source); err != nil {
+			return nil, err
+		}
+	}
+	return source, nil
 }
 
 func (s *Source) Name() string {
@@ -87,7 +113,7 @@ func (s *Source) Function(ctx context.Context, tokenBudget int) (part gaictx.Par
 	if renderer == nil {
 		renderer = &gaictx.XMLRenderer{}
 	}
-	part = newPart(definitions, toolUseProtocol+renderer.RenderToolSignatures(toToolSignatures(s.tools)))
+	part = newPart(definitions, s.usageProtocol, s.usageProtocol+renderer.RenderToolSignatures(toToolSignatures(s.tools)))
 	observer.Succeeded(ctx, definitionNames(definitions))
 	return part, nil
 }
@@ -136,14 +162,16 @@ func definitionNames(definitions []definition) []string {
 }
 
 type part struct {
-	definitions []definition
-	text        gaictx.TextPart
+	definitions   []definition
+	usageProtocol string
+	text          gaictx.TextPart
 }
 
-func newPart(definitions []definition, tokenText string) *part {
+func newPart(definitions []definition, usageProtocol, tokenText string) *part {
 	return &part{
-		definitions: definitions,
-		text:        gaictx.NewTextPart(tokenText),
+		definitions:   definitions,
+		usageProtocol: usageProtocol,
+		text:          gaictx.NewTextPart(tokenText),
 	}
 }
 
@@ -162,7 +190,7 @@ func (p *part) Render(ctx context.Context) (gaictx.RenderNode, error) {
 	node := gaictx.RenderNode{
 		Type: "tools",
 		Children: []gaictx.RenderNode{
-			{Type: "tool_usage", Value: toolUseProtocol},
+			{Type: "tool_usage", Value: p.usageProtocol},
 		},
 	}
 	for _, definition := range p.definitions {

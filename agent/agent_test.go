@@ -158,6 +158,38 @@ func TestAgentToolsAutomaticallyAddPromptContract(t *testing.T) {
 	}
 }
 
+func TestAgentToolDefinitionOptionsCustomizeAutomaticPromptContract(t *testing.T) {
+	t.Parallel()
+
+	builder := gaictx.New(gaictx.Definition{Renderer: &gaictx.SimpleRenderer{}})
+	assistant := agent.New(agent.Definition{
+		Model:                 &mocks.MockModel{},
+		Tools:                 []loop.Tool{loop.NewEchoTool()},
+		ToolDefinitionOptions: []tooldefinitions.Option{tooldefinitions.WithUsageProtocol("Use tools only after asking for confirmation.")},
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return builder, nil
+		},
+	})
+
+	run, err := assistant.NewRun(context.Background(), textRunInput("remember my name"))
+	if err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	if _, err := run.Loop.PromptBuilder.BuildContext(context.Background()); err != nil {
+		t.Fatalf("BuildContext failed: %v", err)
+	}
+	prompt, err := run.Loop.PromptBuilder.BuildPrompt(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("BuildPrompt failed: %v", err)
+	}
+	if !strings.Contains(prompt, "Use tools only after asking for confirmation.") {
+		t.Fatalf("custom tool definition protocol missing:\n%s", prompt)
+	}
+	if strings.Contains(prompt, `{"type":"function","name":"<tool-name>","arguments":{...}}`) {
+		t.Fatalf("default tool definition protocol still present:\n%s", prompt)
+	}
+}
+
 func TestAgentDoesNotDuplicateExistingToolDefinitions(t *testing.T) {
 	t.Parallel()
 
