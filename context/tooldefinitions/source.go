@@ -23,7 +23,7 @@ var (
 const toolUseProtocol = `When a tool is required, output each tool call as a standalone JSON object using exactly this shape:
 {"type":"function","name":"<tool-name>","arguments":{...}}
 
-The name must match a listed tool and arguments must match its signature. Do not include an id, do not wrap the JSON in Markdown, and separate multiple calls with a blank line. If no tool is needed, respond normally. Do not repeat a completed tool call when its result is already present.`
+The name must match a listed tool, type must be exactly "function" and arguments must match its signature. Do not include an id, do not wrap the JSON in Markdown, and separate multiple calls with a blank line. If no tool is needed, respond normally. Do not repeat a completed tool call when its result is already present.`
 
 // Source renders loop tools and their text-based invocation protocol as prompt
 // context.
@@ -168,10 +168,8 @@ func (p *part) Render(ctx context.Context) (gaictx.RenderNode, error) {
 	for _, definition := range p.definitions {
 		node.Children = append(node.Children, gaictx.RenderNode{
 			Type: "tool",
-			Fields: []gaictx.RenderField{
-				{Key: "name", Value: definition.name},
-			},
 			Children: []gaictx.RenderNode{
+				{Type: "tool-name", Value: definition.name},
 				{Type: "description", Value: definition.description},
 				{Type: "signature", Value: definition.parameters},
 			},
