@@ -20,6 +20,17 @@ type testPromptBuilder struct {
 	tokenizer ai.Tokenizer
 }
 
+type testContextSource struct{ name string }
+
+func (s testContextSource) Name() string { return s.name }
+func (s testContextSource) Function(context.Context, int) (gaictx.Part, error) {
+	return gaictx.NewTextPart(s.name), nil
+}
+
+func (b *testPromptBuilder) PrependContextSource(ctx context.Context, source gaictx.ContextSource) error {
+	return nil
+}
+
 func (b *testPromptBuilder) AppendContextSource(ctx context.Context, source gaictx.ContextSource) error {
 	return nil
 }
@@ -112,7 +123,8 @@ func TestAgentToolsAutomaticallyAddPromptContract(t *testing.T) {
 	t.Parallel()
 
 	builder := gaictx.New(gaictx.Definition{
-		Renderer: &gaictx.SimpleRenderer{},
+		Renderer:       &gaictx.SimpleRenderer{},
+		ContextSources: []gaictx.ContextSource{testContextSource{name: "application_context"}},
 	})
 	assistant := agent.New(agent.Definition{
 		Model: &mocks.MockModel{},
@@ -125,6 +137,9 @@ func TestAgentToolsAutomaticallyAddPromptContract(t *testing.T) {
 	run, err := assistant.NewRun(context.Background(), textRunInput("remember my name"))
 	if err != nil {
 		t.Fatalf("NewRun failed: %v", err)
+	}
+	if len(builder.ContextSources) != 2 || builder.ContextSources[0].Name() != "tool_definitions" || builder.ContextSources[1].Name() != "application_context" {
+		t.Fatalf("tool definitions were not prepended: %+v", builder.ContextSources)
 	}
 	if _, err := run.Loop.PromptBuilder.BuildContext(context.Background()); err != nil {
 		t.Fatalf("BuildContext failed: %v", err)
