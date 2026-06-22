@@ -89,7 +89,6 @@ func Definition(model ai.Model, opts ...Option) agent.Definition {
 			return gaictx.New(gaictx.Definition{
 				Renderer:           &gaictx.XMLRenderer{},
 				SystemInstructions: []gaictx.Part{gaictx.NewTextPart(systemPrompt)},
-				UserPrompt:         input.Text,
 				TokenBudget:        -1,
 				Tokenizer:          config.Tokenizer,
 			}), nil
@@ -125,7 +124,7 @@ func (s Summarizer) Summarize(ctx context.Context, req Request) (string, error) 
 	}
 	input := agent.RunInput{
 		ID:        req.ID,
-		Text:      req.Text,
+		Prompt:    gaictx.PromptInput{User: gaictx.NewTextContent(req.Text)},
 		MaxTokens: req.MaxTokens,
 		Meta:      req.Meta,
 	}

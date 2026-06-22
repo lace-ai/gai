@@ -35,8 +35,8 @@ type Iteration struct {
 	Count int
 	// Parts contains generated responses, tool calls, and tool errors in order.
 	Parts []IterationPart
-	// Request is the user prompt retained by the first iteration.
-	Request string
+	// UserMessage is the structured user input retained by the first iteration.
+	UserMessage *gaictx.Message
 }
 
 // IterationPart contains one response, tool call, or tool result segment.
@@ -52,17 +52,12 @@ type IterationPart struct {
 }
 
 // Messages converts the iteration into ordered conversation messages.
-// The first iteration includes Request as a user message when it is non-empty.
+// The first iteration includes UserMessage when present.
 func (i Iteration) Messages() []gaictx.Message {
 	var msgs []gaictx.Message
 
-	if i.Count == 1 {
-		if len(i.Request) > 0 {
-			msgs = append(msgs, gaictx.Message{
-				Role:    gaictx.RoleUser,
-				Content: gaictx.NewTextContent(i.Request),
-			})
-		}
+	if i.Count == 1 && i.UserMessage != nil {
+		msgs = append(msgs, *i.UserMessage)
 	}
 
 	return append(msgs, i.partMessages()...)

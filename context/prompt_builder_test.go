@@ -54,14 +54,14 @@ func TestNewPromptBuilderFromDefinition(t *testing.T) {
 	builder := New(Definition{
 		SystemInstructions: []Part{NewTextPart("system")},
 		ContextSources:     []ContextSource{source},
-		UserPrompt:         "user",
+		PromptInput:        PromptInput{User: NewTextContent("user")},
 		TokenBudget:        12,
 	})
 
 	if builder.Renderer == nil {
 		t.Fatal("expected default renderer")
 	}
-	if got := builder.GetUserPrompt(); got != "user" {
+	if got := builder.Input().User.String(); got != "user" {
 		t.Fatalf("expected user prompt %q, got %q", "user", got)
 	}
 
@@ -102,7 +102,7 @@ func TestBuildPromptRendersStructuredConversationContent(t *testing.T) {
 
 	builder := New(Definition{
 		SystemInstructions: []Part{NewTextPart("system")},
-		UserPrompt:         "find docs",
+		PromptInput:        PromptInput{User: NewTextContent("find docs")},
 	})
 
 	prompt, err := builder.BuildPrompt(context.Background(), messageConversation{
@@ -155,6 +155,41 @@ func TestBuildPromptRendersStructuredConversationContent(t *testing.T) {
 	}
 }
 
+func TestBuildPromptOrdersInputContextBeforeUserAndConversation(t *testing.T) {
+	t.Parallel()
+
+	observation, err := NewJSONPart("memory_observation", map[string]string{"fact": "stable"})
+	if err != nil {
+		t.Fatalf("NewJSONPart failed: %v", err)
+	}
+	builder := New(Definition{
+		Renderer:           &SimpleRenderer{},
+		SystemInstructions: []Part{NewTextPart("system")},
+		ContextSources:     []ContextSource{&testContextSource{name: "source", text: "configured context"}},
+		PromptInput: PromptInput{
+			User:    NewTextContent("current user"),
+			Context: []Part{observation},
+		},
+	})
+	if _, err := builder.BuildContext(t.Context()); err != nil {
+		t.Fatalf("BuildContext failed: %v", err)
+	}
+	prompt, err := builder.BuildPrompt(t.Context(), messageConversation{messages: []Message{{Role: RoleAssistant, Content: NewTextContent("assistant delta")}}})
+	if err != nil {
+		t.Fatalf("BuildPrompt failed: %v", err)
+	}
+
+	ordered := []string{"system", "configured context", "<memory_observation>", "current user", "assistant delta"}
+	previous := -1
+	for _, fragment := range ordered {
+		index := strings.Index(prompt, fragment)
+		if index <= previous {
+			t.Fatalf("prompt does not preserve structured input order at %q: %s", fragment, prompt)
+		}
+		previous = index
+	}
+}
+
 type debugEventSink struct {
 	sensitive bool
 	events    []gai.DebugEvent
@@ -190,7 +225,7 @@ func TestPromptBuilderEmitsExistingEventsWithoutSensitiveFieldsByDefault(t *test
 	builder := New(Definition{
 		SystemInstructions: []Part{NewTextPart("system prompt")},
 		ContextSources:     []ContextSource{source},
-		UserPrompt:         "find docs",
+		PromptInput:        PromptInput{User: NewTextContent("find docs")},
 		TokenBudget:        10,
 		DebugSink:          sink,
 	})
@@ -237,7 +272,7 @@ func TestPromptBuilderEmitsSensitiveRenderFieldsWhenEnabled(t *testing.T) {
 	sink := &debugEventSink{sensitive: true}
 	builder := New(Definition{
 		SystemInstructions: []Part{NewTextPart(strings.Repeat("system ", 900))},
-		UserPrompt:         "find docs",
+		PromptInput:        PromptInput{User: NewTextContent("find docs")},
 		DebugSink:          sink,
 	})
 

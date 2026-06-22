@@ -312,6 +312,7 @@ func tokenText(tokens []ai.Token) string {
 
 func cloneRunInput(input RunInput) RunInput {
 	cloned := input
+	cloned.Prompt = input.Prompt.Clone()
 	if input.Meta != nil {
 		cloned.Meta = make(map[string]any, len(input.Meta))
 		for key, value := range input.Meta {
@@ -358,6 +359,10 @@ func cloneIterations(iterations []loop.Iteration) []loop.Iteration {
 	cloned := make([]loop.Iteration, len(iterations))
 	for i, iteration := range iterations {
 		cloned[i] = iteration
+		if iteration.UserMessage != nil {
+			message := cloneMessages([]gaictx.Message{*iteration.UserMessage})[0]
+			cloned[i].UserMessage = &message
+		}
 		cloned[i].Parts = make([]loop.IterationPart, len(iteration.Parts))
 		for j, part := range iteration.Parts {
 			cloned[i].Parts[j] = part

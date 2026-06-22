@@ -57,11 +57,11 @@ func (b *countingPromptBuilder) BuildPrompt(ctx context.Context, conv gaictx.Con
 	return fmt.Sprintf("prompt-%d", count), nil
 }
 
-func (b *countingPromptBuilder) GetUserPrompt() string {
-	return "Initial prompt"
+func (b *countingPromptBuilder) Input() gaictx.PromptInput {
+	return gaictx.PromptInput{User: gaictx.NewTextContent("Initial prompt")}
 }
 
-func (b *countingPromptBuilder) SetUserPrompt(prompt string) {
+func (b *countingPromptBuilder) SetInput(input gaictx.PromptInput) {
 }
 
 type stubPromptBuilder struct {
@@ -108,12 +108,18 @@ func (b *stubPromptBuilder) BuildPrompt(ctx context.Context, conv gaictx.Convers
 	return prompt.String(), nil
 }
 
-func (b *stubPromptBuilder) GetUserPrompt() string {
-	return b.userPrompt
+func (b *stubPromptBuilder) Input() gaictx.PromptInput {
+	if b.userPrompt == "" {
+		return gaictx.PromptInput{}
+	}
+	return gaictx.PromptInput{User: gaictx.NewTextContent(b.userPrompt)}
 }
 
-func (b *stubPromptBuilder) SetUserPrompt(prompt string) {
-	b.userPrompt = prompt
+func (b *stubPromptBuilder) SetInput(input gaictx.PromptInput) {
+	b.userPrompt = ""
+	if input.User != nil {
+		b.userPrompt = input.User.String()
+	}
 }
 
 func (m *scriptedStreamModel) Name() string {

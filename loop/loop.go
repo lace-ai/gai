@@ -166,7 +166,10 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInfor
 				Prompt:    prompt,
 				MaxTokens: a.MaxTokens,
 			}
-			iteration.Request = a.PromptBuilder.GetUserPrompt()
+			input := a.PromptBuilder.Input()
+			if input.User != nil {
+				iteration.UserMessage = &gaictx.Message{Role: gaictx.RoleUser, Content: input.User}
+			}
 
 			tokens := a.Model.GenerateStream(iterCtx, request)
 

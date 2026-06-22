@@ -13,9 +13,8 @@ import (
 // RunInput contains the application input for one agent run.
 type RunInput struct {
 	ID string
-	// Text is the user input for a primary agent and the current visible output
-	// for an agent running as middleware.
-	Text string
+	// Prompt separates genuine user content from structured machine context.
+	Prompt gaictx.PromptInput
 	// MaxTokens overrides Definition.Limits.MaxTokens when it is positive.
 	MaxTokens int
 	// Meta carries application data such as user, session, or request IDs.
@@ -134,6 +133,7 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 	if promptBuilder == nil {
 		return nil, loop.ErrPromptNotConfigured
 	}
+	promptBuilder.SetInput(input.Prompt)
 	if len(a.def.Tools) > 0 && !hasContextSource(promptBuilder, "tool_definitions") {
 		toolSource, err := tooldefinitions.New(nil, a.def.Tools, a.def.DebugSink)
 		if err != nil {

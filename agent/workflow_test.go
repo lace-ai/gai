@@ -19,7 +19,7 @@ func workflowAgent(name, response string, middleware ...agent.Middleware) *agent
 		Name:  name,
 		Model: &mocks.MockModel{Responses: []mocks.MockModelResponse{{Res: ai.AIResponse{Text: response}}}},
 		Prompt: func(_ context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
-			return &testPromptBuilder{prompt: input.Text}, nil
+			return &testPromptBuilder{}, nil
 		},
 		Middleware: middleware,
 	})
@@ -95,7 +95,7 @@ func TestAgentMiddlewareOutputPolicies(t *testing.T) {
 				Model: &mocks.MockModel{Responses: []mocks.MockModelResponse{{Res: ai.AIResponse{Text: "post"}}}},
 				Prompt: func(_ context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
 					postInput = input
-					return &testPromptBuilder{prompt: input.Text}, nil
+					return &testPromptBuilder{}, nil
 				},
 			})
 			main := workflowAgent("main", "main", agent.NewAgentMiddleware(post, agent.AgentMiddlewareConfig{
@@ -104,9 +104,9 @@ func TestAgentMiddlewareOutputPolicies(t *testing.T) {
 			}))
 
 			workflow, err := main.NewRun(context.Background(), agent.RunInput{
-				ID:   "run-1",
-				Text: "question",
-				Meta: map[string]any{"session_id": "session-1"},
+				ID:     "run-1",
+				Prompt: gaictx.PromptInput{User: gaictx.NewTextContent("question")},
+				Meta:   map[string]any{"session_id": "session-1"},
 			})
 			if err != nil {
 				t.Fatalf("NewRun failed: %v", err)
@@ -121,7 +121,7 @@ func TestAgentMiddlewareOutputPolicies(t *testing.T) {
 			if len(consumed.statuses) != 1 {
 				t.Fatalf("expected only the primary status, got %d", len(consumed.statuses))
 			}
-			if postInput.ID != "run-1" || postInput.Text != "main" || postInput.Meta["session_id"] != "session-1" {
+			if postInput.ID != "run-1" || promptContextValue(postInput, "upstream_output") != "main" || postInput.Meta["session_id"] != "session-1" {
 				t.Fatalf("unexpected automatic post input: %+v", postInput)
 			}
 
@@ -144,25 +144,25 @@ func TestAgentMiddlewareMapsWorkflowResult(t *testing.T) {
 		Model: &mocks.MockModel{Responses: []mocks.MockModelResponse{{Res: ai.AIResponse{Text: "post"}}}},
 		Prompt: func(_ context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
 			postInput = input
-			return &testPromptBuilder{prompt: input.Text}, nil
+			return &testPromptBuilder{}, nil
 		},
 	})
 	main := workflowAgent("main", "main", agent.NewAgentMiddleware(post, agent.AgentMiddlewareConfig{
 		Output: agent.PreserveOutput,
 		MapInput: func(_ context.Context, result agent.WorkflowResult) (agent.RunInput, error) {
 			mappedResult = result
-			return agent.RunInput{ID: "mapped", Text: "observation"}, nil
+			return agent.RunInput{ID: "mapped", Prompt: gaictx.PromptInput{User: gaictx.NewTextContent("observation")}}, nil
 		},
 	}))
-	workflow, err := main.NewRun(context.Background(), agent.RunInput{Text: "question"})
+	workflow, err := main.NewRun(context.Background(), textRunInput("question"))
 	if err != nil {
 		t.Fatalf("NewRun failed: %v", err)
 	}
 	consumeWorkflow(t, workflow)
-	if mappedResult.Input.Text != "question" || mappedResult.Text != "main" {
+	if promptUserText(mappedResult.Input) != "question" || mappedResult.Text != "main" {
 		t.Fatalf("input mapper did not receive the workflow result: %+v", mappedResult)
 	}
-	if postInput.ID != "mapped" || postInput.Text != "observation" {
+	if postInput.ID != "mapped" || promptUserText(postInput) != "observation" {
 		t.Fatalf("post agent did not receive mapped input: %+v", postInput)
 	}
 }
@@ -177,7 +177,7 @@ func TestAgentMiddlewareRunsInOrderWithPriorStageResults(t *testing.T) {
 		Model: &mocks.MockModel{Responses: []mocks.MockModelResponse{{Res: ai.AIResponse{Text: "memory"}}}},
 		Prompt: func(_ context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
 			order = append(order, "first")
-			return &testPromptBuilder{prompt: input.Text}, nil
+			return &testPromptBuilder{}, nil
 		},
 	})
 	second := agent.New(agent.Definition{
@@ -185,7 +185,7 @@ func TestAgentMiddlewareRunsInOrderWithPriorStageResults(t *testing.T) {
 		Model: &mocks.MockModel{Responses: []mocks.MockModelResponse{{Res: ai.AIResponse{Text: "audit"}}}},
 		Prompt: func(_ context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
 			order = append(order, "second")
-			return &testPromptBuilder{prompt: input.Text}, nil
+			return &testPromptBuilder{}, nil
 		},
 	})
 	main := workflowAgent("main", "main",
@@ -193,7 +193,7 @@ func TestAgentMiddlewareRunsInOrderWithPriorStageResults(t *testing.T) {
 			Output: agent.PreserveOutput,
 			MapInput: func(_ context.Context, result agent.WorkflowResult) (agent.RunInput, error) {
 				firstStageCount = len(result.Stages)
-				return agent.RunInput{Text: result.Text}, nil
+				return textRunInput(result.Text), nil
 			},
 		}),
 		agent.NewAgentMiddleware(second, agent.AgentMiddlewareConfig{
@@ -203,12 +203,12 @@ func TestAgentMiddlewareRunsInOrderWithPriorStageResults(t *testing.T) {
 				if len(result.Stages) > 0 {
 					secondPriorText = result.Stages[0].Result.Text
 				}
-				return agent.RunInput{Text: result.Text}, nil
+				return textRunInput(result.Text), nil
 			},
 		}),
 	)
 
-	workflow, err := main.NewRun(context.Background(), agent.RunInput{Text: "question"})
+	workflow, err := main.NewRun(context.Background(), textRunInput("question"))
 	if err != nil {
 		t.Fatalf("NewRun failed: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestAgentMiddlewareErrorPolicy(t *testing.T) {
 				{Err: stageErr},
 			}},
 			Prompt: func(_ context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
-				return &testPromptBuilder{prompt: input.Text}, nil
+				return &testPromptBuilder{}, nil
 			},
 			Limits: agent.Limits{RetryCount: 1},
 		})
@@ -258,7 +258,7 @@ func TestAgentMiddlewareErrorPolicy(t *testing.T) {
 				Output:      tt.output,
 				ErrorPolicy: tt.errorPolicy,
 			}))
-			workflow, err := main.NewRun(context.Background(), agent.RunInput{Text: "question"})
+			workflow, err := main.NewRun(context.Background(), textRunInput("question"))
 			if err != nil {
 				t.Fatalf("NewRun failed: %v", err)
 			}
@@ -288,7 +288,7 @@ func TestAgentMiddlewareRecordsInputMappingFailure(t *testing.T) {
 		Model: &mocks.MockModel{},
 		Prompt: func(_ context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
 			postCalled = true
-			return &testPromptBuilder{prompt: input.Text}, nil
+			return &testPromptBuilder{}, nil
 		},
 	})
 	main := workflowAgent("main", "main", agent.NewAgentMiddleware(post, agent.AgentMiddlewareConfig{
@@ -299,7 +299,7 @@ func TestAgentMiddlewareRecordsInputMappingFailure(t *testing.T) {
 		},
 	}))
 
-	workflow, err := main.NewRun(context.Background(), agent.RunInput{Text: "question"})
+	workflow, err := main.NewRun(context.Background(), textRunInput("question"))
 	if err != nil {
 		t.Fatalf("NewRun failed: %v", err)
 	}
@@ -323,7 +323,7 @@ func TestAgentMiddlewareRunPolicy(t *testing.T) {
 				{Err: modelErr},
 			}},
 			Prompt: func(_ context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
-				return &testPromptBuilder{prompt: input.Text}, nil
+				return &testPromptBuilder{}, nil
 			},
 			Limits:     agent.Limits{RetryCount: 1},
 			Middleware: []agent.Middleware{middleware},
@@ -336,11 +336,11 @@ func TestAgentMiddlewareRunPolicy(t *testing.T) {
 		Model: &mocks.MockModel{Responses: []mocks.MockModelResponse{{Res: ai.AIResponse{Text: "audited"}}}},
 		Prompt: func(_ context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
 			postCalled = true
-			return &testPromptBuilder{prompt: input.Text}, nil
+			return &testPromptBuilder{}, nil
 		},
 	})
 
-	workflow, err := newMain(agent.NewAgentMiddleware(post, agent.AgentMiddlewareConfig{})).NewRun(context.Background(), agent.RunInput{Text: "question"})
+	workflow, err := newMain(agent.NewAgentMiddleware(post, agent.AgentMiddlewareConfig{})).NewRun(context.Background(), textRunInput("question"))
 	if err != nil {
 		t.Fatalf("NewRun failed: %v", err)
 	}
@@ -354,7 +354,7 @@ func TestAgentMiddlewareRunPolicy(t *testing.T) {
 		ShouldRun: func(result agent.WorkflowResult) bool {
 			return len(result.Errors) > 0
 		},
-	})).NewRun(context.Background(), agent.RunInput{Text: "question"})
+	})).NewRun(context.Background(), textRunInput("question"))
 	if err != nil {
 		t.Fatalf("NewRun failed: %v", err)
 	}

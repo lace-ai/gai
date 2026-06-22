@@ -1,0 +1,66 @@
+package context_test
+
+import (
+	"errors"
+	"strings"
+	"testing"
+
+	gaictx "github.com/lace-ai/gai/context"
+	"github.com/lace-ai/gai/testutil/mocks"
+)
+
+func TestJSONPartUsesOneStructuredRepresentation(t *testing.T) {
+	t.Parallel()
+
+	part, err := gaictx.NewJSONPart("memory_observation", map[string]any{"name": "Sam"})
+	if err != nil {
+		t.Fatalf("NewJSONPart failed: %v", err)
+	}
+	node, err := part.Render(t.Context())
+	if err != nil {
+		t.Fatalf("Render failed: %v", err)
+	}
+	if node.Type != "memory_observation" || node.Value != `{"name":"Sam"}` {
+		t.Fatalf("unexpected node: %+v", node)
+	}
+	tokenizer := &mocks.MockTokenizer{}
+	if _, err := part.Tokens(t.Context(), tokenizer); err != nil {
+		t.Fatalf("Tokens failed: %v", err)
+	}
+
+	rendered, err := (&gaictx.SimpleRenderer{}).Render(t.Context(), []gaictx.Part{part})
+	if err != nil {
+		t.Fatalf("renderer failed: %v", err)
+	}
+	if rendered != "<memory_observation>\n{\"name\":\"Sam\"}\n</memory_observation>" {
+		t.Fatalf("unexpected rendered part: %q", rendered)
+	}
+}
+
+func TestNamedAndJSONPartValidation(t *testing.T) {
+	t.Parallel()
+
+	if _, err := gaictx.NewNamedPart("bad name", "value"); !errors.Is(err, gaictx.ErrPromptPartName) {
+		t.Fatalf("expected ErrPromptPartName, got %v", err)
+	}
+	if _, err := gaictx.NewJSONPart("value", make(chan int)); err == nil || !strings.Contains(err.Error(), "marshal value prompt part") {
+		t.Fatalf("expected contextual JSON marshal error, got %v", err)
+	}
+}
+
+func TestPromptInputCloneOwnsContextSlice(t *testing.T) {
+	t.Parallel()
+
+	first, _ := gaictx.NewNamedPart("first", "one")
+	second, _ := gaictx.NewNamedPart("second", "two")
+	input := gaictx.PromptInput{User: gaictx.NewTextContent("hello"), Context: []gaictx.Part{first}}
+	cloned := input.Clone()
+	cloned.Context[0] = second
+
+	if input.Context[0].Name() != "first" {
+		t.Fatalf("clone shared context slice: %+v", input.Context)
+	}
+	if cloned.User.String() != "hello" {
+		t.Fatalf("clone lost user content: %+v", cloned)
+	}
+}

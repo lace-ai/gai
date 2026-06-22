@@ -11,6 +11,7 @@ import (
 func TestCloneWorkflowResultOwnsMutableExecutionData(t *testing.T) {
 	call := &ai.ToolCall{Name: "lookup", Args: []byte(`{"query":"original"}`)}
 	result := WorkflowResult{
+		Input: RunInput{Prompt: gaictx.PromptInput{Context: []gaictx.Part{gaictx.NewTextPart("original")}}},
 		Primary: AgentResult{
 			Tokens: []ai.Token{{Type: ai.TokenTypeToolCall, Data: []byte("original"), ToolCall: call}},
 			Messages: []gaictx.Message{{
@@ -29,12 +30,17 @@ func TestCloneWorkflowResultOwnsMutableExecutionData(t *testing.T) {
 	}
 
 	cloned := cloneWorkflowResult(result)
+	cloned.Input.Prompt.Context[0] = gaictx.NewTextPart("changed")
 	cloned.Primary.Tokens[0].Data[0] = 'X'
 	cloned.Primary.Tokens[0].ToolCall.Args[0] = 'X'
 	cloned.Primary.Messages[0].TokenCount["tokenizer"] = 99
 	cloned.Primary.Iterations[0].Parts[0].Response.Text = "changed"
 	cloned.Primary.Iterations[0].Parts[0].ToolReq.Args[0] = 'X'
 	*cloned.Primary.Iterations[0].Parts[0].ToolResp.Text = "changed"
+	originalPromptNode, err := result.Input.Prompt.Context[0].Render(t.Context())
+	if err != nil || originalPromptNode.Value != "original" {
+		t.Fatalf("prompt context slice was shared with clone: %+v", result.Input.Prompt.Context)
+	}
 
 	if string(result.Primary.Tokens[0].Data) != "original" || string(result.Primary.Tokens[0].ToolCall.Args) != `{"query":"original"}` {
 		t.Fatalf("token data was shared with clone: %+v", result.Primary.Tokens[0])

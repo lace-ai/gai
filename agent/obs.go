@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/lace-ai/gai"
+	gaictx "github.com/lace-ai/gai/context"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -39,7 +40,8 @@ func newRunCreationObserver(ctx context.Context, agent *Agent, input RunInput) (
 		attribute.String("agent.model", modelName),
 		attribute.Int("agent.tool_count", toolCount),
 		attribute.Int("agent.middleware_count", middlewareCount),
-		attribute.Int("agent.input_chars", len(input.Text)),
+		attribute.Int("agent.user_input_chars", promptUserChars(input.Prompt)),
+		attribute.Int("agent.input_context_parts", len(input.Prompt.Context)),
 		attribute.Int("agent.max_tokens", input.MaxTokens),
 	)
 	return ctx, &runCreationObserver{
@@ -79,16 +81,26 @@ func (o *runCreationObserver) fields() map[string]any {
 	fields["model"] = o.modelName
 	fields["tool_count"] = o.toolCount
 	fields["middleware_count"] = o.middlewareCount
-	fields["input_chars"] = len(o.input.Text)
+	fields["user_input_chars"] = promptUserChars(o.input.Prompt)
+	fields["input_context_parts"] = len(o.input.Prompt.Context)
 	fields["max_tokens"] = o.input.MaxTokens
 	fields["meta_keys"] = sortedMetaKeys(o.input.Meta)
 	if o.input.ID != "" {
 		fields["run_id"] = o.input.ID
 	}
 	if o.debug != nil && o.debug.IncludeSensitiveData() {
-		fields["input_text"] = o.input.Text
+		if o.input.Prompt.User != nil {
+			fields["user_input"] = o.input.Prompt.User.String()
+		}
 	}
 	return fields
+}
+
+func promptUserChars(input gaictx.PromptInput) int {
+	if input.User == nil {
+		return 0
+	}
+	return len(input.User.String())
 }
 
 func (o *runCreationObserver) emit(ctx context.Context, name string, fields map[string]any, err error) {

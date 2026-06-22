@@ -18,7 +18,7 @@ var (
 	ErrPromptEntryID     = errors.New("prompt entry ID error")
 	ErrPromptSource      = errors.New("prompt source error")
 	ErrPromptBudget      = errors.New("prompt budget exceeded")
-	ErrUserPromptEmpty   = errors.New("user prompt is empty")
+	ErrPromptPartName    = errors.New("invalid prompt part name")
 	ErrTokenizerNotFound = errors.New("tokenizer not found")
 
 	ErrMessageNotFound    = errors.New("message not found")
