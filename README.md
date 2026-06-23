@@ -239,7 +239,7 @@ type AIRequest struct {
 }
 ```
 
-`AIResponse` contains visible `Text`, separate `Reasoning`, structured `ToolCalls`, optional provider `Raw` data, and token usage. Agent runs normally create the prompt string through a `context.PromptBuilder`; direct model calls can supply it themselves.
+`AIResponse` contains visible `Text`, separate `Reasoning`, structured `ToolCalls`, optional provider `Raw` data, and token usage. Agent runs normally create the prompt string through a `context.PromptBuilder`; direct model calls can supply it themselves. Workflow results follow the same split: `WorkflowResult.Text` is visible output and `WorkflowResult.Reasoning` is thought-token output.
 
 </details>
 

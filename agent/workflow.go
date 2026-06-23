@@ -31,10 +31,12 @@ type Stream struct {
 }
 
 // AgentResult is the captured result of one agent execution. Text contains only
-// the concatenated text-token content; Tokens retains the complete token stream.
+// the concatenated text-token content, Reasoning contains thought-token content,
+// and Tokens retains the complete token stream.
 type AgentResult struct {
 	Tokens     []ai.Token
 	Text       string
+	Reasoning  string
 	Messages   []gaictx.Message
 	Iterations []loop.Iteration
 	Errors     []error
@@ -49,15 +51,17 @@ type StageResult struct {
 }
 
 // WorkflowResult is a snapshot of the complete workflow state. Primary never
-// changes, while Tokens and Text represent the output after the latest stage.
+// changes, while Tokens, Text, and Reasoning represent the output after the
+// latest stage.
 type WorkflowResult struct {
-	Input    RunInput
-	Primary  AgentResult
-	Tokens   []ai.Token
-	Text     string
-	Stages   []StageResult
-	Errors   []error
-	Complete bool
+	Input     RunInput
+	Primary   AgentResult
+	Tokens    []ai.Token
+	Text      string
+	Reasoning string
+	Stages    []StageResult
+	Errors    []error
+	Complete  bool
 }
 
 // MiddlewareContext gives middleware access to the accumulated workflow result.
@@ -186,6 +190,7 @@ func (w *Workflow) capturePrimary(ctx context.Context, upstream Stream, obs *wor
 		result := AgentResult{
 			Tokens:     cloneTokens(tokens),
 			Text:       tokenText(tokens),
+			Reasoning:  tokenReasoning(tokens),
 			Messages:   cloneMessages(w.Loop.Messages()),
 			Iterations: cloneIterations(w.Loop.Iterations),
 			Errors:     append([]error(nil), errs...),
@@ -194,6 +199,7 @@ func (w *Workflow) capturePrimary(ctx context.Context, upstream Stream, obs *wor
 		w.result.Primary = result
 		w.result.Tokens = cloneTokens(tokens)
 		w.result.Text = result.Text
+		w.result.Reasoning = result.Reasoning
 		w.result.Errors = append([]error(nil), errs...)
 		w.mu.Unlock()
 		obs.PrimaryFinished(ctx, result)
@@ -205,6 +211,7 @@ func (w *Workflow) captureFinal(ctx context.Context, upstream Stream, obs *workf
 		w.mu.Lock()
 		w.result.Tokens = cloneTokens(tokens)
 		w.result.Text = tokenText(tokens)
+		w.result.Reasoning = tokenReasoning(tokens)
 		w.result.Errors = append([]error(nil), errs...)
 		w.result.Complete = true
 		result := cloneWorkflowResult(w.result)
@@ -219,6 +226,7 @@ func (w *Workflow) addStage(stage StageResult, tokens []ai.Token) {
 	w.result.Stages = append(w.result.Stages, cloneStageResult(stage))
 	w.result.Tokens = cloneTokens(tokens)
 	w.result.Text = tokenText(tokens)
+	w.result.Reasoning = tokenReasoning(tokens)
 }
 
 type streamRelay struct {
@@ -320,6 +328,21 @@ func tokenText(tokens []ai.Token) string {
 		}
 	}
 	return string(text)
+}
+
+func tokenReasoning(tokens []ai.Token) string {
+	var reasoning []byte
+	for _, token := range tokens {
+		if token.Type != ai.TokenTypeThought {
+			continue
+		}
+		if token.Text != "" {
+			reasoning = append(reasoning, token.Text...)
+		} else {
+			reasoning = append(reasoning, token.Data...)
+		}
+	}
+	return string(reasoning)
 }
 
 func cloneRunInput(input RunInput) RunInput {

@@ -289,6 +289,7 @@ func agentResultFields(result AgentResult) map[string]any {
 	return map[string]any{
 		"token_count":     len(result.Tokens),
 		"text_chars":      len(result.Text),
+		"reasoning_chars": len(result.Reasoning),
 		"message_count":   len(result.Messages),
 		"iteration_count": len(result.Iterations),
 		"error_count":     len(result.Errors),

@@ -141,6 +141,7 @@ func (m *AgentMiddleware) upstreamResult(run *MiddlewareContext, captured captur
 	result := run.Result()
 	result.Tokens = cloneTokens(captured.Tokens)
 	result.Text = tokenText(captured.Tokens)
+	result.Reasoning = tokenReasoning(captured.Tokens)
 	result.Errors = append([]error(nil), captured.Errors...)
 	return result
 }
@@ -179,6 +180,7 @@ func (m *AgentMiddleware) runStage(ctx context.Context, input RunInput) AgentRes
 	result := workflow.Result().Primary
 	result.Tokens = cloneTokens(captured.Tokens)
 	result.Text = tokenText(captured.Tokens)
+	result.Reasoning = tokenReasoning(captured.Tokens)
 	result.Errors = append([]error(nil), captured.Errors...)
 	return result
 }

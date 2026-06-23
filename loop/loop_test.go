@@ -607,3 +607,32 @@ func TestLoopFallsBackToBuildPromptEveryIteration(t *testing.T) {
 		}
 	}
 }
+
+func TestIterationCountsLeadingThoughtTokens(t *testing.T) {
+	t.Parallel()
+
+	var iteration loop.Iteration
+	iteration.AppendToken(ai.Token{Type: ai.TokenTypeThought, Text: "thinking", TokenUsage: 7})
+	iteration.AppendToken(ai.Token{Type: ai.TokenTypeThought, Text: " more", TokenUsage: 3})
+	iteration.AppendToken(ai.Token{Type: ai.TokenTypeText, Text: "answer", TokenUsage: 2})
+
+	if len(iteration.Parts) != 1 {
+		t.Fatalf("expected one response part, got %d", len(iteration.Parts))
+	}
+	response := iteration.Parts[0].Response
+	if response == nil {
+		t.Fatal("expected response part")
+	}
+	if response.Text != "answer" {
+		t.Fatalf("unexpected visible text: %q", response.Text)
+	}
+	if response.Reasoning != "thinking more" {
+		t.Fatalf("unexpected reasoning: %q", response.Reasoning)
+	}
+	if response.ReasoningTokens != 10 {
+		t.Fatalf("expected reasoning tokens to include leading thought, got %d", response.ReasoningTokens)
+	}
+	if response.OutputTokens != 12 {
+		t.Fatalf("unexpected output tokens: %d", response.OutputTokens)
+	}
+}
