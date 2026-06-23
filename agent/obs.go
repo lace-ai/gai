@@ -24,12 +24,20 @@ type runCreationObserver struct {
 }
 
 func newRunCreationObserver(ctx context.Context, agent *Agent, input RunInput) (context.Context, *runCreationObserver) {
-	name := agent.name()
-	debug := agent.debugSink()
+	name := ""
+	var debug gai.DebugSink
 	modelName := ""
 	toolCount := 0
-	middlewareCount := len(agent.middleware())
+	middlewareCount := 0
 	if agent != nil {
+		name = agent.name()
+		debug = agent.debugSink()
+		middlewareCount = len(agent.middleware())
+		toolCount = len(agent.def.Tools)
+		if agent.def.Model != nil {
+			modelName = agent.def.Model.Name()
+		}
+	}
 		toolCount = len(agent.def.Tools)
 		if agent.def.Model != nil {
 			modelName = agent.def.Model.Name()
