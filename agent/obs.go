@@ -38,11 +38,6 @@ func newRunCreationObserver(ctx context.Context, agent *Agent, input RunInput) (
 			modelName = agent.def.Model.Name()
 		}
 	}
-		toolCount = len(agent.def.Tools)
-		if agent.def.Model != nil {
-			modelName = agent.def.Model.Name()
-		}
-	}
 	ctx, span := gai.StartOperationSpan(ctx, agentTracerName, "agent.run", "agent.operation", "create",
 		attribute.String("agent.name", name),
 		attribute.String("agent.model", modelName),
@@ -158,6 +153,9 @@ func (o *workflowObserver) PrimaryFinished(ctx context.Context, result AgentResu
 }
 
 func (o *workflowObserver) Finished(ctx context.Context, result WorkflowResult) {
+	if o == nil {
+		return
+	}
 	fields := map[string]any{
 		"agent_name":       o.agentName,
 		"middleware_count": o.middlewareCount,
