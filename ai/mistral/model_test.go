@@ -141,6 +141,48 @@ func TestModelGenerateMapsRequestCapabilities(t *testing.T) {
 	}
 }
 
+func TestModelGenerateMapsMultipleResponseToolCalls(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"choices":[{
+				"message":{
+					"content":"",
+					"tool_calls":[
+						{"id":"call_1","type":"function","function":{"name":"first_tool","arguments":"{\"value\":1}"}},
+						{"id":"call_2","type":"function","function":{"name":"second_tool","arguments":"{\"value\":2}"}}
+					]
+				}
+			}],
+			"usage":{"prompt_tokens":3,"completion_tokens":4}
+		}`))
+	}))
+	defer ts.Close()
+
+	p := New("test-key", nil)
+	p.baseURL = ts.URL
+
+	m, err := p.Model(MistralSmallLatest)
+	if err != nil {
+		t.Fatalf("Model error: %v", err)
+	}
+
+	res, err := m.Generate(context.Background(), ai.AIRequest{Prompt: "call tools"})
+	if err != nil {
+		t.Fatalf("Generate error: %v", err)
+	}
+
+	if len(res.ToolCalls) != 2 {
+		t.Fatalf("expected 2 tool calls, got %#v", res.ToolCalls)
+	}
+	if res.ToolCalls[0].ID != "call_1" || res.ToolCalls[0].Name != "first_tool" || string(res.ToolCalls[0].Args) != `{"value":1}` {
+		t.Fatalf("unexpected first tool call: %#v", res.ToolCalls[0])
+	}
+	if res.ToolCalls[1].ID != "call_2" || res.ToolCalls[1].Name != "second_tool" || string(res.ToolCalls[1].Args) != `{"value":2}` {
+		t.Fatalf("unexpected second tool call: %#v", res.ToolCalls[1])
+	}
+}
+
 func TestModelGenerateNoChoices(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

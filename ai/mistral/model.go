@@ -861,10 +861,39 @@ func mapChatResponseToolCalls(raw json.RawMessage) ([]ai.ToolCall, error) {
 	if len(raw) == 0 || string(raw) == "null" {
 		return nil, nil
 	}
-	var accumulator mistralToolCallAccumulator
-	calls, err := accumulator.add(raw, true)
-	if err != nil {
-		return nil, err
+
+	var entries []mistralStreamToolCallEntry
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return nil, fmt.Errorf("decode tool_calls: %w", err)
 	}
-	return calls, nil
+
+	result := make([]ai.ToolCall, 0, len(entries))
+	for _, entry := range entries {
+		toolName := strings.TrimSpace(entry.Function.Name)
+		if toolName == "" {
+			continue
+		}
+		args := json.RawMessage(strings.TrimSpace(entry.Function.Arguments))
+		if len(args) == 0 {
+			args = json.RawMessage("{}")
+		}
+		if !json.Valid(args) {
+			continue
+		}
+		callType := strings.TrimSpace(entry.Type)
+		if callType == "" {
+			callType = "function"
+		}
+		callID := strings.TrimSpace(entry.ID)
+		if callID == "" {
+			callID = ai.GenerateToolCallID(toolName)
+		}
+		result = append(result, ai.ToolCall{
+			ID:   callID,
+			Type: callType,
+			Name: toolName,
+			Args: args,
+		})
+	}
+	return result, nil
 }
