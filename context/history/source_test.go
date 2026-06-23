@@ -77,7 +77,7 @@ func TestHistoryPartRendersSimpleContent(t *testing.T) {
 
 	want := `<history>
 user: hello <world> & "quotes"
-assistant: {"type":"function","name":"search","arguments":{"q":"lace<&>"}}
+assistant: {"arguments":{"q":"lace\u003c\u0026\u003e"},"name":"search","type":"function"}
 tool res: found <docs> & "notes"
 summary: older turns
 </history>`
