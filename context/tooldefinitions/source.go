@@ -195,7 +195,8 @@ func (p *part) Render(ctx context.Context) (gaictx.RenderNode, error) {
 	}
 	for _, definition := range p.definitions {
 		node.Children = append(node.Children, gaictx.RenderNode{
-			Type: "tool",
+			Type:   "tool",
+			Fields: []gaictx.RenderField{{Key: "name", Value: definition.name}},
 			Children: []gaictx.RenderNode{
 				{Type: "tool-name", Value: definition.name},
 				{Type: "description", Value: definition.description},
