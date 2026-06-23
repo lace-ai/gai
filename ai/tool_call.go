@@ -45,6 +45,9 @@ func (tc *ToolCall) Validate() error {
 
 // String returns a diagnostic representation of the tool call.
 func (tc *ToolCall) String() string {
+	if tc == nil {
+		return "<nil>"
+	}
 	var builder strings.Builder
 	builder.WriteString("id: ")
 	builder.WriteString(tc.ID)

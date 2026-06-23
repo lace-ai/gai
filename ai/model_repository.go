@@ -40,6 +40,9 @@ func (r *ModelRepository) RegisterProvider(ctx context.Context, provider Provide
 	if err := r.Validate(); err != nil {
 		return err
 	}
+	if provider == nil {
+		return ErrNilProvider
+	}
 	if err := provider.Validate(); err != nil {
 		if r.debug != nil {
 			r.debug.Emit(ctx, gai.DebugEvent{
