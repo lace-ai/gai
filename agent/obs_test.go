@@ -31,7 +31,7 @@ func TestAgentWorkflowEmitsLifecycleEventsAndSpans(t *testing.T) {
 		Name:  "post",
 		Model: &mocks.MockModel{Responses: []mocks.MockModelResponse{{Res: ai.AIResponse{Text: "post"}}}},
 		Prompt: func(_ context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
-			return &testPromptBuilder{prompt: input.Text}, nil
+			return &testPromptBuilder{}, nil
 		},
 	})
 	primary := agent.New(agent.Definition{
@@ -39,7 +39,7 @@ func TestAgentWorkflowEmitsLifecycleEventsAndSpans(t *testing.T) {
 		Model:     &mocks.MockModel{Responses: []mocks.MockModelResponse{{Res: ai.AIResponse{Text: "primary"}}}},
 		DebugSink: sink,
 		Prompt: func(_ context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
-			return &testPromptBuilder{prompt: input.Text}, nil
+			return &testPromptBuilder{}, nil
 		},
 		Middleware: []agent.Middleware{agent.NewAgentMiddleware(post, agent.AgentMiddlewareConfig{
 			Output: agent.PreserveOutput,
@@ -47,9 +47,9 @@ func TestAgentWorkflowEmitsLifecycleEventsAndSpans(t *testing.T) {
 	})
 
 	workflow, err := primary.NewRun(t.Context(), agent.RunInput{
-		ID:   "run-1",
-		Text: "question",
-		Meta: map[string]any{"session_id": "session-1"},
+		ID:     "run-1",
+		Prompt: gaictx.PromptInput{User: gaictx.NewTextContent("question")},
+		Meta:   map[string]any{"session_id": "session-1"},
 	})
 	if err != nil {
 		t.Fatalf("NewRun failed: %v", err)
@@ -76,7 +76,7 @@ func TestAgentWorkflowEmitsLifecycleEventsAndSpans(t *testing.T) {
 	if !ok {
 		t.Fatal("missing run-created event")
 	}
-	if _, leaked := created.Fields["input_text"]; leaked {
+	if _, leaked := created.Fields["user_input"]; leaked {
 		t.Fatalf("non-sensitive sink received input text: %+v", created.Fields)
 	}
 
@@ -93,7 +93,7 @@ func TestAgentWorkflowEmitsLifecycleEventsAndSpans(t *testing.T) {
 
 func TestAgentObservabilityReportsCreationAndMiddlewareFailures(t *testing.T) {
 	sink := &agentDebugSink{}
-	_, err := agent.New(agent.Definition{Name: "broken", DebugSink: sink}).NewRun(t.Context(), agent.RunInput{Text: "question"})
+	_, err := agent.New(agent.Definition{Name: "broken", DebugSink: sink}).NewRun(t.Context(), textRunInput("question"))
 	if err == nil {
 		t.Fatal("expected run creation failure")
 	}
@@ -106,7 +106,7 @@ func TestAgentObservabilityReportsCreationAndMiddlewareFailures(t *testing.T) {
 		Name:  "post",
 		Model: &mocks.MockModel{},
 		Prompt: func(_ context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
-			return &testPromptBuilder{prompt: input.Text}, nil
+			return &testPromptBuilder{}, nil
 		},
 	})
 	primary := agent.New(agent.Definition{
@@ -114,7 +114,7 @@ func TestAgentObservabilityReportsCreationAndMiddlewareFailures(t *testing.T) {
 		Model:     &mocks.MockModel{Responses: []mocks.MockModelResponse{{Res: ai.AIResponse{Text: "primary"}}}},
 		DebugSink: sink,
 		Prompt: func(_ context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
-			return &testPromptBuilder{prompt: input.Text}, nil
+			return &testPromptBuilder{}, nil
 		},
 		Middleware: []agent.Middleware{agent.NewAgentMiddleware(post, agent.AgentMiddlewareConfig{
 			ErrorPolicy: agent.RecordError,
@@ -123,7 +123,7 @@ func TestAgentObservabilityReportsCreationAndMiddlewareFailures(t *testing.T) {
 			},
 		})},
 	})
-	workflow, err := primary.NewRun(t.Context(), agent.RunInput{Text: "question"})
+	workflow, err := primary.NewRun(t.Context(), textRunInput("question"))
 	if err != nil {
 		t.Fatalf("NewRun failed: %v", err)
 	}

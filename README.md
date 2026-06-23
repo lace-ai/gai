@@ -58,16 +58,19 @@ assistant := agent.New(agent.Definition{
   Name:  "assistant",
   Model: model,
   Prompt: func(ctx context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
-    return gaictx.New(gaictx.Definition{
+	return gaictx.New(gaictx.Definition{
       SystemInstructions: []gaictx.Part{
         gaictx.NewTextPart("You are a concise, helpful assistant."),
       },
-      UserPrompt:         input.Text,
-    }), nil
+	}), nil
   },
 })
 
-workflow, err := assistant.NewRun(ctx, agent.RunInput{Text: "What is the capital of France?"})
+workflow, err := assistant.NewRun(ctx, agent.RunInput{
+  Prompt: gaictx.PromptInput{
+    User: gaictx.NewTextContent("What is the capital of France?"),
+  },
+})
 
 tokens, statuses, errs := workflow.Run(ctx)
 go func() {
@@ -108,22 +111,30 @@ assistant := agent.New(agent.Definition{
       Output:      agent.PreserveOutput,
       ErrorPolicy: agent.RecordError,
       MapInput: func(ctx context.Context, result agent.WorkflowResult) (agent.RunInput, error) {
-        observation, err := buildMemoryObservation(ctx, result)
+		observation, err := buildMemoryObservation(ctx, result)
         if err != nil {
           return agent.RunInput{}, err
         }
-        return agent.RunInput{
-          ID:   result.Input.ID,
-          Text: observation,
-          Meta: result.Input.Meta,
-        }, nil
+		observationPart, err := gaictx.NewJSONPart("memory_observation", observation)
+		if err != nil {
+		  return agent.RunInput{}, err
+		}
+		return agent.RunInput{
+		  ID: result.Input.ID,
+		  Prompt: gaictx.PromptInput{
+		    Context: []gaictx.Part{observationPart},
+		  },
+		  Meta: result.Input.Meta,
+		}, nil
       },
     }),
   },
 })
 
 workflow, err := assistant.NewRun(ctx, agent.RunInput{
-  Text: "What is the capital of France?",
+  Prompt: gaictx.PromptInput{
+    User: gaictx.NewTextContent("What is the capital of France?"),
+  },
   Meta: map[string]any{"session_id": sessionID},
 })
 tokens, statuses, errs := workflow.Run(ctx)
@@ -335,18 +346,20 @@ type Conversation interface {
 
 </summary>
 
-`context.New` creates a `Builder` from a `Definition`. The definition supplies the renderer, system instructions, context sources, user prompt, token budget, output reserve, tokenizer, and optional debug sink.
+`context.New` creates a `Builder` from a `Definition`. The definition supplies the renderer, system instructions, context sources, structured prompt input, token budget, output reserve, tokenizer, and optional debug sink.
 
 ```go
 builder := gaictx.New(gaictx.Definition{
-  Renderer: gaictx.XMLRenderer{},
+  Renderer: &gaictx.XMLRenderer{},
   SystemInstructions: []gaictx.Part{
     gaictx.NewTextPart("Follow the system policy."),
   },
   ContextSources: []gaictx.ContextSource{
     history.NewHistory(sessionID, historyStore),
   },
-  UserPrompt:         "Summarize the project status.",
+  PromptInput: gaictx.PromptInput{
+    User: gaictx.NewTextContent("Summarize the project status."),
+  },
   TokenBudget:        128000,
   OutputTokenReserve: 4096,
   Tokenizer:          model.Tokenizer(),
@@ -356,13 +369,13 @@ builder := gaictx.New(gaictx.Definition{
 The builder has two phases:
 
 1. `BuildContext` calls each `ContextSource` in order. A source receives the remaining token budget and returns one `Part`.
-2. `BuildPrompt` renders system instructions, the built context parts, the current user prompt, and non-user messages from the loop conversation into one string.
+2. `BuildPrompt` renders system instructions, built context sources, input context parts, current user content, and non-user messages from the loop conversation into one string.
 
-`Part` is the unit of token counting and rendering. Built-in parts include `TextPart`, `MessagePart`, and `SystemPart`; custom parts implement `Name`, `Tokens`, and `Render`. `XMLRenderer` is the default, or provide another `Renderer` in the definition.
+`Part` is the unit of token counting and rendering. Built-in parts include `TextPart`, `NamedPart`, `MessagePart`, and `SystemPart`; `NewJSONPart` creates named structured JSON context. Custom parts implement `Name`, `Tokens`, and `Render`. `XMLRenderer` is the default, or provide another `Renderer` in the definition.
 
 When `TokenBudget` is positive, the available context budget is `TokenBudget - OutputTokenReserve - system instruction tokens`. The active tokenizer is passed automatically to context sources that implement `TokenizerSetter`. A builder created by an `agent.Agent` also receives the agent tokenizer override, or the model tokenizer when no override is configured.
 
-Use `AppendSystemInstructions`, `AppendContextSource`, and `SetUserPrompt` when the prompt needs to be changed after construction. `SetDebugSink` enables prompt-build diagnostics.
+Use `AppendSystemInstructions`, `AppendContextSource`, and `SetInput` when the prompt needs to be changed after construction. `SetDebugSink` enables prompt-build diagnostics.
 
 </details>
 
@@ -392,7 +405,7 @@ The `agent` package turns reusable configuration into independent loop runs:
 
 - `Definition` combines a name, model, tools, prompt factory, limits, optional tokenizer override, optional tool-response preprocessor, and ordered stream middleware.
 - `Prompt` builds a `context.PromptBuilder` for one `RunInput`.
-- `RunInput` carries an ID, user text, per-run output-token override, metadata, and the upstream result when an agent runs as middleware.
+- `RunInput` carries an ID, structured `PromptInput`, per-run output-token override, and metadata. `PromptInput` separates genuine user content from named machine context.
 - `Limits` configures maximum loop iterations, retries, and default output tokens.
 - `Agent` is created with `agent.New`; `NewRun` returns a `Workflow`, and `Workflow.Run` streams the loop through each configured middleware.
 - `AgentMiddleware` adapts an ordinary agent with preserve, append, or replace output behavior. `Workflow.Result` exposes the primary result, final output, and named middleware stages.
@@ -416,7 +429,8 @@ After they close, `Workflow.Result()` contains the immutable primary result, the
 final visible output, accumulated errors, and named middleware stages.
 
 An ordinary agent can become middleware with `NewAgentMiddleware`. By default it
-receives the current visible text, original run ID, and metadata. Set
+receives the current visible text as named `upstream_output` context, plus the
+original run ID and metadata. Set
 `AgentMiddlewareConfig.MapInput` to deliberately project the typed upstream
 `WorkflowResult` into a different `RunInput`:
 

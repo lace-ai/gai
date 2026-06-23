@@ -9,6 +9,7 @@ import (
 	"strings"
 )
 
+// SystemPrompt loads a supported prompt file and appends it as a system instruction.
 func (b *Builder) SystemPrompt(ctx context.Context, path string) error {
 	part, err := LoadPromptFromFile(path)
 	if err != nil {
@@ -19,6 +20,7 @@ func (b *Builder) SystemPrompt(ctx context.Context, path string) error {
 	return nil
 }
 
+// LoadPromptFromFile loads a Markdown or text file as a trimmed TextPart.
 func LoadPromptFromFile(path string) (Part, error) {
 	cleanPath := strings.TrimSpace(path)
 	if cleanPath == "" {

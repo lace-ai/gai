@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-// Content is the atomic unit of a message
+// Content is the atomic, serializable, and renderable payload of a message.
 type Content interface {
 	String() string
 	Type() string
@@ -21,7 +21,7 @@ const (
 	ContentTypeToolResultErr = "tool_result_err"
 )
 
-// TextContent is a generic content type
+// TextContent contains plain message text.
 type TextContent struct {
 	Text string
 }
@@ -42,11 +42,12 @@ func (c TextContent) Render(ctx context.Context) (RenderNode, error) {
 	return RenderNode{Type: ContentTypeText, Value: c.Text}, nil
 }
 
+// NewTextContent creates plain message content.
 func NewTextContent(text string) TextContent {
 	return TextContent{Text: text}
 }
 
-// ToolCallContent represents a tool call
+// ToolCallContent records a tool name and its serialized arguments.
 type ToolCallContent struct {
 	ToolName string
 	Args     string
@@ -74,6 +75,7 @@ func (c ToolCallContent) Render(ctx context.Context) (RenderNode, error) {
 	}, nil
 }
 
+// NewToolCallContent creates tool-call message content.
 func NewToolCallContent(toolName, args string) ToolCallContent {
 	return ToolCallContent{
 		ToolName: toolName,
@@ -81,7 +83,7 @@ func NewToolCallContent(toolName, args string) ToolCallContent {
 	}
 }
 
-// ToolResultContent represents a tool result
+// ToolResultContent records a successful tool result.
 type ToolResultContent struct {
 	ToolName          string
 	Result            string
@@ -111,6 +113,7 @@ func (c ToolResultContent) Render(ctx context.Context) (RenderNode, error) {
 	}, nil
 }
 
+// NewToolResultContent creates successful tool-result content.
 func NewToolResultContent(toolName, result string, precomputed bool, precomputedResult string) ToolResultContent {
 	return ToolResultContent{
 		ToolName:          toolName,
@@ -120,7 +123,7 @@ func NewToolResultContent(toolName, result string, precomputed bool, precomputed
 	}
 }
 
-// ToolResultErrContent represents a tool error result
+// ToolResultErrContent records a failed tool execution.
 type ToolResultErrContent struct {
 	ToolName string
 	Err      string
@@ -148,6 +151,7 @@ func (c ToolResultErrContent) Render(ctx context.Context) (RenderNode, error) {
 	}, nil
 }
 
+// NewToolResultErrContent creates failed tool-result content.
 func NewToolResultErrContent(toolName, err string) ToolResultErrContent {
 	return ToolResultErrContent{
 		ToolName: toolName,
@@ -155,6 +159,7 @@ func NewToolResultErrContent(toolName, err string) ToolResultErrContent {
 	}
 }
 
+// NewContentFromType decodes a marshalled Content value using its type name.
 func NewContentFromType(contentType string, data []byte) (Content, error) {
 	switch contentType {
 	case ContentTypeText:

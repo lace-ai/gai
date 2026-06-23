@@ -20,7 +20,13 @@ var (
 	ErrToolInvalid = errors.New("invalid tool definition")
 )
 
-// Source renders loop tools as prompt context.
+const toolUseProtocol = `When a tool is required, output each tool call as a standalone JSON object using exactly this shape:
+{"type":"function","name":"<tool-name>","arguments":{...}}
+
+The name must match a listed tool, type must be exactly "function" and arguments must match its signature. Do not include an id, do not wrap the JSON in Markdown, and separate multiple calls with a blank line. If no tool is needed, respond normally. Do not repeat a completed tool call when its result is already present.`
+
+// Source renders loop tools and their text-based invocation protocol as prompt
+// context.
 type Source struct {
 	tools    []loop.Tool
 	renderer gaictx.Renderer
@@ -81,7 +87,7 @@ func (s *Source) Function(ctx context.Context, tokenBudget int) (part gaictx.Par
 	if renderer == nil {
 		renderer = &gaictx.XMLRenderer{}
 	}
-	part = newPart(definitions, renderer.RenderToolSignatures(toToolSignatures(s.tools)))
+	part = newPart(definitions, toolUseProtocol+renderer.RenderToolSignatures(toToolSignatures(s.tools)))
 	observer.Succeeded(ctx, definitionNames(definitions))
 	return part, nil
 }
@@ -153,14 +159,18 @@ func (p *part) Render(ctx context.Context) (gaictx.RenderNode, error) {
 	if err := ctx.Err(); err != nil {
 		return gaictx.RenderNode{}, err
 	}
-	node := gaictx.RenderNode{Type: "tools"}
+	node := gaictx.RenderNode{
+		Type: "tools",
+		Children: []gaictx.RenderNode{
+			{Type: "tool_usage", Value: toolUseProtocol},
+		},
+	}
 	for _, definition := range p.definitions {
 		node.Children = append(node.Children, gaictx.RenderNode{
-			Type: "tool",
-			Fields: []gaictx.RenderField{
-				{Key: "name", Value: definition.name},
-			},
+			Type:   "tool",
+			Fields: []gaictx.RenderField{{Key: "name", Value: definition.name}},
 			Children: []gaictx.RenderNode{
+				{Type: "tool-name", Value: definition.name},
 				{Type: "description", Value: definition.description},
 				{Type: "signature", Value: definition.parameters},
 			},

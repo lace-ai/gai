@@ -5,50 +5,66 @@ import (
 	gaictx "github.com/lace-ai/gai/context"
 )
 
+// IterationType identifies the semantic kind of one iteration part.
 type IterationType string
 
 const (
-	// TODO: add thinking, ...
-	IterationTypeToolCall  IterationType = "tool_call"
-	IterationTypeResponse  IterationType = "response"
+	// IterationTypeToolCall identifies a model request to invoke a tool.
+	IterationTypeToolCall IterationType = "tool_call"
+	// IterationTypeResponse identifies generated assistant text.
+	IterationTypeResponse IterationType = "response"
+	// IterationTypeToolError identifies a failed tool operation.
 	IterationTypeToolError IterationType = "tool_error"
 )
 
+// IterationInformation reports progress after an iteration or retry attempt.
 type IterationInformation struct {
-	Iteration      Iteration
+	// Iteration contains the completed iteration when one is available.
+	Iteration Iteration
+	// IterationCount is the one-based current iteration number.
 	IterationCount int
-	PartCount      int
-	RetryCount     int
+	// PartCount is the number of parts accumulated in the iteration.
+	PartCount int
+	// RetryCount is the number of consecutive generation retries.
+	RetryCount int
 }
 
+// Iteration records one model generation and its tool interactions.
 type Iteration struct {
-	Count   int
-	Parts   []IterationPart
-	Request string
+	// Count is the one-based iteration number.
+	Count int
+	// Parts contains generated responses, tool calls, and tool errors in order.
+	Parts []IterationPart
+	// UserMessage is the structured user input retained by the first iteration.
+	UserMessage *gaictx.Message
 }
 
+// IterationPart contains one response, tool call, or tool result segment.
 type IterationPart struct {
-	Type     IterationType
+	// Type identifies which fields are meaningful.
+	Type IterationType
+	// Response contains generated text for IterationTypeResponse.
 	Response *ai.AIResponse
-	ToolReq  *ai.ToolCall
+	// ToolReq contains the requested call for tool-related parts.
+	ToolReq *ai.ToolCall
+	// ToolResp contains the result produced for ToolReq.
 	ToolResp *ToolResponse
 }
 
+// Messages converts the iteration into ordered conversation messages.
+// The first iteration includes UserMessage when present.
 func (i Iteration) Messages() []gaictx.Message {
 	var msgs []gaictx.Message
 
-	if i.Count == 1 {
-		if len(i.Request) > 0 {
-			msgs = append(msgs, gaictx.Message{
-				Role:    gaictx.RoleUser,
-				Content: gaictx.NewTextContent(i.Request),
-			})
-		}
+	if i.Count == 1 && i.UserMessage != nil {
+		msgs = append(msgs, *i.UserMessage)
 	}
 
 	return append(msgs, i.partMessages()...)
 }
 
+// DeltaMessages converts only the iteration parts into conversation messages,
+// excluding the original user request.
 func (i *Iteration) DeltaMessages() []gaictx.Message {
 	if i == nil {
 		return nil
@@ -92,6 +108,7 @@ func (i *Iteration) partMessages() []gaictx.Message {
 	return msgs
 }
 
+// CurrentPart returns the most recently appended part, or nil when empty.
 func (i *Iteration) CurrentPart() *IterationPart {
 	if len(i.Parts) == 0 {
 		return nil
@@ -99,6 +116,7 @@ func (i *Iteration) CurrentPart() *IterationPart {
 	return &i.Parts[len(i.Parts)-1]
 }
 
+// AppendToken adds a streamed model token to the appropriate iteration part.
 func (i *Iteration) AppendToken(t ai.Token) {
 	text := t.Text
 	if text == "" && len(t.Data) > 0 {

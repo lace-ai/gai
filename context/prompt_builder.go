@@ -3,6 +3,7 @@ package context
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
@@ -14,25 +15,30 @@ const (
 	promptDebugPreviewLimit = 160
 )
 
+// ContextSource produces one prompt part using the remaining context budget.
+// Sources are evaluated in declaration order by Builder.BuildContext.
 type ContextSource interface {
 	Name() string
 	Function(ctx context.Context, TokenBudget int) (Part, error)
 }
 
+// TokenizerSetter is implemented by components that accept tokenizer injection.
 type TokenizerSetter interface {
 	SetTokenizer(tokenizer ai.Tokenizer)
 }
 
+// PromptBuilder is the prompt-construction contract consumed by agent loops.
 type PromptBuilder interface {
 	AppendContextSource(ctx context.Context, source ContextSource) error
 	AppendContextSources(ctx context.Context, sources ...ContextSource) error
 	AppendSystemInstructions(ctx context.Context, instructions ...Part) error
 	BuildContext(ctx context.Context) ([]Part, error)
 	BuildPrompt(ctx context.Context, conv Conversation) (string, error)
-	GetUserPrompt() string
-	SetUserPrompt(prompt string)
+	Input() PromptInput
+	SetInput(input PromptInput)
 }
 
+// TokenBudget exposes prompt-window configuration and remaining capacity.
 type TokenBudget interface {
 	SetTokenLimit(limit int) error
 	SetOutputTokenReserve(reserve int) error
@@ -40,17 +46,29 @@ type TokenBudget interface {
 	Tokenizer() ai.Tokenizer
 }
 
+// Definition configures a Builder.
 type Definition struct {
-	Renderer           Renderer
+	// Renderer converts the final ordered parts into a model prompt. XMLRenderer
+	// is used when Renderer is nil.
+	Renderer Renderer
+	// SystemInstructions are placed before context, user, and conversation parts.
 	SystemInstructions []Part
-	ContextSources     []ContextSource
-	UserPrompt         string
-	TokenBudget        int
+	// ContextSources dynamically produce context during BuildContext.
+	ContextSources []ContextSource
+	// PromptInput contains run-specific user content and structured context.
+	PromptInput PromptInput
+	// TokenBudget is the total prompt window. Non-positive values disable budgeting.
+	TokenBudget int
+	// OutputTokenReserve is withheld from the prompt budget for model output.
 	OutputTokenReserve int
-	Tokenizer          ai.Tokenizer
-	DebugSink          gai.DebugSink
+	// Tokenizer counts parts and is propagated to compatible context sources.
+	Tokenizer ai.Tokenizer
+	// DebugSink receives prompt-building diagnostics.
+	DebugSink gai.DebugSink
 }
 
+// Builder assembles system instructions, dynamic context, user input, and loop
+// iterations into a rendered model prompt.
 type Builder struct {
 	SystemInstructions []Part
 	ContextSources     []ContextSource
@@ -59,11 +77,12 @@ type Builder struct {
 	TokenBudget        int
 	Renderer           Renderer
 	debugSink          gai.DebugSink
-	userPrompt         string
+	input              PromptInput
 	tokenizer          ai.Tokenizer
 	OutputTokenReserve int
 }
 
+// New creates a prompt builder from def.
 func New(def Definition) *Builder {
 	renderer := def.Renderer
 	if renderer == nil {
@@ -81,11 +100,12 @@ func New(def Definition) *Builder {
 		OutputTokenReserve: def.OutputTokenReserve,
 		Renderer:           renderer,
 		debugSink:          def.DebugSink,
-		userPrompt:         def.UserPrompt,
+		input:              def.PromptInput.Clone(),
 		tokenizer:          def.Tokenizer,
 	}
 }
 
+// NewBuilder creates a builder with a renderer and total token budget.
 func NewBuilder(renderer Renderer, tokenBudget int) *Builder {
 	return New(Definition{
 		Renderer:    renderer,
@@ -112,6 +132,22 @@ func (b *Builder) AppendContextSources(ctx context.Context, sources ...ContextSo
 		}
 	}
 	return nil
+}
+
+// HasContextSource reports whether a source with name is already configured.
+// It allows higher-level components to provide default sources without
+// duplicating application-provided prompt context.
+func (b *Builder) HasContextSource(name string) bool {
+	name = strings.TrimSpace(name)
+	if b == nil || name == "" {
+		return false
+	}
+	for _, source := range b.ContextSources {
+		if source != nil && source.Name() == name {
+			return true
+		}
+	}
+	return false
 }
 
 func (b *Builder) AppendSystemInstructions(ctx context.Context, instructions ...Part) error {
@@ -171,6 +207,19 @@ func (b *Builder) BuildContext(ctx context.Context) (contextParts []Part, err er
 			}, stats.RemainingTokens)
 		}
 	}
+	for _, part := range b.input.Context {
+		if part == nil {
+			continue
+		}
+		contextParts = append(contextParts, part)
+		tokens, ok := b.partTokens(ctx, part, map[string]any{
+			"source": "prompt_input",
+			"part":   part.Name(),
+		})
+		if ok && b.TokenBudget > 0 {
+			stats.RemainingTokens -= tokens
+		}
+	}
 	b.ContextParts = contextParts
 	obs.BuildFinished(ctx, stats)
 	return contextParts, nil
@@ -181,7 +230,7 @@ func (b *Builder) BuildPrompt(ctx context.Context, conv Conversation) (prompt st
 	stats := promptRenderStats{
 		SystemPartCount:  len(b.SystemInstructions),
 		ContextPartCount: len(b.ContextParts),
-		HasUserPrompt:    b.userPrompt != "",
+		HasUserInput:     b.input.User != nil,
 	}
 	defer func() {
 		stats.PromptChars = len(prompt)
@@ -191,8 +240,8 @@ func (b *Builder) BuildPrompt(ctx context.Context, conv Conversation) (prompt st
 	var parts []Part
 	parts = append(parts, NewSystemPart(b.SystemInstructions))
 	parts = append(parts, b.ContextParts...)
-	if b.userPrompt != "" {
-		parts = append(parts, NewMessagePart(RoleUser, NewTextContent(b.userPrompt)))
+	if b.input.User != nil {
+		parts = append(parts, NewMessagePart(RoleUser, b.input.User))
 	}
 	if conv != nil {
 		messages := conv.Messages()
@@ -216,8 +265,8 @@ func (b *Builder) BuildPrompt(ctx context.Context, conv Conversation) (prompt st
 	return prompt, nil
 }
 
-func (b *Builder) GetUserPrompt() string {
-	return b.userPrompt
+func (b *Builder) Input() PromptInput {
+	return b.input.Clone()
 }
 
 func (b *Builder) SetTokenLimit(limit int) error {
@@ -228,8 +277,8 @@ func (b *Builder) SetTokenLimit(limit int) error {
 	return nil
 }
 
-func (b *Builder) SetUserPrompt(prompt string) {
-	b.userPrompt = prompt
+func (b *Builder) SetInput(input PromptInput) {
+	b.input = input.Clone()
 }
 
 func (b *Builder) Tokenizer() ai.Tokenizer {

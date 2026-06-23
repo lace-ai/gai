@@ -3,17 +3,20 @@ package agent_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/lace-ai/gai/agent"
 	"github.com/lace-ai/gai/ai"
 	gaictx "github.com/lace-ai/gai/context"
+	"github.com/lace-ai/gai/context/tooldefinitions"
 	"github.com/lace-ai/gai/loop"
 	"github.com/lace-ai/gai/testutil/mocks"
 )
 
 type testPromptBuilder struct {
 	prompt    string
+	input     gaictx.PromptInput
 	tokenizer ai.Tokenizer
 }
 
@@ -37,12 +40,22 @@ func (b *testPromptBuilder) BuildPrompt(ctx context.Context, conv gaictx.Convers
 	return b.prompt, nil
 }
 
-func (b *testPromptBuilder) GetUserPrompt() string {
-	return b.prompt
+func (b *testPromptBuilder) Input() gaictx.PromptInput {
+	return b.input.Clone()
 }
 
-func (b *testPromptBuilder) SetUserPrompt(prompt string) {
-	b.prompt = prompt
+func (b *testPromptBuilder) SetInput(input gaictx.PromptInput) {
+	b.input = input.Clone()
+	b.prompt = ""
+	if input.User != nil {
+		b.prompt = input.User.String()
+		return
+	}
+	if len(input.Context) > 0 && input.Context[0] != nil {
+		if node, err := input.Context[0].Render(context.Background()); err == nil {
+			b.prompt = node.Value
+		}
+	}
 }
 
 func (b *testPromptBuilder) SetTokenizer(tokenizer ai.Tokenizer) {
@@ -61,7 +74,7 @@ func TestAgentNewRunCreatesLoop(t *testing.T) {
 		Model: model,
 		Tools: []loop.Tool{tool},
 		Prompt: func(ctx context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
-			builder = &testPromptBuilder{prompt: input.Text}
+			builder = &testPromptBuilder{}
 			return builder, nil
 		},
 		Limits: agent.Limits{
@@ -71,7 +84,7 @@ func TestAgentNewRunCreatesLoop(t *testing.T) {
 		},
 	})
 
-	run, err := assistant.NewRun(context.Background(), agent.RunInput{Text: "input"})
+	run, err := assistant.NewRun(context.Background(), textRunInput("input"))
 	if err != nil {
 		t.Fatalf("NewRun failed: %v", err)
 	}
@@ -95,26 +108,123 @@ func TestAgentNewRunCreatesLoop(t *testing.T) {
 	}
 }
 
+func TestAgentToolsAutomaticallyAddPromptContract(t *testing.T) {
+	t.Parallel()
+
+	builder := gaictx.New(gaictx.Definition{
+		Renderer: &gaictx.SimpleRenderer{},
+	})
+	assistant := agent.New(agent.Definition{
+		Model: &mocks.MockModel{},
+		Tools: []loop.Tool{loop.NewEchoTool()},
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return builder, nil
+		},
+	})
+
+	run, err := assistant.NewRun(context.Background(), textRunInput("remember my name"))
+	if err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	if _, err := run.Loop.PromptBuilder.BuildContext(context.Background()); err != nil {
+		t.Fatalf("BuildContext failed: %v", err)
+	}
+	prompt, err := run.Loop.PromptBuilder.BuildPrompt(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("BuildPrompt failed: %v", err)
+	}
+	for _, expected := range []string{
+		"tool: echo",
+		`{"type":"function","name":"<tool-name>","arguments":{...}}`,
+	} {
+		if !strings.Contains(prompt, expected) {
+			t.Fatalf("automatic tool prompt missing %q:\n%s", expected, prompt)
+		}
+	}
+}
+
+func TestAgentDoesNotDuplicateExistingToolDefinitions(t *testing.T) {
+	t.Parallel()
+
+	tool := loop.NewEchoTool()
+	source, err := tooldefinitions.New(&gaictx.SimpleRenderer{}, []loop.Tool{tool}, nil)
+	if err != nil {
+		t.Fatalf("new tool source: %v", err)
+	}
+	builder := gaictx.New(gaictx.Definition{
+		Renderer:       &gaictx.SimpleRenderer{},
+		ContextSources: []gaictx.ContextSource{source},
+	})
+	assistant := agent.New(agent.Definition{
+		Model: &mocks.MockModel{},
+		Tools: []loop.Tool{tool},
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return builder, nil
+		},
+	})
+
+	run, err := assistant.NewRun(context.Background(), agent.RunInput{})
+	if err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	if _, err := run.Loop.PromptBuilder.BuildContext(context.Background()); err != nil {
+		t.Fatalf("BuildContext failed: %v", err)
+	}
+	prompt, err := run.Loop.PromptBuilder.BuildPrompt(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("BuildPrompt failed: %v", err)
+	}
+	if got := strings.Count(prompt, "tool: echo"); got != 1 {
+		t.Fatalf("tool definitions rendered %d times:\n%s", got, prompt)
+	}
+}
+
 func TestAgentNewRunUsesInputMaxTokens(t *testing.T) {
 	t.Parallel()
 
 	assistant := agent.New(agent.Definition{
 		Model: &mocks.MockModel{},
 		Prompt: func(ctx context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
-			return &testPromptBuilder{prompt: input.Text}, nil
+			return &testPromptBuilder{}, nil
 		},
 		Limits: agent.Limits{
 			MaxTokens: 9,
 		},
 	})
 
-	run, err := assistant.NewRun(context.Background(), agent.RunInput{Text: "input", MaxTokens: 3})
+	input := textRunInput("input")
+	input.MaxTokens = 3
+	run, err := assistant.NewRun(context.Background(), input)
 	if err != nil {
 		t.Fatalf("NewRun failed: %v", err)
 	}
 	if run.Loop.MaxTokens != 3 {
 		t.Fatalf("expected input max tokens 3, got %d", run.Loop.MaxTokens)
 	}
+}
+
+func textRunInput(text string) agent.RunInput {
+	return agent.RunInput{Prompt: gaictx.PromptInput{User: gaictx.NewTextContent(text)}}
+}
+
+func promptUserText(input agent.RunInput) string {
+	if input.Prompt.User == nil {
+		return ""
+	}
+	return input.Prompt.User.String()
+}
+
+func promptContextValue(input agent.RunInput, name string) string {
+	for _, part := range input.Prompt.Context {
+		if part == nil || part.Name() != name {
+			continue
+		}
+		node, err := part.Render(context.Background())
+		if err == nil {
+			return node.Value
+		}
+	}
+	return ""
 }
 
 func TestAgentNewRunUsesConfiguredTokenizerOverride(t *testing.T) {

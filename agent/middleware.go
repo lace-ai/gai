@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/lace-ai/gai/ai"
+	gaictx "github.com/lace-ai/gai/context"
 	"github.com/lace-ai/gai/loop"
 )
 
@@ -50,7 +51,8 @@ type AgentMiddlewareConfig struct {
 	// Output controls how the nested agent changes visible workflow tokens.
 	Output OutputPolicy
 	// MapInput controls exactly what the nested agent receives. When nil, the
-	// current visible text, original run ID, and metadata are forwarded.
+	// current visible text is forwarded as named upstream_output context along
+	// with the original run ID and metadata.
 	MapInput func(ctx context.Context, result WorkflowResult) (RunInput, error)
 	// ErrorPolicy controls whether input-mapping and nested-agent failures
 	// propagate. The zero value is PropagateError.
@@ -154,9 +156,15 @@ func (m *AgentMiddleware) input(ctx context.Context, result WorkflowResult) (Run
 	if m.config.MapInput != nil {
 		return m.config.MapInput(ctx, result)
 	}
+	upstream, err := gaictx.NewNamedPart("upstream_output", result.Text)
+	if err != nil {
+		return RunInput{}, err
+	}
 	return RunInput{
-		ID:   result.Input.ID,
-		Text: result.Text,
+		ID: result.Input.ID,
+		Prompt: gaictx.PromptInput{
+			Context: []gaictx.Part{upstream},
+		},
 		Meta: cloneRunInput(result.Input).Meta,
 	}, nil
 }

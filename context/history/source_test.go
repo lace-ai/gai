@@ -77,7 +77,7 @@ func TestHistoryPartRendersSimpleContent(t *testing.T) {
 
 	want := `<history>
 user: hello <world> & "quotes"
-assistant: {"q":"lace<&>"}
+assistant: {"arguments":{"q":"lace\u003c\u0026\u003e"},"name":"search","type":"function"}
 tool res: found <docs> & "notes"
 summary: older turns
 </history>`
@@ -86,6 +86,29 @@ summary: older turns
 	}
 	if strings.Contains(got, "&lt;") || strings.Contains(got, "&amp;") || strings.Contains(got, "&#34;") {
 		t.Fatalf("expected raw characters to be preserved: %q", got)
+	}
+}
+
+func TestHistoryPartTruncatesToolResultToPrefix(t *testing.T) {
+	t.Parallel()
+
+	result := strings.Repeat("a", 499) + "👋" + "discarded"
+	part := &history.Part{
+		Contents: []history.Content{
+			{Role: gaictx.RoleTool, Value: gaictx.NewToolResultContent("search", result, false, "")},
+		},
+	}
+
+	got, err := (gaictx.SimpleRenderer{}).Render(context.Background(), []gaictx.Part{part})
+	if err != nil {
+		t.Fatalf("Render failed: %v", err)
+	}
+	want := "<history>\ntool res:\n" + strings.Repeat("a", 499) + "👋\n[tool result truncated]\n</history>"
+	if got != want {
+		t.Fatalf("unexpected truncated tool result:\nwant %q\n got %q", want, got)
+	}
+	if strings.Contains(got, "discarded") {
+		t.Fatalf("history contains the discarded tool-result suffix: %q", got)
 	}
 }
 

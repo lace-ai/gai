@@ -8,15 +8,21 @@ import (
 	"github.com/lace-ai/gai/ai"
 )
 
+// Role identifies the participant represented by a message.
 type Role string
 
 const (
-	RoleSystem    Role = "system"
-	RoleUser      Role = "user"
+	// RoleSystem identifies system instructions.
+	RoleSystem Role = "system"
+	// RoleUser identifies user input.
+	RoleUser Role = "user"
+	// RoleAssistant identifies model output and tool requests.
 	RoleAssistant Role = "assistant"
-	RoleTool      Role = "tool"
+	// RoleTool identifies tool results returned to the model.
+	RoleTool Role = "tool"
 )
 
+// Turn groups one user message with the assistant and tool messages it caused.
 type Turn struct {
 	ID          string
 	Count       int
@@ -26,6 +32,7 @@ type Turn struct {
 	debugSink   gai.DebugSink
 }
 
+// Message is one role-labelled conversation entry.
 type Message struct {
 	ID        string
 	SessionID string
@@ -36,10 +43,13 @@ type Message struct {
 	TokenCount map[string]int
 }
 
+// TurnTokenStore persists calculated token counts for a turn.
 type TurnTokenStore interface {
 	UpdateTurnTokens(ctx context.Context, turnID string, tokenizer string, tokens int) error
 }
 
+// Tokenize returns the turn token count, using cached message or turn counts
+// when available and optionally persisting a newly calculated value.
 func (t *Turn) Tokenize(ctx context.Context, tokenizer ai.Tokenizer, store TurnTokenStore) (int, error) {
 	if t == nil {
 		return 0, ErrMessageNotFound
@@ -82,6 +92,7 @@ func (t *Turn) Tokenize(ctx context.Context, tokenizer ai.Tokenizer, store TurnT
 	return count, nil
 }
 
+// SetDebugSink configures diagnostics for non-fatal turn operations.
 func (t *Turn) SetDebugSink(sink gai.DebugSink) {
 	t.debugSink = sink
 }
@@ -137,6 +148,7 @@ func combinedMessageContent(messages []Message) string {
 	return builder.String()
 }
 
+// IsValidRole reports whether role is one of the built-in roles.
 func IsValidRole(role Role) bool {
 	switch role {
 	case RoleSystem, RoleUser, RoleAssistant, RoleTool:
@@ -146,6 +158,7 @@ func IsValidRole(role Role) bool {
 	}
 }
 
+// Tokens returns the message token count for tokenizer, caching the result.
 func (m Message) Tokens(ctx context.Context, tokenizer ai.Tokenizer) (int, error) {
 	if tokenizer == nil {
 		return 0, ErrTokenizerNotFound

@@ -118,6 +118,7 @@ func TestSimpleRendererRendersInstructionsHistoryAndConversation(t *testing.T) {
 
 	rendered, err := (gaictx.SimpleRenderer{}).Render(context.Background(), []gaictx.Part{
 		gaictx.NewSystemPart([]gaictx.Part{
+			gaictx.NewTextPart("follow the instructions carefully"),
 			renderTestPart{
 				name: "system",
 				node: gaictx.RenderNode{Type: "text", Value: "be precise <raw> & direct"},
@@ -145,6 +146,8 @@ func TestSimpleRendererRendersInstructionsHistoryAndConversation(t *testing.T) {
 
 	want := `<Instructions>
 
+follow the instructions carefully
+
 System:
 be precise <raw> & direct
 
@@ -155,14 +158,14 @@ always call search("x") if needed
 
 <history>
 user: hi <there> & "quoted"
-assistant: {"q":"lace<&>"}
+assistant: {"arguments":{"q":"lace\u003c\u0026\u003e"},"name":"search","type":"function"}
 tool res: found <docs> & "notes"
 assistant: done
 </history>
 
 user: find docs
 
-assistant: {"q":"lace"}
+assistant: {"arguments":{"q":"lace"},"name":"search","type":"function"}
 
 tool res: found <docs>`
 	if rendered != want {
@@ -170,6 +173,37 @@ tool res: found <docs>`
 	}
 	if strings.Contains(rendered, "&lt;") || strings.Contains(rendered, "&amp;") || strings.Contains(rendered, "&#34;") {
 		t.Fatalf("expected raw characters to be preserved: %q", rendered)
+	}
+}
+
+func TestSimpleRendererPreservesGenericNodeStructure(t *testing.T) {
+	t.Parallel()
+
+	rendered, err := (gaictx.SimpleRenderer{}).Render(context.Background(), []gaictx.Part{
+		renderTestPart{
+			name: "memory_profile",
+			node: gaictx.RenderNode{
+				Type:   "memory_profile",
+				Fields: []gaictx.RenderField{{Key: "version", Value: "2"}},
+				Value:  `{"preferred_name":"Sam"}`,
+				Children: []gaictx.RenderNode{
+					{Type: "source", Value: "persisted"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Render failed: %v", err)
+	}
+
+	want := `<memory_profile version="2">
+{"preferred_name":"Sam"}
+<source>
+persisted
+</source>
+</memory_profile>`
+	if rendered != want {
+		t.Fatalf("unexpected generic node render:\nwant %q\n got %q", want, rendered)
 	}
 }
 

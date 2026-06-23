@@ -1,4 +1,10 @@
-// Package ai: unified AI package for all the different AI prividers, apis, packages.
-// Providers contain Models, Models can generate text (or in the future other media it takes in a AIRequest and returns a AIResponse
-// AIRequest carries a single prompt string plus generation settings.
+// Package ai defines provider-independent interfaces and value types for text
+// generation.
+//
+// A Provider exposes named Models. A Model accepts an AIRequest and either
+// returns a complete AIResponse or streams Tokens. ModelRepository provides a
+// small registry for selecting models by provider and model name.
+//
+// Provider-specific implementations live in subpackages such as gemini and
+// mistral.
 package ai

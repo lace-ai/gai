@@ -18,21 +18,38 @@ const (
 
 const loopTracerName = "github.com/lace-ai/gai/loop"
 
+// ToolResPreProcessor can inspect or modify a tool response before the loop
+// records it and builds the next prompt.
 type ToolResPreProcessor interface {
+	// Process handles the response produced for req.
 	Process(req ai.ToolCall, res *ToolResponse) error
 }
 
+// Loop coordinates prompt construction, model generation, and tool execution.
+//
+// Use New for initialized defaults. A Loop stores run state in Iterations and
+// must not be run concurrently or reused without explicitly clearing that
+// state.
 type Loop struct {
-	Iterations        []Iteration
-	Model             ai.Model
-	Tools             []Tool
+	// Iterations contains completed model/tool interaction rounds.
+	Iterations []Iteration
+	// Model generates tokens for each iteration.
+	Model ai.Model
+	// Tools contains the functions available to the model.
+	Tools []Tool
+	// MaxLoopIterations limits model/tool interaction rounds.
 	MaxLoopIterations int
-	MaxTokens         int
-	RetryCount        int
-	PromptBuilder     gaictx.PromptBuilder
+	// MaxTokens limits model output for each generation request.
+	MaxTokens int
+	// RetryCount is the number of model stream failures retried before stopping.
+	RetryCount int
+	// PromptBuilder constructs the prompt for each iteration.
+	PromptBuilder gaictx.PromptBuilder
+	// PreProcessToolRes optionally processes tool responses before they are recorded.
 	PreProcessToolRes ToolResPreProcessor
 }
 
+// Validate applies default limits and checks required loop dependencies.
 func (a *Loop) Validate() error {
 	if a == nil {
 		return ErrNilAgent
@@ -49,6 +66,7 @@ func (a *Loop) Validate() error {
 	return nil
 }
 
+// New constructs a Loop with default iteration and retry limits.
 func New(model ai.Model, tools []Tool, promptBuilder gaictx.PromptBuilder, toolResPreProcessor ToolResPreProcessor) *Loop {
 	agent := &Loop{
 		Model:             model,
@@ -66,6 +84,12 @@ type iterationToolCall struct {
 	toolCall ai.ToolCall
 }
 
+// Loop starts asynchronous model and tool execution.
+//
+// The returned channels carry generated tokens, iteration snapshots, and
+// terminal errors respectively. All three channels are closed when execution
+// ends. Callers should consume every channel concurrently so execution cannot
+// block when one stream's buffer fills.
 func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInformation, <-chan error) {
 	errCh := make(chan error, 1)
 	tokenCh := make(chan ai.Token, 16)
@@ -142,7 +166,10 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInfor
 				Prompt:    prompt,
 				MaxTokens: a.MaxTokens,
 			}
-			iteration.Request = a.PromptBuilder.GetUserPrompt()
+			input := a.PromptBuilder.Input()
+			if input.User != nil {
+				iteration.UserMessage = &gaictx.Message{Role: gaictx.RoleUser, Content: input.User}
+			}
 
 			tokens := a.Model.GenerateStream(iterCtx, request)
 
@@ -306,6 +333,7 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInfor
 	return tokenCh, statusCh, errCh
 }
 
+// Messages returns the completed iterations as ordered conversation messages.
 func (a *Loop) Messages() []gaictx.Message {
 	var msgs []gaictx.Message
 

@@ -3,18 +3,32 @@ package loop
 import "errors"
 
 var (
-	ErrNilAgent            = errors.New("agent is nil")
-	ErrModelNotConfigured  = errors.New("model is not configured")
+	// ErrNilAgent indicates an operation on a nil Loop.
+	ErrNilAgent = errors.New("agent is nil")
+	// ErrModelNotConfigured indicates that a Loop has no model.
+	ErrModelNotConfigured = errors.New("model is not configured")
+	// ErrPromptNotConfigured indicates that a Loop has no prompt builder.
 	ErrPromptNotConfigured = errors.New("prompt builder is not configured")
-	ErrToolReqValidation   = errors.New("invalid tool call")
-	ErrToolCallMalformed   = errors.New("tool call payload is malformed")
-	ErrToolNotFound        = errors.New("tool not found")
-	ErrMaxIterations       = errors.New("max loop iterations exceeded")
-	ErrPromptPathEmpty     = errors.New("prompt path is empty")
-	ErrPromptFileType      = errors.New("prompt file must be .md or .txt")
-	ErrPromptMissing       = errors.New("prompt file is missing")
-	ErrArgsDecodeTarget    = errors.New("tool args decode target is nil")
-	ErrPreProcessToolRes   = errors.New("pre-process tool response error")
-	ErrBuildPrompt         = errors.New("build prompt error")
-	ErrMaxRetries          = errors.New("max retries exceeded")
+	// ErrToolReqValidation indicates that a tool request failed validation.
+	ErrToolReqValidation = errors.New("invalid tool call")
+	// ErrToolCallMalformed indicates malformed tool-call arguments.
+	ErrToolCallMalformed = errors.New("tool call payload is malformed")
+	// ErrToolNotFound indicates that no configured tool matches a call.
+	ErrToolNotFound = errors.New("tool not found")
+	// ErrMaxIterations indicates that the loop reached its iteration limit.
+	ErrMaxIterations = errors.New("max loop iterations exceeded")
+	// ErrPromptPathEmpty indicates that no prompt file path was provided.
+	ErrPromptPathEmpty = errors.New("prompt path is empty")
+	// ErrPromptFileType indicates an unsupported prompt file extension.
+	ErrPromptFileType = errors.New("prompt file must be .md or .txt")
+	// ErrPromptMissing indicates that a prompt file does not exist.
+	ErrPromptMissing = errors.New("prompt file is missing")
+	// ErrArgsDecodeTarget indicates a nil target passed to DecodeToolArgs.
+	ErrArgsDecodeTarget = errors.New("tool args decode target is nil")
+	// ErrPreProcessToolRes indicates that tool-response preprocessing failed.
+	ErrPreProcessToolRes = errors.New("pre-process tool response error")
+	// ErrBuildPrompt indicates that prompt construction failed.
+	ErrBuildPrompt = errors.New("build prompt error")
+	// ErrMaxRetries indicates that model generation exhausted its retry limit.
+	ErrMaxRetries = errors.New("max retries exceeded")
 )

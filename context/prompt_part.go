@@ -6,17 +6,20 @@ import (
 	"github.com/lace-ai/gai/ai"
 )
 
+// Part is a token-countable unit that can produce a renderer-neutral node.
 type Part interface {
 	Name() string
 	Tokens(ctx context.Context, tokenizer ai.Tokenizer) (int, error)
 	Render(ctx context.Context) (RenderNode, error)
 }
 
+// TextPart is a plain-text prompt part.
 type TextPart struct {
 	Content string
 	tokens  map[string]int
 }
 
+// NewTextPart creates a text part with an empty token-count cache.
 func NewTextPart(content string) TextPart {
 	return TextPart{
 		Content: content,
@@ -47,12 +50,14 @@ func (t TextPart) Render(ctx context.Context) (RenderNode, error) {
 	return RenderNode{Type: "text", Value: t.Content}, nil
 }
 
+// MessagePart associates message content with a conversation role.
 type MessagePart struct {
 	Role    Role
 	Content Content
 	tokens  map[string]int
 }
 
+// NewMessagePart creates a role-aware message part.
 func NewMessagePart(role Role, content Content) MessagePart {
 	return MessagePart{
 		Role:    role,
@@ -110,10 +115,12 @@ func roleRenderType(role Role) string {
 	return "message"
 }
 
+// SystemPart groups multiple parts under one system-instruction node.
 type SystemPart struct {
 	Instructions []Part
 }
 
+// NewSystemPart creates a grouped system-instruction part.
 func NewSystemPart(instructions []Part) SystemPart {
 	return SystemPart{
 		Instructions: instructions,

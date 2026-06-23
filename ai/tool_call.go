@@ -13,13 +13,20 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
+// ToolCall describes a model request to invoke a function tool.
 type ToolCall struct {
-	ID   string
+	// ID identifies the call within the model interaction.
+	ID string
+	// Type is the tool-call kind and must be "function".
 	Type string
+	// Name is the function tool to invoke.
 	Name string
+	// Args contains the function arguments as JSON.
 	Args json.RawMessage
 }
 
+// Validate checks that the tool call has an ID, the "function" type, and a
+// non-empty name.
 func (tc *ToolCall) Validate() error {
 	if tc == nil {
 		return fmt.Errorf("%w: tool call nil", ErrInvalidToolCall)
@@ -36,7 +43,11 @@ func (tc *ToolCall) Validate() error {
 	return nil
 }
 
+// String returns a diagnostic representation of the tool call.
 func (tc *ToolCall) String() string {
+	if tc == nil {
+		return "<nil>"
+	}
 	var builder strings.Builder
 	builder.WriteString("id: ")
 	builder.WriteString(tc.ID)
@@ -52,6 +63,8 @@ func (tc *ToolCall) String() string {
 
 var toolCallCounter uint64
 
+// GenerateToolCallID creates a process-local unique call ID using toolName as
+// a readable component.
 func GenerateToolCallID(toolName string) string {
 	name := strings.TrimSpace(toolName)
 	if name == "" {

@@ -40,7 +40,7 @@ func TestSourceBuildsToolDefinitionsPart(t *testing.T) {
 		t.Fatalf("Render: %v", err)
 	}
 	for _, expected := range []string{
-		`<tools>`, `<tool name="search">`, `<description>`, "Searches documentation.", `<signature>`, `query`, `<tool name="weather">`,
+		`<tools>`, `<tool_usage>`, `&#34;function&#34;`, `&lt;tool-name&gt;`, `<tool name="search">`, `<description>`, "Searches documentation.", `<signature>`, `query`, `<tool name="weather">`,
 	} {
 		if !strings.Contains(rendered, expected) {
 			t.Errorf("rendered definitions missing %q:\n%s", expected, rendered)
@@ -56,6 +56,39 @@ func TestSourceBuildsToolDefinitionsPart(t *testing.T) {
 	}
 	if got := events[1].Fields["tool_count"]; got != 2 {
 		t.Fatalf("tool_count = %#v, want 2", got)
+	}
+}
+
+func TestSourceRendersClearSimpleToolDefinitions(t *testing.T) {
+	t.Parallel()
+
+	source, err := tooldefinitions.New(&gaictx.SimpleRenderer{}, []loop.Tool{
+		staticTool{name: "search", description: "Searches the web.", params: `{"type":"object","properties":{"query":{"type":"string"}}}`},
+	}, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	part, err := source.Function(context.Background(), 2048)
+	if err != nil {
+		t.Fatalf("Function: %v", err)
+	}
+
+	rendered, err := (gaictx.SimpleRenderer{}).Render(context.Background(), []gaictx.Part{part})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	want := `<tools>
+usage:
+When a tool is required, output each tool call as a standalone JSON object using exactly this shape:
+{"type":"function","name":"<tool-name>","arguments":{...}}
+
+The name must match a listed tool, type must be exactly "function" and arguments must match its signature. Do not include an id, do not wrap the JSON in Markdown, and separate multiple calls with a blank line. If no tool is needed, respond normally. Do not repeat a completed tool call when its result is already present.
+tool: search
+description: Searches the web.
+signature: {"type":"object","properties":{"query":{"type":"string"}}}
+</tools>`
+	if rendered != want {
+		t.Fatalf("unexpected tool definitions:\nwant %q\n got %q", want, rendered)
 	}
 }
 

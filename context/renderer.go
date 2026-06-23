@@ -2,6 +2,7 @@ package context
 
 import (
 	"context"
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"sort"
@@ -12,6 +13,7 @@ import (
 	"github.com/lace-ai/gai"
 )
 
+// Renderer converts ordered prompt parts into the model-facing prompt string.
 type Renderer interface {
 	Render(ctx context.Context, contextParts []Part) (string, error)
 	SetRenderResultCallback(ctx context.Context, callback RenderResultCallback) error
@@ -29,11 +31,13 @@ type ToolSignature interface {
 // before a successful Render call returns.
 type RenderResultCallback func(parts []Part, prompt string)
 
+// RenderField is a named scalar attribute on a RenderNode.
 type RenderField struct {
 	Key   string
 	Value string
 }
 
+// RenderNode is the renderer-neutral tree emitted by Part and Content values.
 type RenderNode struct {
 	Type     string
 	Fields   []RenderField
@@ -42,6 +46,7 @@ type RenderNode struct {
 }
 
 type (
+	// XMLRenderer renders nodes as structured XML.
 	XMLRenderer struct {
 		// DebugSink enables detailed renderer events. Prompt content is included only
 		// when the sink's IncludeSensitiveData method returns true.
@@ -50,6 +55,7 @@ type (
 		DebugPreviewChars    int
 		renderResultCallback RenderResultCallback
 	}
+	// SimpleRenderer renders nodes as compact role-labelled plain text.
 	SimpleRenderer struct {
 		// DebugSink enables detailed renderer events. Prompt content is included only
 		// when the sink's IncludeSensitiveData method returns true.
@@ -214,8 +220,10 @@ func renderSimpleInstructions(ctx context.Context, part SystemPart) (string, *Re
 		}
 
 		builder.WriteString("\n\n")
-		builder.WriteString(formatSimpleInstructionLabel(instruction.Name()))
-		builder.WriteString(":\n")
+		if !isSimpleTextInstruction(instruction) {
+			builder.WriteString(formatSimpleInstructionLabel(instruction.Name()))
+			builder.WriteString(":\n")
+		}
 		builder.WriteString(body)
 		wroteInstruction = true
 	}
@@ -227,6 +235,15 @@ func renderSimpleInstructions(ctx context.Context, part SystemPart) (string, *Re
 	}
 	builder.WriteString("</Instructions>")
 	return builder.String(), &node, nil
+}
+
+func isSimpleTextInstruction(part Part) bool {
+	switch part.(type) {
+	case TextPart, *TextPart:
+		return true
+	default:
+		return false
+	}
 }
 
 func renderSimpleInstruction(ctx context.Context, part Part) (string, RenderNode, error) {
@@ -251,13 +268,101 @@ func renderSimpleInstruction(ctx context.Context, part Part) (string, RenderNode
 
 func renderSimpleNode(node RenderNode) string {
 	switch node.Type {
+	case ContentTypeText:
+		return node.Value
 	case "history":
 		return renderSimpleHistory(node)
+	case "tools":
+		return renderSimpleTools(node)
 	case string(RoleUser), string(RoleAssistant), string(RoleTool), string(RoleSystem), "summary", "message":
 		return renderSimpleMessageNode(node)
 	default:
-		return renderSimpleNodeBody(node)
+		return renderSimpleGenericNode(node)
 	}
+}
+
+func renderSimpleTools(node RenderNode) string {
+	var builder strings.Builder
+	builder.WriteString("<tools>")
+	for _, child := range node.Children {
+		if child.Type == "tool_usage" {
+			body := renderSimpleNodeBody(child)
+			if body != "" {
+				builder.WriteString("\n")
+				builder.WriteString("usage:\n")
+				builder.WriteString(body)
+			}
+			continue
+		}
+		if child.Type != "tool" {
+			continue
+		}
+
+		builder.WriteString("\n")
+		builder.WriteString("tool: ")
+		name := simpleNodeFieldValue(child, "name")
+		if name == "" {
+			name = simpleNodeChildValue(child, "tool-name")
+		}
+		builder.WriteString(name)
+		for _, toolChild := range child.Children {
+			if toolChild.Type == "tool-name" {
+				continue
+			}
+			body := renderSimpleNodeBody(toolChild)
+			if body == "" {
+				continue
+			}
+			builder.WriteString("\n")
+			builder.WriteString(toolChild.Type)
+			builder.WriteString(": ")
+			builder.WriteString(body)
+		}
+	}
+	if len(node.Children) > 0 {
+		builder.WriteString("\n")
+	}
+	builder.WriteString("</tools>")
+	return builder.String()
+}
+
+func renderSimpleGenericNode(node RenderNode) string {
+	bodyParts := make([]string, 0, len(node.Children)+1)
+	if node.Value != "" {
+		bodyParts = append(bodyParts, node.Value)
+	}
+	for _, child := range node.Children {
+		if rendered := renderSimpleNode(child); rendered != "" {
+			bodyParts = append(bodyParts, rendered)
+		}
+	}
+	body := strings.Join(bodyParts, "\n")
+	if node.Type == "" {
+		return body
+	}
+
+	var builder strings.Builder
+	builder.WriteString("<")
+	builder.WriteString(node.Type)
+	for _, field := range node.Fields {
+		if field.Key == "" {
+			continue
+		}
+		builder.WriteString(" ")
+		builder.WriteString(field.Key)
+		builder.WriteString("=")
+		encoded, _ := json.Marshal(field.Value)
+		builder.Write(encoded)
+	}
+	builder.WriteString(">")
+	if body != "" {
+		builder.WriteString("\n")
+		builder.WriteString(body)
+	}
+	builder.WriteString("\n</")
+	builder.WriteString(node.Type)
+	builder.WriteString(">")
+	return builder.String()
 }
 
 func renderSimpleHistory(node RenderNode) string {
@@ -305,7 +410,7 @@ func renderSimpleNodeBody(node RenderNode) string {
 	case ContentTypeText:
 		return node.Value
 	case ContentTypeToolCall:
-		return simpleNodeChildValue(node, "arguments")
+		return renderSimpleToolCall(node)
 	case ContentTypeToolResult:
 		return simpleNodeChildValue(node, "result")
 	case ContentTypeToolResultErr:
@@ -325,6 +430,33 @@ func renderSimpleNodeBody(node RenderNode) string {
 	return strings.Join(parts, "\n")
 }
 
+func renderSimpleToolCall(node RenderNode) string {
+	name := simpleNodeFieldValue(node, "name")
+	arguments := simpleNodeChildValue(node, "arguments")
+	if name == "" {
+		return arguments
+	}
+
+	var argsValue any
+	rawArgs := json.RawMessage(arguments)
+	if len(arguments) > 0 && json.Valid(rawArgs) {
+		argsValue = rawArgs
+	} else {
+		argsValue = arguments
+	}
+
+	payload := map[string]any{
+		"type":      "function",
+		"name":      name,
+		"arguments": argsValue,
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return `{"type":"function","name":"","arguments":""}`
+	}
+	return string(encoded)
+}
+
 func simpleNodeChildValue(node RenderNode, childType string) string {
 	for _, child := range node.Children {
 		if child.Type == childType {
@@ -332,6 +464,15 @@ func simpleNodeChildValue(node RenderNode, childType string) string {
 		}
 	}
 	return node.Value
+}
+
+func simpleNodeFieldValue(node RenderNode, key string) string {
+	for _, field := range node.Fields {
+		if field.Key == key {
+			return field.Value
+		}
+	}
+	return ""
 }
 
 func formatSimpleInstructionLabel(name string) string {

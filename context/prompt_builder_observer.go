@@ -27,7 +27,7 @@ type promptRenderStats struct {
 	ConversationMessageCount int
 	PartCount                int
 	PromptChars              int
-	HasUserPrompt            bool
+	HasUserInput             bool
 }
 
 type promptPartTokenStats struct {
@@ -65,7 +65,8 @@ func newPromptBuilderRenderObserver(ctx context.Context, b *Builder) (context.Co
 	ctx, span := gai.StartOperationSpan(ctx, contextTracerName, "context.prompt_builder", "context.operation", "render_prompt",
 		attribute.Int("context.system_parts", len(b.SystemInstructions)),
 		attribute.Int("context.context_parts", len(b.ContextParts)),
-		attribute.Bool("context.has_user_prompt", b.userPrompt != ""),
+		attribute.Bool("context.has_user_input", b.input.User != nil),
+		attribute.Int("context.input_context_parts", len(b.input.Context)),
 	)
 	return ctx, &promptBuilderObserver{
 		debug: b.debugSink,
@@ -177,7 +178,7 @@ func (o *promptBuilderObserver) RenderFailed(ctx context.Context, stats promptRe
 		"part_count":            stats.PartCount,
 		"system_parts":          stats.SystemPartCount,
 		"context_parts":         stats.ContextPartCount,
-		"has_user_prompt":       stats.HasUserPrompt,
+		"has_user_input":        stats.HasUserInput,
 		"conversation_messages": stats.ConversationMessageCount,
 	}, err)
 }
@@ -187,7 +188,7 @@ func (o *promptBuilderObserver) RenderFinished(ctx context.Context, stats prompt
 		"part_count":            stats.PartCount,
 		"system_parts":          stats.SystemPartCount,
 		"context_parts":         stats.ContextPartCount,
-		"has_user_prompt":       stats.HasUserPrompt,
+		"has_user_input":        stats.HasUserInput,
 		"conversation_messages": stats.ConversationMessageCount,
 		"prompt_chars":          stats.PromptChars,
 	}

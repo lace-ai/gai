@@ -6,15 +6,15 @@ import (
 	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
 	gaictx "github.com/lace-ai/gai/context"
+	"github.com/lace-ai/gai/context/tooldefinitions"
 	"github.com/lace-ai/gai/loop"
 )
 
 // RunInput contains the application input for one agent run.
 type RunInput struct {
 	ID string
-	// Text is the user input for a primary agent and the current visible output
-	// for an agent running as middleware.
-	Text string
+	// Prompt separates genuine user content from structured machine context.
+	Prompt gaictx.PromptInput
 	// MaxTokens overrides Definition.Limits.MaxTokens when it is positive.
 	MaxTokens int
 	// Meta carries application data such as user, session, or request IDs.
@@ -41,7 +41,9 @@ type Definition struct {
 	Name string
 	// Model performs the agent's model calls.
 	Model ai.Model
-	// Tools are available to the model during loop execution.
+	// Tools are available to the model during loop execution. Their definitions
+	// and text-based invocation protocol are added to the prompt automatically
+	// unless its builder already contains a tool_definitions context source.
 	Tools []loop.Tool
 	// Prompt builds run-specific instructions and context.
 	Prompt Prompt
@@ -131,6 +133,16 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 	if promptBuilder == nil {
 		return nil, loop.ErrPromptNotConfigured
 	}
+	promptBuilder.SetInput(input.Prompt)
+	if len(a.def.Tools) > 0 && !hasContextSource(promptBuilder, "tool_definitions") {
+		toolSource, err := tooldefinitions.New(nil, a.def.Tools, a.def.DebugSink)
+		if err != nil {
+			return nil, err
+		}
+		if err := promptBuilder.AppendContextSource(ctx, toolSource); err != nil {
+			return nil, err
+		}
+	}
 	if setter, ok := promptBuilder.(gaictx.TokenizerSetter); ok {
 		tokenizer := a.def.Tokenizer
 		if tokenizer == nil {
@@ -154,4 +166,13 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 		l.MaxTokens = a.def.Limits.MaxTokens
 	}
 	return l, nil
+}
+
+type contextSourceLookup interface {
+	HasContextSource(name string) bool
+}
+
+func hasContextSource(builder gaictx.PromptBuilder, name string) bool {
+	lookup, ok := builder.(contextSourceLookup)
+	return ok && lookup.HasContextSource(name)
 }
