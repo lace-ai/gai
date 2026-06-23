@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"reflect"
 	"sync"
 
 	"github.com/lace-ai/gai"
@@ -116,10 +117,7 @@ func newWorkflow(input RunInput, l *loop.Loop, name string, debug gai.DebugSink,
 
 func validateMiddleware(middleware []Middleware) error {
 	for _, item := range middleware {
-		if item == nil {
-			return ErrMiddlewareNotConfigured
-		}
-		if middlewareFunc, ok := item.(MiddlewareFunc); ok && middlewareFunc == nil {
+		if middlewareIsNil(item) {
 			return ErrMiddlewareNotConfigured
 		}
 		if validator, ok := item.(middlewareValidator); ok {
@@ -129,6 +127,20 @@ func validateMiddleware(middleware []Middleware) error {
 		}
 	}
 	return nil
+}
+
+func middlewareIsNil(item Middleware) bool {
+	if item == nil {
+		return true
+	}
+
+	value := reflect.ValueOf(item)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }
 
 // Run starts the workflow and returns the final transformed stream. Callers must
