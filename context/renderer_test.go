@@ -158,14 +158,14 @@ always call search("x") if needed
 
 <history>
 user: hi <there> & "quoted"
-assistant: {"type":"function","name":"search","arguments":{"q":"lace<&>"}}
+assistant: {"arguments":{"q":"lace\u003c\u0026\u003e"},"name":"search","type":"function"}
 tool res: found <docs> & "notes"
 assistant: done
 </history>
 
 user: find docs
 
-assistant: {"type":"function","name":"search","arguments":{"q":"lace"}}
+assistant: {"arguments":{"q":"lace"},"name":"search","type":"function"}
 
 tool res: found <docs>`
 	if rendered != want {
