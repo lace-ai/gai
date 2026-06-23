@@ -82,7 +82,7 @@ usage:
 When a tool is required, output each tool call as a standalone JSON object using exactly this shape:
 {"type":"function","name":"<tool-name>","arguments":{...}}
 
-The name must match a listed tool and arguments must match its signature. Do not include an id, do not wrap the JSON in Markdown, and separate multiple calls with a blank line. If no tool is needed, respond normally. Do not repeat a completed tool call when its result is already present.
+The name must match a listed tool, type must be exactly "function" and arguments must match its signature. Do not include an id, do not wrap the JSON in Markdown, and separate multiple calls with a blank line. If no tool is needed, respond normally. Do not repeat a completed tool call when its result is already present.
 tool: search
 description: Searches the web.
 signature: {"type":"object","properties":{"query":{"type":"string"}}}

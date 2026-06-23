@@ -300,8 +300,15 @@ func renderSimpleTools(node RenderNode) string {
 
 		builder.WriteString("\n")
 		builder.WriteString("tool: ")
-		builder.WriteString(simpleNodeFieldValue(child, "name"))
+		name := simpleNodeFieldValue(child, "name")
+		if name == "" {
+			name = simpleNodeChildValue(child, "tool-name")
+		}
+		builder.WriteString(name)
 		for _, toolChild := range child.Children {
+			if toolChild.Type == "tool-name" {
+				continue
+			}
 			body := renderSimpleNodeBody(toolChild)
 			if body == "" {
 				continue
