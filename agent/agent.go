@@ -3,45 +3,117 @@ package agent
 import (
 	"context"
 
+	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
 	gaictx "github.com/lace-ai/gai/context"
 	"github.com/lace-ai/gai/loop"
 )
 
+// RunInput contains the application input for one agent run.
 type RunInput struct {
-	ID        string
-	Text      string
+	ID string
+	// Text is the user input for a primary agent and the current visible output
+	// for an agent running as middleware.
+	Text string
+	// MaxTokens overrides Definition.Limits.MaxTokens when it is positive.
 	MaxTokens int
-	Meta      map[string]any
+	// Meta carries application data such as user, session, or request IDs.
+	Meta map[string]any
 }
 
+// Prompt creates the prompt builder used by one run.
 type Prompt func(ctx context.Context, input RunInput) (gaictx.PromptBuilder, error)
 
+// Limits controls loop retries, iterations, and model output size.
 type Limits struct {
+	// MaxLoopIterations limits model/tool iterations. Zero uses the loop default.
 	MaxLoopIterations int
-	RetryCount        int
-	MaxTokens         int
+	// RetryCount limits model retries. Zero uses the loop default.
+	RetryCount int
+	// MaxTokens is the default model output limit for the agent.
+	MaxTokens int
 }
 
+// Definition describes a reusable agent and its workflow middleware.
 type Definition struct {
-	Name         string
-	Model        ai.Model
-	Tools        []loop.Tool
-	Prompt       Prompt
-	Limits       Limits
-	Tokenizer    ai.Tokenizer
+	// Name identifies the agent in diagnostics and is the default name used when
+	// the agent is adapted into middleware.
+	Name string
+	// Model performs the agent's model calls.
+	Model ai.Model
+	// Tools are available to the model during loop execution.
+	Tools []loop.Tool
+	// Prompt builds run-specific instructions and context.
+	Prompt Prompt
+	// Limits configures loop execution defaults.
+	Limits Limits
+	// Tokenizer overrides Model.Tokenizer when it is non-nil.
+	Tokenizer ai.Tokenizer
+	// Preprocessor can transform tool responses before they enter the transcript.
 	Preprocessor loop.ToolResPreProcessor
+	// DebugSink receives agent and workflow lifecycle events.
+	DebugSink gai.DebugSink
+	// Middleware transforms the run stream in declaration order.
+	Middleware []Middleware
 }
 
+// Agent is a reusable definition that creates independent workflows.
 type Agent struct {
 	def Definition
 }
 
+// New creates an agent from def. Configuration is validated by NewRun.
 func New(def Definition) *Agent {
 	return &Agent{def: def}
 }
 
-func (a *Agent) NewRun(ctx context.Context, input RunInput) (*loop.Loop, error) {
+// NewRun builds a single-use workflow for input.
+//
+// Prompt construction happens before NewRun returns. Model execution and
+// middleware processing begin when Workflow.Run is called.
+func (a *Agent) NewRun(ctx context.Context, input RunInput) (*Workflow, error) {
+	ctx, obs := newRunCreationObserver(ctx, a, input)
+	if a != nil {
+		if err := validateMiddleware(a.def.Middleware); err != nil {
+			obs.Failed(ctx, "middleware_validation", err)
+			obs.Finish(err)
+			return nil, err
+		}
+	}
+	l, err := a.newLoop(ctx, input)
+	if err != nil {
+		obs.Failed(ctx, "loop_creation", err)
+		obs.Finish(err)
+		return nil, err
+	}
+	workflow := newWorkflow(input, l, a.name(), a.debugSink(), a.middleware())
+	obs.Created(ctx)
+	obs.Finish(nil)
+	return workflow, nil
+}
+
+func (a *Agent) name() string {
+	if a == nil {
+		return ""
+	}
+	return a.def.Name
+}
+
+func (a *Agent) debugSink() gai.DebugSink {
+	if a == nil {
+		return nil
+	}
+	return a.def.DebugSink
+}
+
+func (a *Agent) middleware() []Middleware {
+	if a == nil {
+		return nil
+	}
+	return a.def.Middleware
+}
+
+func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error) {
 	if a == nil {
 		return nil, loop.ErrNilAgent
 	}

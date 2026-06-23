@@ -75,20 +75,20 @@ func TestAgentNewRunCreatesLoop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRun failed: %v", err)
 	}
-	if run.Model != model {
+	if run.Loop.Model != model {
 		t.Fatal("expected configured model")
 	}
-	if len(run.Tools) != 1 || run.Tools[0] != tool {
-		t.Fatalf("expected configured tools, got %+v", run.Tools)
+	if len(run.Loop.Tools) != 1 || run.Loop.Tools[0] != tool {
+		t.Fatalf("expected configured tools, got %+v", run.Loop.Tools)
 	}
-	if run.MaxLoopIterations != 2 {
-		t.Fatalf("expected max iterations 2, got %d", run.MaxLoopIterations)
+	if run.Loop.MaxLoopIterations != 2 {
+		t.Fatalf("expected max iterations 2, got %d", run.Loop.MaxLoopIterations)
 	}
-	if run.RetryCount != 1 {
-		t.Fatalf("expected retry count 1, got %d", run.RetryCount)
+	if run.Loop.RetryCount != 1 {
+		t.Fatalf("expected retry count 1, got %d", run.Loop.RetryCount)
 	}
-	if run.MaxTokens != 9 {
-		t.Fatalf("expected max tokens 9, got %d", run.MaxTokens)
+	if run.Loop.MaxTokens != 9 {
+		t.Fatalf("expected max tokens 9, got %d", run.Loop.MaxTokens)
 	}
 	if builder == nil || builder.tokenizer == nil {
 		t.Fatal("expected model tokenizer to be set on prompt builder")
@@ -112,8 +112,8 @@ func TestAgentNewRunUsesInputMaxTokens(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRun failed: %v", err)
 	}
-	if run.MaxTokens != 3 {
-		t.Fatalf("expected input max tokens 3, got %d", run.MaxTokens)
+	if run.Loop.MaxTokens != 3 {
+		t.Fatalf("expected input max tokens 3, got %d", run.Loop.MaxTokens)
 	}
 }
 

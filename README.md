@@ -67,9 +67,9 @@ assistant := agent.New(agent.Definition{
   },
 })
 
-run, err := assistant.NewRun(ctx, agent.RunInput{Text: "What is the capital of France?"})
+workflow, err := assistant.NewRun(ctx, agent.RunInput{Text: "What is the capital of France?"})
 
-tokens, statuses, errs := run.Loop(ctx)
+tokens, statuses, errs := workflow.Run(ctx)
 go func() {
     for range statuses {
     }
@@ -82,6 +82,67 @@ for err := range errs {
         panic(err)
     }
 }
+```
+
+Agents can include stream middleware in their definition. An input mapper can
+project the typed upstream workflow result into the ordinary `RunInput` accepted
+by the nested agent. This memory agent records its own output while passing the
+assistant response through unchanged.
+
+```go
+memoryAgent := agent.New(agent.Definition{
+  Name:  "memory",
+  Model: model,
+  Tools: []loop.Tool{saveMemoryTool},
+  Prompt: func(ctx context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
+    return memoryPrompt(input), nil
+  },
+})
+
+assistant := agent.New(agent.Definition{
+  Name:   "assistant",
+  Model:  model,
+  Prompt: assistantPrompt,
+  Middleware: []agent.Middleware{
+    agent.NewAgentMiddleware(memoryAgent, agent.AgentMiddlewareConfig{
+      Output:      agent.PreserveOutput,
+      ErrorPolicy: agent.RecordError,
+      MapInput: func(ctx context.Context, result agent.WorkflowResult) (agent.RunInput, error) {
+        observation, err := buildMemoryObservation(ctx, result)
+        if err != nil {
+          return agent.RunInput{}, err
+        }
+        return agent.RunInput{
+          ID:   result.Input.ID,
+          Text: observation,
+          Meta: result.Input.Meta,
+        }, nil
+      },
+    }),
+  },
+})
+
+workflow, err := assistant.NewRun(ctx, agent.RunInput{
+  Text: "What is the capital of France?",
+  Meta: map[string]any{"session_id": sessionID},
+})
+tokens, statuses, errs := workflow.Run(ctx)
+
+go func() {
+  for range statuses {
+  }
+}()
+for token := range tokens {
+  fmt.Print(token.Text)
+}
+for err := range errs {
+  if err != nil {
+    panic(err)
+  }
+}
+
+result := workflow.Result()
+fmt.Printf("memory stage output: %s\n", result.Stages[0].Result.Text)
 ```
 
 For a single non-agent request, call the model directly with `model.Generate(ctx, ai.AIRequest{Prompt: "...", MaxTokens: 100})`.
@@ -329,13 +390,83 @@ Use `history.New(sessionID, store, summarizerDefinition)` when older turns shoul
 
 The `agent` package turns reusable configuration into independent loop runs:
 
-- `Definition` combines a name, model, tools, prompt factory, limits, optional tokenizer override, and optional tool-response preprocessor.
+- `Definition` combines a name, model, tools, prompt factory, limits, optional tokenizer override, optional tool-response preprocessor, and ordered stream middleware.
 - `Prompt` builds a `context.PromptBuilder` for one `RunInput`.
-- `RunInput` carries an ID, user text, per-run output-token override, and metadata.
+- `RunInput` carries an ID, user text, per-run output-token override, metadata, and the upstream result when an agent runs as middleware.
 - `Limits` configures maximum loop iterations, retries, and default output tokens.
-- `Agent` is created with `agent.New`; `NewRun` validates the definition, builds the prompt, injects the tokenizer when supported, and returns a configured `loop.Loop`.
+- `Agent` is created with `agent.New`; `NewRun` returns a `Workflow`, and `Workflow.Run` streams the loop through each configured middleware.
+- `AgentMiddleware` adapts an ordinary agent with preserve, append, or replace output behavior. `Workflow.Result` exposes the primary result, final output, and named middleware stages.
 
 The `agent/summary` package is a built-in component. `summary.Definition` returns a reusable agent definition, while `summary.New` returns a `Summarizer` that runs that agent and can be attached to a history source.
+
+</details>
+
+<details>
+
+<summary>
+
+### 🔗 Agent Workflows and Middleware
+
+</summary>
+
+`Agent.NewRun` creates a single-use `Workflow`. Calling `Workflow.Run` starts the
+primary loop and passes its stream through every entry in `Definition.Middleware`
+in declaration order. Callers must consume the token, status, and error channels.
+After they close, `Workflow.Result()` contains the immutable primary result, the
+final visible output, accumulated errors, and named middleware stages.
+
+An ordinary agent can become middleware with `NewAgentMiddleware`. By default it
+receives the current visible text, original run ID, and metadata. Set
+`AgentMiddlewareConfig.MapInput` to deliberately project the typed upstream
+`WorkflowResult` into a different `RunInput`:
+
+- `PreserveOutput` streams the upstream output unchanged and keeps the nested
+  agent result only in `WorkflowResult.Stages`.
+- `AppendOutput` streams the upstream output, then emits the nested agent output
+  after that stage completes successfully.
+- `ReplaceOutput` buffers the upstream output and emits the nested agent output
+  only after the stage completes successfully.
+
+Failed append and replace stages leave the upstream output unchanged. An agent
+used through `NewAgentMiddleware` cannot define middleware of its own; compose
+stages on the parent workflow instead.
+
+Agent middleware runs only after a successful upstream result by default. Set
+`AgentMiddlewareConfig.ShouldRun` to implement policies such as failure auditing.
+Nested-agent errors are sent through the workflow error channel by default. Set
+`ErrorPolicy: RecordError` for best-effort stages whose failures should remain in
+`StageResult.Result.Errors` without failing the surrounding workflow.
+
+For transformations that do not require another agent, use `MiddlewareFunc`:
+
+```go
+passthrough := agent.MiddlewareFunc(func(
+  ctx context.Context,
+  run *agent.MiddlewareContext,
+  upstream agent.Stream,
+) agent.Stream {
+  // A custom middleware owns all three streams. Returning upstream is a
+  // zero-overhead pass-through; a transformer may return replacement channels.
+  return upstream
+})
+
+assistant := agent.New(agent.Definition{
+  Name:       "assistant",
+  Model:      model,
+  Prompt:     assistantPrompt,
+  Middleware: []agent.Middleware{passthrough},
+})
+```
+
+`MiddlewareContext.Result()` returns a concurrency-safe snapshot for custom
+middleware. `Complete` becomes true only after the final workflow streams close.
+
+Set `Definition.DebugSink` to receive structured agent lifecycle events for run
+creation, workflow start/completion, primary completion, and middleware
+start/skip/success/failure. Agent execution also emits `agent.run.create`,
+`agent.workflow.run`, and `agent.middleware.run` OpenTelemetry spans. Event
+payloads contain counts and policy names by default; input and output text are
+included only when `DebugSink.IncludeSensitiveData()` returns true.
 
 </details>
 
