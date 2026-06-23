@@ -429,8 +429,25 @@ func renderSimpleToolCall(node RenderNode) string {
 	if name == "" {
 		return arguments
 	}
-	encodedName, _ := json.Marshal(name)
-	return `{"type":"function","name":` + string(encodedName) + `,"arguments":` + arguments + `}`
+
+	var argsValue any
+	rawArgs := json.RawMessage(arguments)
+	if len(arguments) > 0 && json.Valid(rawArgs) {
+		argsValue = rawArgs
+	} else {
+		argsValue = arguments
+	}
+
+	payload := map[string]any{
+		"type":      "function",
+		"name":      name,
+		"arguments": argsValue,
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return `{"type":"function","name":"","arguments":""}`
+	}
+	return string(encoded)
 }
 
 func simpleNodeChildValue(node RenderNode, childType string) string {
