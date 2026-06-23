@@ -76,6 +76,12 @@ func tokensText(tokens []ai.Token) string {
 	return text
 }
 
+type nilMiddleware struct{}
+
+func (*nilMiddleware) Process(context.Context, *agent.MiddlewareContext, agent.Stream) agent.Stream {
+	panic("typed-nil middleware should be rejected before Process")
+}
+
 func TestAgentMiddlewareOutputPolicies(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -407,5 +413,18 @@ func TestAgentValidatesMiddleware(t *testing.T) {
 	}).NewRun(context.Background(), agent.RunInput{})
 	if !errors.Is(err, agent.ErrMiddlewareAgentNested) {
 		t.Fatalf("expected nested middleware-agent error, got %v", err)
+	}
+}
+
+func TestAgentRejectsTypedNilMiddleware(t *testing.T) {
+	var middleware *nilMiddleware
+
+	_, err := agent.New(agent.Definition{
+		Model:      &mocks.MockModel{},
+		Prompt:     func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) { return &testPromptBuilder{}, nil },
+		Middleware: []agent.Middleware{middleware},
+	}).NewRun(context.Background(), agent.RunInput{})
+	if !errors.Is(err, agent.ErrMiddlewareNotConfigured) {
+		t.Fatalf("expected typed-nil middleware validation error, got %v", err)
 	}
 }

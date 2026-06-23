@@ -24,12 +24,15 @@ type runCreationObserver struct {
 }
 
 func newRunCreationObserver(ctx context.Context, agent *Agent, input RunInput) (context.Context, *runCreationObserver) {
-	name := agent.name()
-	debug := agent.debugSink()
+	name := ""
+	var debug gai.DebugSink
 	modelName := ""
 	toolCount := 0
-	middlewareCount := len(agent.middleware())
+	middlewareCount := 0
 	if agent != nil {
+		name = agent.name()
+		debug = agent.debugSink()
+		middlewareCount = len(agent.middleware())
 		toolCount = len(agent.def.Tools)
 		if agent.def.Model != nil {
 			modelName = agent.def.Model.Name()
@@ -150,6 +153,9 @@ func (o *workflowObserver) PrimaryFinished(ctx context.Context, result AgentResu
 }
 
 func (o *workflowObserver) Finished(ctx context.Context, result WorkflowResult) {
+	if o == nil {
+		return
+	}
 	fields := map[string]any{
 		"agent_name":       o.agentName,
 		"middleware_count": o.middlewareCount,
