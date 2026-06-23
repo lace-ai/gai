@@ -29,6 +29,7 @@ type TokenizerSetter interface {
 
 // PromptBuilder is the prompt-construction contract consumed by agent loops.
 type PromptBuilder interface {
+	PrependContextSource(ctx context.Context, source ContextSource) error
 	AppendContextSource(ctx context.Context, source ContextSource) error
 	AppendContextSources(ctx context.Context, sources ...ContextSource) error
 	AppendSystemInstructions(ctx context.Context, instructions ...Part) error
@@ -122,6 +123,15 @@ func (b *Builder) AppendContextSource(ctx context.Context, source ContextSource)
 		setter.SetTokenizer(b.tokenizer)
 	}
 	b.ContextSources = append(b.ContextSources, source)
+	return nil
+}
+
+// PrependContextSource adds source before all existing context sources.
+func (b *Builder) PrependContextSource(ctx context.Context, source ContextSource) error {
+	if setter, ok := source.(TokenizerSetter); ok && b.tokenizer != nil {
+		setter.SetTokenizer(b.tokenizer)
+	}
+	b.ContextSources = append([]ContextSource{source}, b.ContextSources...)
 	return nil
 }
 

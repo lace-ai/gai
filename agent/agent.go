@@ -42,9 +42,12 @@ type Definition struct {
 	// Model performs the agent's model calls.
 	Model ai.Model
 	// Tools are available to the model during loop execution. Their definitions
-	// and text-based invocation protocol are added to the prompt automatically
-	// unless its builder already contains a tool_definitions context source.
+	// and text-based invocation protocol are added as the first prompt context
+	// source unless its builder already contains a tool_definitions source.
 	Tools []loop.Tool
+	// ToolDefinitionOptions configure the auto-prepended tool-definitions prompt
+	// source used for Tools.
+	ToolDefinitionOptions []tooldefinitions.Option
 	// Prompt builds run-specific instructions and context.
 	Prompt Prompt
 	// Limits configures loop execution defaults.
@@ -135,11 +138,11 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 	}
 	promptBuilder.SetInput(input.Prompt)
 	if len(a.def.Tools) > 0 && !hasContextSource(promptBuilder, "tool_definitions") {
-		toolSource, err := tooldefinitions.New(nil, a.def.Tools, a.def.DebugSink)
+		toolSource, err := tooldefinitions.New(nil, a.def.Tools, a.def.DebugSink, a.def.ToolDefinitionOptions...)
 		if err != nil {
 			return nil, err
 		}
-		if err := promptBuilder.AppendContextSource(ctx, toolSource); err != nil {
+		if err := promptBuilder.PrependContextSource(ctx, toolSource); err != nil {
 			return nil, err
 		}
 	}

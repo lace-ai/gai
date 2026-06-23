@@ -404,6 +404,7 @@ Use `history.New(sessionID, store, summarizerDefinition)` when older turns shoul
 The `agent` package turns reusable configuration into independent loop runs:
 
 - `Definition` combines a name, model, tools, prompt factory, limits, optional tokenizer override, optional tool-response preprocessor, and ordered stream middleware.
+- Agent tools are exposed automatically through a `tool_definitions` source placed before application context sources.
 - `Prompt` builds a `context.PromptBuilder` for one `RunInput`.
 - `RunInput` carries an ID, structured `PromptInput`, per-run output-token override, and metadata. `PromptInput` separates genuine user content from named machine context.
 - `Limits` configures maximum loop iterations, retries, and default output tokens.

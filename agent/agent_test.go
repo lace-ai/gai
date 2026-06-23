@@ -20,6 +20,17 @@ type testPromptBuilder struct {
 	tokenizer ai.Tokenizer
 }
 
+type testContextSource struct{ name string }
+
+func (s testContextSource) Name() string { return s.name }
+func (s testContextSource) Function(context.Context, int) (gaictx.Part, error) {
+	return gaictx.NewTextPart(s.name), nil
+}
+
+func (b *testPromptBuilder) PrependContextSource(ctx context.Context, source gaictx.ContextSource) error {
+	return nil
+}
+
 func (b *testPromptBuilder) AppendContextSource(ctx context.Context, source gaictx.ContextSource) error {
 	return nil
 }
@@ -112,11 +123,49 @@ func TestAgentToolsAutomaticallyAddPromptContract(t *testing.T) {
 	t.Parallel()
 
 	builder := gaictx.New(gaictx.Definition{
-		Renderer: &gaictx.SimpleRenderer{},
+		Renderer:       &gaictx.SimpleRenderer{},
+		ContextSources: []gaictx.ContextSource{testContextSource{name: "application_context"}},
 	})
 	assistant := agent.New(agent.Definition{
 		Model: &mocks.MockModel{},
 		Tools: []loop.Tool{loop.NewEchoTool()},
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return builder, nil
+		},
+	})
+
+	run, err := assistant.NewRun(context.Background(), textRunInput("remember my name"))
+	if err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	if len(builder.ContextSources) != 2 || builder.ContextSources[0].Name() != "tool_definitions" || builder.ContextSources[1].Name() != "application_context" {
+		t.Fatalf("tool definitions were not prepended: %+v", builder.ContextSources)
+	}
+	if _, err := run.Loop.PromptBuilder.BuildContext(context.Background()); err != nil {
+		t.Fatalf("BuildContext failed: %v", err)
+	}
+	prompt, err := run.Loop.PromptBuilder.BuildPrompt(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("BuildPrompt failed: %v", err)
+	}
+	for _, expected := range []string{
+		"tool: echo",
+		`{"type":"function","name":"<tool-name>","arguments":{...}}`,
+	} {
+		if !strings.Contains(prompt, expected) {
+			t.Fatalf("automatic tool prompt missing %q:\n%s", expected, prompt)
+		}
+	}
+}
+
+func TestAgentToolDefinitionOptionsCustomizeAutomaticPromptContract(t *testing.T) {
+	t.Parallel()
+
+	builder := gaictx.New(gaictx.Definition{Renderer: &gaictx.SimpleRenderer{}})
+	assistant := agent.New(agent.Definition{
+		Model:                 &mocks.MockModel{},
+		Tools:                 []loop.Tool{loop.NewEchoTool()},
+		ToolDefinitionOptions: []tooldefinitions.Option{tooldefinitions.WithUsageProtocol("Use tools only after asking for confirmation.")},
 		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
 			return builder, nil
 		},
@@ -133,13 +182,11 @@ func TestAgentToolsAutomaticallyAddPromptContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildPrompt failed: %v", err)
 	}
-	for _, expected := range []string{
-		"tool: echo",
-		`{"type":"function","name":"<tool-name>","arguments":{...}}`,
-	} {
-		if !strings.Contains(prompt, expected) {
-			t.Fatalf("automatic tool prompt missing %q:\n%s", expected, prompt)
-		}
+	if !strings.Contains(prompt, "Use tools only after asking for confirmation.") {
+		t.Fatalf("custom tool definition protocol missing:\n%s", prompt)
+	}
+	if strings.Contains(prompt, `{"type":"function","name":"<tool-name>","arguments":{...}}`) {
+		t.Fatalf("default tool definition protocol still present:\n%s", prompt)
 	}
 }
 

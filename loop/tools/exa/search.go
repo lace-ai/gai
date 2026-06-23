@@ -64,12 +64,14 @@ func (e *APIError) Unwrap() error {
 // SearchTool searches the web with Exa and returns the raw JSON response to the
 // agent. Its default request uses type=auto and query-relevant highlights.
 type SearchTool struct {
-	apiKey     string
-	endpoint   string
-	client     *http.Client
-	searchType string
-	numResults int
-	debug      gai.DebugSink
+	apiKey      string
+	endpoint    string
+	client      *http.Client
+	searchType  string
+	numResults  int
+	debug       gai.DebugSink
+	description string
+	params      string
 }
 
 var _ loop.Tool = (*SearchTool)(nil)
@@ -135,6 +137,30 @@ func WithEndpoint(endpoint string) Option {
 	}
 }
 
+// WithPromptDescription overrides the prompt-facing tool description.
+func WithPromptDescription(description string) Option {
+	return func(tool *SearchTool) error {
+		description = strings.TrimSpace(description)
+		if description == "" {
+			return fmt.Errorf("%w: prompt description is empty", ErrInvalidOption)
+		}
+		tool.description = description
+		return nil
+	}
+}
+
+// WithPromptParams overrides the prompt-facing JSON schema for tool arguments.
+func WithPromptParams(params string) Option {
+	return func(tool *SearchTool) error {
+		params = strings.TrimSpace(params)
+		if params == "" || !json.Valid([]byte(params)) {
+			return fmt.Errorf("%w: prompt params must be valid JSON", ErrInvalidOption)
+		}
+		tool.params = params
+		return nil
+	}
+}
+
 // NewSearchTool constructs an Exa web search tool.
 func NewSearchTool(apiKey string, options ...Option) (*SearchTool, error) {
 	apiKey = strings.TrimSpace(apiKey)
@@ -143,11 +169,13 @@ func NewSearchTool(apiKey string, options ...Option) (*SearchTool, error) {
 	}
 
 	tool := &SearchTool{
-		apiKey:     apiKey,
-		endpoint:   defaultEndpoint,
-		client:     &http.Client{Timeout: defaultHTTPTimeout},
-		searchType: defaultSearchType,
-		numResults: defaultNumResults,
+		apiKey:      apiKey,
+		endpoint:    defaultEndpoint,
+		client:      &http.Client{Timeout: defaultHTTPTimeout},
+		searchType:  defaultSearchType,
+		numResults:  defaultNumResults,
+		description: "Searches the web for current or factual information and returns relevant pages with excerpts.",
+		params:      `{"type":"object","required":["query"],"properties":{"query":{"type":"string","description":"A specific natural-language web search query"}}}`,
 	}
 	for _, option := range options {
 		if option == nil {
@@ -170,11 +198,11 @@ func (t *SearchTool) Name() string {
 }
 
 func (t *SearchTool) Description() string {
-	return "Searches the web for current or factual information and returns relevant pages with excerpts."
+	return t.description
 }
 
 func (t *SearchTool) Params() string {
-	return `{"type":"object","required":["query"],"properties":{"query":{"type":"string","description":"A specific natural-language web search query"}}}`
+	return t.params
 }
 
 type searchArgs struct {

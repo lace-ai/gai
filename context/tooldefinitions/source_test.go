@@ -40,13 +40,13 @@ func TestSourceBuildsToolDefinitionsPart(t *testing.T) {
 		t.Fatalf("Render: %v", err)
 	}
 	for _, expected := range []string{
-		`<tools>`, `<tool_usage>`, `&#34;function&#34;`, `&lt;tool-name&gt;`, `<tool name="search">`, `<description>`, "Searches documentation.", `<signature>`, `query`, `<tool name="weather">`,
+		`<tools>`, `<tool_usage>`, `&#34;function&#34;`, `&lt;tool-name&gt;`, `<tool-name>`, "search", `<description>`, "Searches documentation.", `<signature>`, `query`, "weather",
 	} {
 		if !strings.Contains(rendered, expected) {
 			t.Errorf("rendered definitions missing %q:\n%s", expected, rendered)
 		}
 	}
-	if strings.Index(rendered, `name="search"`) > strings.Index(rendered, `name="weather"`) {
+	if strings.Index(rendered, "search") > strings.Index(rendered, "weather") {
 		t.Fatalf("tools are not rendered deterministically:\n%s", rendered)
 	}
 
@@ -92,18 +92,46 @@ signature: {"type":"object","properties":{"query":{"type":"string"}}}
 	}
 }
 
+func TestSourceAllowsCustomUsageProtocol(t *testing.T) {
+	t.Parallel()
+
+	source, err := tooldefinitions.New(&gaictx.SimpleRenderer{}, []loop.Tool{
+		staticTool{name: "search", description: "Searches the web.", params: `{"type":"object","properties":{"query":{"type":"string"}}}`},
+	}, nil, tooldefinitions.WithUsageProtocol("Call tools only when the user explicitly asks."))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	part, err := source.Function(context.Background(), 2048)
+	if err != nil {
+		t.Fatalf("Function: %v", err)
+	}
+
+	rendered, err := (gaictx.SimpleRenderer{}).Render(context.Background(), []gaictx.Part{part})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if !strings.Contains(rendered, "Call tools only when the user explicitly asks.") {
+		t.Fatalf("custom usage protocol missing from render:\n%s", rendered)
+	}
+	if strings.Contains(rendered, `{"type":"function","name":"<tool-name>","arguments":{...}}`) {
+		t.Fatalf("default usage protocol was not replaced:\n%s", rendered)
+	}
+}
+
 func TestSourceErrorHandling(t *testing.T) {
 	tests := []struct {
 		name    string
 		tools   []loop.Tool
+		options []tooldefinitions.Option
 		wantErr error
 	}{
 		{name: "empty", wantErr: tooldefinitions.ErrToolsEmpty},
 		{name: "nil tool", tools: []loop.Tool{nil}, wantErr: tooldefinitions.ErrToolInvalid},
+		{name: "nil option", tools: []loop.Tool{staticTool{name: "search", description: "Searches", params: `{"type":"object"}`}}, options: []tooldefinitions.Option{nil}, wantErr: tooldefinitions.ErrToolInvalid},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := tooldefinitions.New(&gaictx.XMLRenderer{}, test.tools, nil)
+			_, err := tooldefinitions.New(&gaictx.XMLRenderer{}, test.tools, nil, test.options...)
 			if !errors.Is(err, test.wantErr) {
 				t.Fatalf("error = %v, want %v", err, test.wantErr)
 			}
