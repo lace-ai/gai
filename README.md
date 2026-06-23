@@ -225,16 +225,21 @@ type Model interface {
 
 </summary>
 
-Providers receive a rendered prompt string and an optional output-token cap:
+Providers receive a rendered prompt string plus provider-neutral capability
+requests for native tools, structured responses, and reasoning:
 
 ```go
 type AIRequest struct {
-    Prompt    string
-    MaxTokens int
+    Prompt         string
+    MaxTokens      int
+    Tools          []ToolDefinition
+    ToolChoice     ToolChoice
+    ResponseFormat ResponseFormat
+    Reasoning      ReasoningConfig
 }
 ```
 
-`AIResponse` contains the generated `Text` plus `InputTokens` and `OutputTokens`. Agent runs normally create the prompt string through a `context.PromptBuilder`; direct model calls can supply it themselves.
+`AIResponse` contains visible `Text`, separate `Reasoning`, structured `ToolCalls`, optional provider `Raw` data, and token usage. Agent runs normally create the prompt string through a `context.PromptBuilder`; direct model calls can supply it themselves.
 
 </details>
 
@@ -552,6 +557,9 @@ Tool calls are expected to arrive as JSON with this shape:
 ```
 
 Tool call IDs are generated internally by the runtime and are not model-controlled.
+When a provider supports native tool calling, the loop sends tool definitions
+through `AIRequest.Tools`. Prompt-rendered JSON tool calls are retained as a
+fallback compatibility protocol.
 
 </details>
 

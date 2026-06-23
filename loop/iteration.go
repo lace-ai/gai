@@ -149,7 +149,7 @@ func (i *Iteration) AppendToken(t ai.Token) {
 		} else {
 			i.Parts = append(i.Parts, IterationPart{
 				Type:     IterationTypeResponse,
-				Response: &ai.AIResponse{Text: text, OutputTokens: t.TokenUsage},
+				Response: &ai.AIResponse{Reasoning: text, OutputTokens: t.TokenUsage},
 			})
 		}
 	case ai.TokenTypeToolCall:

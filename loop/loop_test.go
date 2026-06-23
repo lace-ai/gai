@@ -598,4 +598,12 @@ func TestLoopFallsBackToBuildPromptEveryIteration(t *testing.T) {
 	if requests[0].Prompt != "prompt-1" || requests[1].Prompt != "prompt-2" {
 		t.Fatalf("expected rebuilt prompts, got first=%q second=%q", requests[0].Prompt, requests[1].Prompt)
 	}
+	for index, request := range requests {
+		if len(request.Tools) != 1 {
+			t.Fatalf("request %d expected 1 tool definition, got %d", index, len(request.Tools))
+		}
+		if request.Tools[0].Name != "echo" {
+			t.Fatalf("request %d expected echo tool definition, got %#v", index, request.Tools[0])
+		}
+	}
 }

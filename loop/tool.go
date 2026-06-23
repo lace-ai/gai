@@ -103,6 +103,27 @@ func DecodeToolArgs[T any](req *ai.ToolCall, target *T) error {
 	return nil
 }
 
+// ToolDefinitions converts runtime tools into provider-neutral model request
+// definitions. Tool execution remains owned by loop.Tool.
+func ToolDefinitions(tools []Tool) ([]ai.ToolDefinition, error) {
+	definitions := make([]ai.ToolDefinition, 0, len(tools))
+	for index, tool := range tools {
+		if tool == nil {
+			return nil, fmt.Errorf("%w: tool at index %d is nil", ai.ErrInvalidToolDefinition, index)
+		}
+		definition, err := ai.NewToolDefinition(
+			tool.Name(),
+			tool.Description(),
+			json.RawMessage(tool.Params()),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("tool %q: %w", tool.Name(), err)
+		}
+		definitions = append(definitions, definition)
+	}
+	return definitions, nil
+}
+
 // ToolCallToString returns a diagnostic representation of tc.
 func ToolCallToString(tc ai.ToolCall) string {
 	var builder strings.Builder
