@@ -36,6 +36,10 @@ type countingPromptBuilder struct {
 	count atomic.Int32
 }
 
+func (b *countingPromptBuilder) PrependContextSource(ctx context.Context, source gaictx.ContextSource) error {
+	return nil
+}
+
 func (b *countingPromptBuilder) AppendContextSource(ctx context.Context, source gaictx.ContextSource) error {
 	return nil
 }
@@ -69,6 +73,10 @@ type stubPromptBuilder struct {
 	userPrompt   string
 	contextText  string
 	buildContext func() string
+}
+
+func (b *stubPromptBuilder) PrependContextSource(ctx context.Context, source gaictx.ContextSource) error {
+	return nil
 }
 
 func (b *stubPromptBuilder) AppendContextSource(ctx context.Context, source gaictx.ContextSource) error {

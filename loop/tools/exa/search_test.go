@@ -57,6 +57,9 @@ func TestSearchTool(t *testing.T) {
 	if tool.Name() != "web_search" {
 		t.Fatalf("Name = %q, want web_search", tool.Name())
 	}
+	if tool.Description() == "" || tool.Params() == "" {
+		t.Fatal("expected default prompt metadata")
+	}
 
 	response := tool.Function(context.Background(), &ai.ToolCall{
 		ID: "call-1", Type: "function", Name: tool.Name(), Args: json.RawMessage(`{"query":" current Go release "}`),
@@ -76,6 +79,24 @@ func TestSearchTool(t *testing.T) {
 	}
 	if got := events[1].Fields["result_count"]; got != 1 {
 		t.Fatalf("result_count = %#v, want 1", got)
+	}
+}
+
+func TestSearchToolAllowsCustomPromptMetadata(t *testing.T) {
+	t.Parallel()
+
+	tool, err := exa.NewSearchTool("secret",
+		exa.WithPromptDescription("Use this only for live web lookups."),
+		exa.WithPromptParams(`{"type":"object","required":["query","reason"],"properties":{"query":{"type":"string"},"reason":{"type":"string"}}}`),
+	)
+	if err != nil {
+		t.Fatalf("NewSearchTool: %v", err)
+	}
+	if got := tool.Description(); got != "Use this only for live web lookups." {
+		t.Fatalf("Description = %q", got)
+	}
+	if got := tool.Params(); got != `{"type":"object","required":["query","reason"],"properties":{"query":{"type":"string"},"reason":{"type":"string"}}}` {
+		t.Fatalf("Params = %q", got)
 	}
 }
 
@@ -204,6 +225,8 @@ func TestNewSearchToolValidatesConfiguration(t *testing.T) {
 		{name: "missing API key", wantErr: exa.ErrAPIKeyMissing},
 		{name: "unsupported type", apiKey: "secret", options: []exa.Option{exa.WithSearchType("neural")}, wantErr: exa.ErrInvalidOption},
 		{name: "too many results", apiKey: "secret", options: []exa.Option{exa.WithNumResults(101)}, wantErr: exa.ErrInvalidOption},
+		{name: "empty prompt description", apiKey: "secret", options: []exa.Option{exa.WithPromptDescription(" ")}, wantErr: exa.ErrInvalidOption},
+		{name: "invalid prompt params", apiKey: "secret", options: []exa.Option{exa.WithPromptParams("{bad}")}, wantErr: exa.ErrInvalidOption},
 	}
 
 	for _, test := range tests {
