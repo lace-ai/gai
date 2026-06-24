@@ -141,6 +141,29 @@ func TestModelGenerateMapsRequestCapabilities(t *testing.T) {
 	}
 }
 
+func TestBuildChatCompletionRequestRejectsUnsupportedToolChoiceMode(t *testing.T) {
+	_, err := buildChatCompletionRequest(ai.AIRequest{
+		Prompt: "hello",
+		Tools: []ai.ToolDefinition{
+			{
+				Type:        "function",
+				Name:        "search",
+				Description: "Searches documents.",
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"}}}`),
+			},
+		},
+		ToolChoice: ai.ToolChoice{
+			Mode: "sometimes",
+		},
+	}, MistralSmallLatest, false)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), `unsupported mistral tool choice mode "sometimes"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestModelGenerateMapsMultipleResponseToolCalls(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -180,6 +203,37 @@ func TestModelGenerateMapsMultipleResponseToolCalls(t *testing.T) {
 	}
 	if res.ToolCalls[1].ID != "call_2" || res.ToolCalls[1].Name != "second_tool" || string(res.ToolCalls[1].Args) != `{"value":2}` {
 		t.Fatalf("unexpected second tool call: %#v", res.ToolCalls[1])
+	}
+}
+
+func TestMapChatResponseToolCallsRejectsMalformedEntries(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     json.RawMessage
+		wantErr string
+	}{
+		{
+			name:    "missing tool name",
+			raw:     json.RawMessage(`[{"id":"call_1","type":"function","function":{"arguments":"{\"value\":1}"}}]`),
+			wantErr: "map tool_calls[0]: missing tool name",
+		},
+		{
+			name:    "invalid JSON arguments",
+			raw:     json.RawMessage(`[{"id":"call_1","type":"function","function":{"name":"search","arguments":"{\"value\""}}]`),
+			wantErr: `map tool_calls[0]: invalid JSON arguments for tool "search"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := mapChatResponseToolCalls(tt.raw)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("expected error containing %q, got %q", tt.wantErr, err.Error())
+			}
+		})
 	}
 }
 

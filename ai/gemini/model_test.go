@@ -142,6 +142,60 @@ func TestBuildGenerateContentConfigMapsCapabilities(t *testing.T) {
 	}
 }
 
+func TestBuildGenerateContentConfigRejectsUnsupportedToolChoices(t *testing.T) {
+	tool := ai.ToolDefinition{
+		Type:        "function",
+		Name:        "search",
+		Description: "Searches documents.",
+		Parameters:  json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"}}}`),
+	}
+
+	tests := []struct {
+		name    string
+		choice  ai.ToolChoice
+		wantErr string
+	}{
+		{
+			name: "auto names unsupported",
+			choice: ai.ToolChoice{
+				Mode:  ai.ToolChoiceAuto,
+				Names: []string{"search"},
+			},
+			wantErr: "Gemini SDK cannot enforce allowed tool names in auto mode",
+		},
+		{
+			name: "none names invalid",
+			choice: ai.ToolChoice{
+				Mode:  ai.ToolChoiceNone,
+				Names: []string{"search"},
+			},
+			wantErr: "no tools may be called",
+		},
+		{
+			name: "unknown mode",
+			choice: ai.ToolChoice{
+				Mode: "sometimes",
+			},
+			wantErr: `unsupported gemini tool choice mode "sometimes"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := buildGenerateContentConfig(ai.AIRequest{
+				Tools:      []ai.ToolDefinition{tool},
+				ToolChoice: tt.choice,
+			})
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("expected error containing %q, got %q", tt.wantErr, err.Error())
+			}
+		})
+	}
+}
+
 func TestMapGenerateContentResponseSeparatesTextReasoningAndToolCalls(t *testing.T) {
 	text, reasoning, toolCalls, err := mapGenerateContentResponse(&genai.GenerateContentResponse{
 		Candidates: []*genai.Candidate{

@@ -340,7 +340,11 @@ func buildGenerateContentConfig(req ai.AIRequest) (*genai.GenerateContentConfig,
 			return nil, err
 		}
 		ensureConfig().Tools = tools
-		if toolConfig := mapGenerateContentToolConfig(req.ToolChoice); toolConfig != nil {
+		toolConfig, err := mapGenerateContentToolConfig(req.ToolChoice)
+		if err != nil {
+			return nil, err
+		}
+		if toolConfig != nil {
 			ensureConfig().ToolConfig = toolConfig
 		}
 	}
@@ -372,7 +376,16 @@ func mapGenerateContentTools(definitions []ai.ToolDefinition) ([]*genai.Tool, er
 	return []*genai.Tool{{FunctionDeclarations: declarations}}, nil
 }
 
-func mapGenerateContentToolConfig(choice ai.ToolChoice) *genai.ToolConfig {
+func mapGenerateContentToolConfig(choice ai.ToolChoice) (*genai.ToolConfig, error) {
+	if len(choice.Names) > 0 {
+		switch choice.Mode {
+		case ai.ToolChoiceAuto, "":
+			return nil, fmt.Errorf("gemini tool choice %q with specific tool names is unsupported: Gemini SDK cannot enforce allowed tool names in auto mode", ai.ToolChoiceAuto)
+		case ai.ToolChoiceNone:
+			return nil, fmt.Errorf("gemini tool choice %q with specific tool names is invalid: no tools may be called", ai.ToolChoiceNone)
+		}
+	}
+
 	var mode genai.FunctionCallingConfigMode
 	switch choice.Mode {
 	case ai.ToolChoiceNone:
@@ -380,16 +393,16 @@ func mapGenerateContentToolConfig(choice ai.ToolChoice) *genai.ToolConfig {
 	case ai.ToolChoiceRequired:
 		mode = genai.FunctionCallingConfigModeAny
 	case ai.ToolChoiceAuto, "":
-		return nil
+		return nil, nil
 	default:
-		return nil
+		return nil, fmt.Errorf("unsupported gemini tool choice mode %q", choice.Mode)
 	}
 	return &genai.ToolConfig{
 		FunctionCallingConfig: &genai.FunctionCallingConfig{
 			Mode:                 mode,
 			AllowedFunctionNames: append([]string(nil), choice.Names...),
 		},
-	}
+	}, nil
 }
 
 func applyGenerateContentResponseFormat(ensureConfig func() *genai.GenerateContentConfig, format ai.ResponseFormat) error {

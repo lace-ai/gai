@@ -636,3 +636,27 @@ func TestIterationCountsLeadingThoughtTokens(t *testing.T) {
 		t.Fatalf("unexpected output tokens: %d", response.OutputTokens)
 	}
 }
+
+func TestIterationDeltaMessagesSkipsThoughtOnlyResponses(t *testing.T) {
+	t.Parallel()
+
+	var iteration loop.Iteration
+	iteration.AppendToken(ai.Token{Type: ai.TokenTypeThought, Text: "thinking"})
+
+	if messages := iteration.DeltaMessages(); len(messages) != 0 {
+		t.Fatalf("expected no messages for thought-only response, got %#v", messages)
+	}
+
+	iteration.AppendToken(ai.Token{Type: ai.TokenTypeText, Text: "answer"})
+
+	messages := iteration.DeltaMessages()
+	if len(messages) != 1 {
+		t.Fatalf("expected one assistant message after visible text, got %#v", messages)
+	}
+	if messages[0].Role != gaictx.RoleAssistant {
+		t.Fatalf("expected assistant role, got %q", messages[0].Role)
+	}
+	if got := messages[0].Content.String(); got != "answer" {
+		t.Fatalf("unexpected assistant content: %q", got)
+	}
+}

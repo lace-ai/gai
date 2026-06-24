@@ -114,7 +114,11 @@ func buildChatCompletionRequest(req ai.AIRequest, modelName string, stream bool)
 			return chatCompletionRequest{}, err
 		}
 		payload.Tools = tools
-		payload.ToolChoice = mapChatToolChoice(req.ToolChoice)
+		toolChoice, err := mapChatToolChoice(req.ToolChoice)
+		if err != nil {
+			return chatCompletionRequest{}, err
+		}
+		payload.ToolChoice = toolChoice
 	}
 	responseFormat, err := mapChatResponseFormat(req.ResponseFormat)
 	if err != nil {
@@ -142,10 +146,10 @@ func mapChatTools(definitions []ai.ToolDefinition) ([]chatToolRequest, error) {
 	return tools, nil
 }
 
-func mapChatToolChoice(choice ai.ToolChoice) any {
+func mapChatToolChoice(choice ai.ToolChoice) (any, error) {
 	switch choice.Mode {
 	case ai.ToolChoiceNone:
-		return "none"
+		return "none", nil
 	case ai.ToolChoiceRequired:
 		if len(choice.Names) == 1 {
 			return map[string]any{
@@ -153,13 +157,13 @@ func mapChatToolChoice(choice ai.ToolChoice) any {
 				"function": map[string]string{
 					"name": choice.Names[0],
 				},
-			}
+			}, nil
 		}
-		return "required"
+		return "required", nil
 	case ai.ToolChoiceAuto, "":
-		return "auto"
+		return "auto", nil
 	default:
-		return nil
+		return nil, fmt.Errorf("unsupported mistral tool choice mode %q", choice.Mode)
 	}
 }
 
@@ -868,17 +872,17 @@ func mapChatResponseToolCalls(raw json.RawMessage) ([]ai.ToolCall, error) {
 	}
 
 	result := make([]ai.ToolCall, 0, len(entries))
-	for _, entry := range entries {
+	for i, entry := range entries {
 		toolName := strings.TrimSpace(entry.Function.Name)
 		if toolName == "" {
-			continue
+			return nil, fmt.Errorf("map tool_calls[%d]: missing tool name", i)
 		}
 		args := json.RawMessage(strings.TrimSpace(entry.Function.Arguments))
 		if len(args) == 0 {
 			args = json.RawMessage("{}")
 		}
 		if !json.Valid(args) {
-			continue
+			return nil, fmt.Errorf("map tool_calls[%d]: invalid JSON arguments for tool %q", i, toolName)
 		}
 		callType := strings.TrimSpace(entry.Type)
 		if callType == "" {

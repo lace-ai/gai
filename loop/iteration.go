@@ -98,6 +98,9 @@ func (i *Iteration) partMessages() []gaictx.Message {
 			}
 		case IterationTypeResponse:
 			if part.Response != nil {
+				if part.Response.Text == "" {
+					continue
+				}
 				msgs = append(msgs, gaictx.Message{
 					Role:    gaictx.RoleAssistant,
 					Content: gaictx.NewTextContent(part.Response.Text),
