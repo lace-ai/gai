@@ -71,7 +71,7 @@ type SearchTool struct {
 	numResults  int
 	debug       gai.DebugSink
 	description string
-	params      string
+	params      ai.ToolParameters
 }
 
 var _ loop.Tool = (*SearchTool)(nil)
@@ -149,12 +149,11 @@ func WithPromptDescription(description string) Option {
 	}
 }
 
-// WithPromptParams overrides the prompt-facing JSON schema for tool arguments.
-func WithPromptParams(params string) Option {
+// WithPromptParams overrides the prompt-facing schema for tool arguments.
+func WithPromptParams(params ai.ToolParameters) Option {
 	return func(tool *SearchTool) error {
-		params = strings.TrimSpace(params)
-		if params == "" || !json.Valid([]byte(params)) {
-			return fmt.Errorf("%w: prompt params must be valid JSON", ErrInvalidOption)
+		if _, err := params.JSONSchema(); err != nil {
+			return fmt.Errorf("%w: prompt params invalid: %w", ErrInvalidOption, err)
 		}
 		tool.params = params
 		return nil
@@ -175,7 +174,16 @@ func NewSearchTool(apiKey string, options ...Option) (*SearchTool, error) {
 		searchType:  defaultSearchType,
 		numResults:  defaultNumResults,
 		description: "Searches the web for current or factual information and returns relevant pages with excerpts.",
-		params:      `{"type":"object","required":["query"],"properties":{"query":{"type":"string","description":"A specific natural-language web search query"}}}`,
+		params: ai.ToolParameters{
+			Properties: []ai.ToolParameter{
+				{
+					Name:        "query",
+					Type:        ai.ToolParameterString,
+					Description: "A specific natural-language web search query",
+					Required:    true,
+				},
+			},
+		},
 	}
 	for _, option := range options {
 		if option == nil {
@@ -201,7 +209,7 @@ func (t *SearchTool) Description() string {
 	return t.description
 }
 
-func (t *SearchTool) Params() string {
+func (t *SearchTool) Params() ai.ToolParameters {
 	return t.params
 }
 

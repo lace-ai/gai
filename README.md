@@ -540,8 +540,26 @@ Tools must implement:
 type Tool interface {
     Name() string
     Description() string
-    Params() string
+    Params() ai.ToolParameters
     Function(ctx context.Context, req *ai.ToolCall) *ToolResponse
+}
+```
+
+`Params` returns a structured object schema. The runtime serializes it to JSON
+Schema for provider-native tool calling and for the prompt fallback:
+
+```go
+func (t *SaveMemoryTool) Params() ai.ToolParameters {
+    return ai.ToolParameters{
+        Properties: []ai.ToolParameter{
+            {
+                Name:        "memory",
+                Type:        ai.ToolParameterString,
+                Description: "The memory text to save.",
+                Required:    true,
+            },
+        },
+    }
 }
 ```
 
@@ -576,7 +594,7 @@ fallback compatibility protocol.
 - `DetectToolCallsInStream` detects tool-call JSON objects in streamed text tokens.
 - `CallTool` runs a tool by name.
 - `DecodeToolArgs` unmarshals tool arguments into a typed struct.
-- `Renderer.RenderToolSignatures` formats tool metadata for prompting.
+- `Renderer.RenderToolSignatures` formats tool metadata for prompting and returns schema errors.
 
 </details>
 

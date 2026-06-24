@@ -389,8 +389,8 @@ func TestRenderToolSignatures(t *testing.T) {
 	t.Parallel()
 
 	tools := []toolSignatureTestTool{
-		{name: "weather", description: "Gets weather.", params: `{"type":"object"}`},
-		{name: "search", description: "Searches docs.", params: `{"type":"object"}`},
+		{name: "weather", description: "Gets weather."},
+		{name: "search", description: "Searches docs."},
 	}
 	want := "\n<tool name=\"search\">\n<description>Searches docs.</description>\n<signature>{\"type\":\"object\"}</signature>\n</tool>\n<tool name=\"weather\">\n<description>Gets weather.</description>\n<signature>{\"type\":\"object\"}</signature>\n</tool>"
 
@@ -403,7 +403,11 @@ func TestRenderToolSignatures(t *testing.T) {
 		for _, tool := range tools {
 			renderTools = append(renderTools, tool)
 		}
-		if got := renderer.RenderToolSignatures(renderTools); got != want {
+		got, err := renderer.RenderToolSignatures(renderTools)
+		if err != nil {
+			t.Fatalf("%T.RenderToolSignatures() error = %v", renderer, err)
+		}
+		if got != want {
 			t.Fatalf("%T.RenderToolSignatures() = %q, want %q", renderer, got, want)
 		}
 	}
@@ -451,9 +455,11 @@ func (p *historyPartAdapter) Render(ctx context.Context) (gaictx.RenderNode, err
 }
 
 type toolSignatureTestTool struct {
-	name, description, params string
+	name, description string
 }
 
 func (t toolSignatureTestTool) Name() string        { return t.name }
 func (t toolSignatureTestTool) Description() string { return t.description }
-func (t toolSignatureTestTool) Params() string      { return t.params }
+func (t toolSignatureTestTool) Params() ai.ToolParameters {
+	return ai.ToolParameters{}
+}

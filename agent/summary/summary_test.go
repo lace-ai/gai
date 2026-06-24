@@ -131,8 +131,8 @@ func (t staticTool) Description() string {
 	return "static test tool"
 }
 
-func (t staticTool) Params() string {
-	return "{}"
+func (t staticTool) Params() ai.ToolParameters {
+	return ai.ToolParameters{}
 }
 
 func (t staticTool) Function(context.Context, *ai.ToolCall) *loop.ToolResponse {

@@ -11,20 +11,21 @@ import (
 	"unicode/utf8"
 
 	"github.com/lace-ai/gai"
+	"github.com/lace-ai/gai/ai"
 )
 
 // Renderer converts ordered prompt parts into the model-facing prompt string.
 type Renderer interface {
 	Render(ctx context.Context, contextParts []Part) (string, error)
 	SetRenderResultCallback(ctx context.Context, callback RenderResultCallback) error
-	RenderToolSignatures(tools []ToolSignature) string
+	RenderToolSignatures(tools []ToolSignature) (string, error)
 }
 
 // ToolSignature is the minimal tool metadata required for prompt formatting.
 type ToolSignature interface {
 	Name() string
 	Description() string
-	Params() string
+	Params() ai.ToolParameters
 }
 
 // RenderResultCallback receives the source parts and completed prompt immediately
@@ -71,9 +72,9 @@ var (
 	_ Renderer = (*SimpleRenderer)(nil)
 )
 
-func renderToolSignatures(tools []ToolSignature) string {
+func renderToolSignatures(tools []ToolSignature) (string, error) {
 	if len(tools) == 0 {
-		return ""
+		return "", nil
 	}
 
 	sorted := make([]ToolSignature, 0, len(tools))
@@ -95,11 +96,15 @@ func renderToolSignatures(tools []ToolSignature) string {
 		builder.WriteString(t.Description())
 		builder.WriteString("</description>")
 		builder.WriteString("\n<signature>")
-		builder.WriteString(t.Params())
+		params, err := t.Params().JSONSchema()
+		if err != nil {
+			return "", fmt.Errorf("tool %q: %w", t.Name(), err)
+		}
+		builder.Write(params)
 		builder.WriteString("</signature>")
 		builder.WriteString("\n</tool>")
 	}
-	return builder.String()
+	return builder.String(), nil
 }
 
 func (r XMLRenderer) Render(ctx context.Context, parts []Part) (string, error) {
@@ -168,11 +173,11 @@ func (r SimpleRenderer) Render(ctx context.Context, parts []Part) (string, error
 	return prompt, nil
 }
 
-func (r XMLRenderer) RenderToolSignatures(tools []ToolSignature) string {
+func (r XMLRenderer) RenderToolSignatures(tools []ToolSignature) (string, error) {
 	return renderToolSignatures(tools)
 }
 
-func (r SimpleRenderer) RenderToolSignatures(tools []ToolSignature) string {
+func (r SimpleRenderer) RenderToolSignatures(tools []ToolSignature) (string, error) {
 	return renderToolSignatures(tools)
 }
 
