@@ -21,8 +21,8 @@ import (
 func TestSourceBuildsToolDefinitionsPart(t *testing.T) {
 	sink := &captureSink{}
 	source, err := tooldefinitions.New(&gaictx.XMLRenderer{}, []loop.Tool{
-		staticTool{name: "weather", description: "Gets current weather.", params: `{"type":"object","properties":{"city":{"type":"string"}}}`},
-		staticTool{name: "search", description: "Searches documentation.", params: `{"type":"object","properties":{"query":{"type":"string"}}}`},
+		staticTool{name: "weather", description: "Gets current weather.", params: testParams("city")},
+		staticTool{name: "search", description: "Searches documentation.", params: testParams("query")},
 	}, sink)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -63,7 +63,7 @@ func TestSourceRendersClearSimpleToolDefinitions(t *testing.T) {
 	t.Parallel()
 
 	source, err := tooldefinitions.New(&gaictx.SimpleRenderer{}, []loop.Tool{
-		staticTool{name: "search", description: "Searches the web.", params: `{"type":"object","properties":{"query":{"type":"string"}}}`},
+		staticTool{name: "search", description: "Searches the web.", params: testParams("query")},
 	}, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -96,7 +96,7 @@ func TestSourceAllowsCustomUsageProtocol(t *testing.T) {
 	t.Parallel()
 
 	source, err := tooldefinitions.New(&gaictx.SimpleRenderer{}, []loop.Tool{
-		staticTool{name: "search", description: "Searches the web.", params: `{"type":"object","properties":{"query":{"type":"string"}}}`},
+		staticTool{name: "search", description: "Searches the web.", params: testParams("query")},
 	}, nil, tooldefinitions.WithUsageProtocol("Call tools only when the user explicitly asks."))
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -127,7 +127,7 @@ func TestSourceErrorHandling(t *testing.T) {
 	}{
 		{name: "empty", wantErr: tooldefinitions.ErrToolsEmpty},
 		{name: "nil tool", tools: []loop.Tool{nil}, wantErr: tooldefinitions.ErrToolInvalid},
-		{name: "nil option", tools: []loop.Tool{staticTool{name: "search", description: "Searches", params: `{"type":"object"}`}}, options: []tooldefinitions.Option{nil}, wantErr: tooldefinitions.ErrToolInvalid},
+		{name: "nil option", tools: []loop.Tool{staticTool{name: "search", description: "Searches", params: testParams("query")}}, options: []tooldefinitions.Option{nil}, wantErr: tooldefinitions.ErrToolInvalid},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -140,7 +140,7 @@ func TestSourceErrorHandling(t *testing.T) {
 
 	sink := &captureSink{}
 	source, err := tooldefinitions.New(&gaictx.XMLRenderer{}, []loop.Tool{
-		staticTool{name: "broken", description: "Broken definition.", params: `{not-json}`},
+		staticTool{name: "broken", description: "Broken definition.", params: invalidParams()},
 	}, sink)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -166,7 +166,7 @@ func TestSourceTracing(t *testing.T) {
 	})
 
 	source, err := tooldefinitions.New(&gaictx.XMLRenderer{}, []loop.Tool{
-		staticTool{name: "broken", description: "Broken definition.", params: "bad"},
+		staticTool{name: "broken", description: "Broken definition.", params: invalidParams()},
 	}, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -194,14 +194,32 @@ func TestSourceTracing(t *testing.T) {
 type staticTool struct {
 	name        string
 	description string
-	params      string
+	params      ai.ToolParameters
 }
 
 func (t staticTool) Name() string        { return t.name }
 func (t staticTool) Description() string { return t.description }
-func (t staticTool) Params() string      { return t.params }
+func (t staticTool) Params() ai.ToolParameters {
+	return t.params
+}
 func (t staticTool) Function(context.Context, *ai.ToolCall) *loop.ToolResponse {
 	return &loop.ToolResponse{}
+}
+
+func testParams(name string) ai.ToolParameters {
+	return ai.ToolParameters{
+		Properties: []ai.ToolParameter{
+			{Name: name, Type: ai.ToolParameterString},
+		},
+	}
+}
+
+func invalidParams() ai.ToolParameters {
+	return ai.ToolParameters{
+		Properties: []ai.ToolParameter{
+			{Name: "value", Type: ai.ToolParameterType("unsupported")},
+		},
+	}
 }
 
 type captureSink struct {

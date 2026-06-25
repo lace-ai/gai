@@ -606,4 +606,65 @@ func TestLoopFallsBackToBuildPromptEveryIteration(t *testing.T) {
 	if requests[0].Prompt != "prompt-1" || requests[1].Prompt != "prompt-2" {
 		t.Fatalf("expected rebuilt prompts, got first=%q second=%q", requests[0].Prompt, requests[1].Prompt)
 	}
+	for index, request := range requests {
+		if len(request.Tools) != 1 {
+			t.Fatalf("request %d expected 1 tool definition, got %d", index, len(request.Tools))
+		}
+		if request.Tools[0].Name != "echo" {
+			t.Fatalf("request %d expected echo tool definition, got %#v", index, request.Tools[0])
+		}
+	}
+}
+
+func TestIterationCountsLeadingThoughtTokens(t *testing.T) {
+	t.Parallel()
+
+	var iteration loop.Iteration
+	iteration.AppendToken(ai.Token{Type: ai.TokenTypeThought, Text: "thinking", TokenUsage: 7})
+	iteration.AppendToken(ai.Token{Type: ai.TokenTypeThought, Text: " more", TokenUsage: 3})
+	iteration.AppendToken(ai.Token{Type: ai.TokenTypeText, Text: "answer", TokenUsage: 2})
+
+	if len(iteration.Parts) != 1 {
+		t.Fatalf("expected one response part, got %d", len(iteration.Parts))
+	}
+	response := iteration.Parts[0].Response
+	if response == nil {
+		t.Fatal("expected response part")
+	}
+	if response.Text != "answer" {
+		t.Fatalf("unexpected visible text: %q", response.Text)
+	}
+	if response.Reasoning != "thinking more" {
+		t.Fatalf("unexpected reasoning: %q", response.Reasoning)
+	}
+	if response.ReasoningTokens != 10 {
+		t.Fatalf("expected reasoning tokens to include leading thought, got %d", response.ReasoningTokens)
+	}
+	if response.OutputTokens != 12 {
+		t.Fatalf("unexpected output tokens: %d", response.OutputTokens)
+	}
+}
+
+func TestIterationDeltaMessagesSkipsThoughtOnlyResponses(t *testing.T) {
+	t.Parallel()
+
+	var iteration loop.Iteration
+	iteration.AppendToken(ai.Token{Type: ai.TokenTypeThought, Text: "thinking"})
+
+	if messages := iteration.DeltaMessages(); len(messages) != 0 {
+		t.Fatalf("expected no messages for thought-only response, got %#v", messages)
+	}
+
+	iteration.AppendToken(ai.Token{Type: ai.TokenTypeText, Text: "answer"})
+
+	messages := iteration.DeltaMessages()
+	if len(messages) != 1 {
+		t.Fatalf("expected one assistant message after visible text, got %#v", messages)
+	}
+	if messages[0].Role != gaictx.RoleAssistant {
+		t.Fatalf("expected assistant role, got %q", messages[0].Role)
+	}
+	if got := messages[0].Content.String(); got != "answer" {
+		t.Fatalf("unexpected assistant content: %q", got)
+	}
 }

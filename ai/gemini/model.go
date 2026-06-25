@@ -96,11 +96,11 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			return
 		}
 
-		var config *genai.GenerateContentConfig
-		if req.MaxTokens > 0 {
-			config = &genai.GenerateContentConfig{
-				MaxOutputTokens: int32(req.MaxTokens),
-			}
+		config, err := buildGenerateContentConfig(req)
+		if err != nil {
+			streamErr = err
+			out <- ai.Token{Err: err, Type: ai.TokenTypeErr, Text: err.Error()}
+			return
 		}
 
 		contents := genai.Text(prompt)
@@ -246,11 +246,16 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 		return nil, err
 	}
 
+	config, err := buildGenerateContentConfig(req)
+	if err != nil {
+		return nil, err
+	}
+
 	result, err := client.Models.GenerateContent(
 		ctx,
 		m.name,
 		genai.Text(prompt),
-		nil,
+		config,
 	)
 	if err != nil {
 		if m.debug != nil {
@@ -272,9 +277,14 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 		inputTokens = int(result.UsageMetadata.PromptTokenCount)
 		outputTokens = int(result.UsageMetadata.CandidatesTokenCount)
 	}
+	reasoningTokens := 0
+	if result.UsageMetadata != nil {
+		reasoningTokens = int(result.UsageMetadata.ThoughtsTokenCount)
+	}
 	span.SetAttributes(
 		attribute.Int("ai.input_tokens", inputTokens),
 		attribute.Int("ai.output_tokens", outputTokens),
+		attribute.Int("ai.reasoning_tokens", reasoningTokens),
 	)
 
 	if m.debug != nil {
@@ -292,11 +302,179 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 		})
 	}
 
+	text, reasoning, toolCalls, err := mapGenerateContentResponse(result)
+	if err != nil {
+		return nil, err
+	}
+	raw, _ := json.Marshal(result)
 	return &ai.AIResponse{
-		Text:         result.Text(),
-		InputTokens:  inputTokens,
-		OutputTokens: outputTokens,
+		Text:            text,
+		Reasoning:       reasoning,
+		ToolCalls:       toolCalls,
+		Raw:             raw,
+		InputTokens:     inputTokens,
+		OutputTokens:    outputTokens,
+		ReasoningTokens: reasoningTokens,
 	}, nil
+}
+
+func buildGenerateContentConfig(req ai.AIRequest) (*genai.GenerateContentConfig, error) {
+	if err := req.ResponseFormat.Validate(); err != nil {
+		return nil, err
+	}
+
+	var config *genai.GenerateContentConfig
+	ensureConfig := func() *genai.GenerateContentConfig {
+		if config == nil {
+			config = &genai.GenerateContentConfig{}
+		}
+		return config
+	}
+
+	if req.MaxTokens > 0 {
+		ensureConfig().MaxOutputTokens = int32(req.MaxTokens)
+	}
+	if len(req.Tools) > 0 {
+		tools, err := mapGenerateContentTools(req.Tools)
+		if err != nil {
+			return nil, err
+		}
+		ensureConfig().Tools = tools
+		toolConfig, err := mapGenerateContentToolConfig(req.ToolChoice)
+		if err != nil {
+			return nil, err
+		}
+		if toolConfig != nil {
+			ensureConfig().ToolConfig = toolConfig
+		}
+	}
+	if err := applyGenerateContentResponseFormat(ensureConfig, req.ResponseFormat); err != nil {
+		return nil, err
+	}
+	if thinking := mapGenerateContentThinkingConfig(req.Reasoning); thinking != nil {
+		ensureConfig().ThinkingConfig = thinking
+	}
+	return config, nil
+}
+
+func mapGenerateContentTools(definitions []ai.ToolDefinition) ([]*genai.Tool, error) {
+	declarations := make([]*genai.FunctionDeclaration, 0, len(definitions))
+	for _, definition := range definitions {
+		if err := definition.Validate(); err != nil {
+			return nil, err
+		}
+		var schema any
+		if err := json.Unmarshal(definition.Parameters, &schema); err != nil {
+			return nil, err
+		}
+		declarations = append(declarations, &genai.FunctionDeclaration{
+			Name:                 definition.Name,
+			Description:          definition.Description,
+			ParametersJsonSchema: schema,
+		})
+	}
+	return []*genai.Tool{{FunctionDeclarations: declarations}}, nil
+}
+
+func mapGenerateContentToolConfig(choice ai.ToolChoice) (*genai.ToolConfig, error) {
+	if len(choice.Names) > 0 {
+		switch choice.Mode {
+		case ai.ToolChoiceAuto, "":
+			return nil, fmt.Errorf("gemini tool choice %q with specific tool names is unsupported: Gemini SDK cannot enforce allowed tool names in auto mode", ai.ToolChoiceAuto)
+		case ai.ToolChoiceNone:
+			return nil, fmt.Errorf("gemini tool choice %q with specific tool names is invalid: no tools may be called", ai.ToolChoiceNone)
+		}
+	}
+
+	var mode genai.FunctionCallingConfigMode
+	switch choice.Mode {
+	case ai.ToolChoiceNone:
+		mode = genai.FunctionCallingConfigModeNone
+	case ai.ToolChoiceRequired:
+		mode = genai.FunctionCallingConfigModeAny
+	case ai.ToolChoiceAuto, "":
+		return nil, nil
+	default:
+		return nil, fmt.Errorf("unsupported gemini tool choice mode %q", choice.Mode)
+	}
+	return &genai.ToolConfig{
+		FunctionCallingConfig: &genai.FunctionCallingConfig{
+			Mode:                 mode,
+			AllowedFunctionNames: append([]string(nil), choice.Names...),
+		},
+	}, nil
+}
+
+func applyGenerateContentResponseFormat(ensureConfig func() *genai.GenerateContentConfig, format ai.ResponseFormat) error {
+	switch format.Type {
+	case "", ai.ResponseFormatText:
+		return nil
+	case ai.ResponseFormatJSONObject:
+		ensureConfig().ResponseMIMEType = "application/json"
+		return nil
+	case ai.ResponseFormatJSONSchema:
+		var schema any
+		if err := json.Unmarshal(format.Schema, &schema); err != nil {
+			return err
+		}
+		cfg := ensureConfig()
+		cfg.ResponseMIMEType = "application/json"
+		cfg.ResponseJsonSchema = schema
+		return nil
+	default:
+		return fmt.Errorf("%w: %s", ai.ErrInvalidResponseFormat, format.Type)
+	}
+}
+
+func mapGenerateContentThinkingConfig(reasoning ai.ReasoningConfig) *genai.ThinkingConfig {
+	if !reasoning.Enabled && !reasoning.IncludeThoughts && reasoning.BudgetTokens <= 0 && reasoning.Effort == "" {
+		return nil
+	}
+	config := &genai.ThinkingConfig{
+		IncludeThoughts: reasoning.IncludeThoughts,
+	}
+	if reasoning.BudgetTokens > 0 {
+		budget := int32(reasoning.BudgetTokens)
+		config.ThinkingBudget = &budget
+	}
+	switch reasoning.Effort {
+	case ai.ReasoningEffortLow:
+		config.ThinkingLevel = genai.ThinkingLevelLow
+	case ai.ReasoningEffortMedium:
+		config.ThinkingLevel = genai.ThinkingLevelMedium
+	case ai.ReasoningEffortHigh:
+		config.ThinkingLevel = genai.ThinkingLevelHigh
+	}
+	return config
+}
+
+func mapGenerateContentResponse(result *genai.GenerateContentResponse) (string, string, []ai.ToolCall, error) {
+	if result == nil || len(result.Candidates) == 0 || result.Candidates[0] == nil || result.Candidates[0].Content == nil {
+		return "", "", nil, nil
+	}
+	var text strings.Builder
+	var reasoning strings.Builder
+	var toolCalls []ai.ToolCall
+	for _, part := range result.Candidates[0].Content.Parts {
+		if part == nil {
+			continue
+		}
+		switch {
+		case part.Text != "":
+			if part.Thought {
+				reasoning.WriteString(part.Text)
+			} else {
+				text.WriteString(part.Text)
+			}
+		case part.FunctionCall != nil:
+			toolCall, err := mapFunctionCall(part.FunctionCall)
+			if err != nil {
+				return "", "", nil, err
+			}
+			toolCalls = append(toolCalls, *toolCall)
+		}
+	}
+	return text.String(), reasoning.String(), toolCalls, nil
 }
 
 func mapFunctionCall(functionCall *genai.FunctionCall) (*ai.ToolCall, error) {

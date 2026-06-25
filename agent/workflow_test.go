@@ -173,6 +173,82 @@ func TestAgentMiddlewareMapsWorkflowResult(t *testing.T) {
 	}
 }
 
+func TestWorkflowResultSeparatesReasoningFromVisibleText(t *testing.T) {
+	main := agent.New(agent.Definition{
+		Name: "main",
+		Model: &mocks.MockModel{Responses: []mocks.MockModelResponse{{
+			Res: ai.AIResponse{Text: "answer", Reasoning: "thinking", ReasoningTokens: 4},
+		}}},
+		Prompt: func(_ context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
+			return &testPromptBuilder{}, nil
+		},
+	})
+
+	workflow, err := main.NewRun(context.Background(), textRunInput("question"))
+	if err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	consumed := consumeWorkflow(t, workflow)
+	if got := tokensText(consumed.tokens); got != "answer" {
+		t.Fatalf("unexpected visible output: %q", got)
+	}
+	result := workflow.Result()
+	if result.Text != "answer" || result.Primary.Text != "answer" {
+		t.Fatalf("reasoning leaked into visible text: %+v", result)
+	}
+	if result.Reasoning != "thinking" || result.Primary.Reasoning != "thinking" {
+		t.Fatalf("reasoning was not captured: %+v", result)
+	}
+	if len(result.Primary.Iterations) != 1 || len(result.Primary.Iterations[0].Parts) != 1 {
+		t.Fatalf("unexpected iterations: %+v", result.Primary.Iterations)
+	}
+	response := result.Primary.Iterations[0].Parts[0].Response
+	if response == nil || response.ReasoningTokens != 4 {
+		t.Fatalf("leading reasoning tokens were not preserved: %+v", response)
+	}
+}
+
+func TestAgentMiddlewareReceivesReasoningInMappedResult(t *testing.T) {
+	var mappedResult agent.WorkflowResult
+	post := agent.New(agent.Definition{
+		Name:  "post",
+		Model: &mocks.MockModel{Responses: []mocks.MockModelResponse{{Res: ai.AIResponse{Text: "post"}}}},
+		Prompt: func(_ context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
+			return &testPromptBuilder{}, nil
+		},
+	})
+	main := agent.New(agent.Definition{
+		Name: "main",
+		Model: &mocks.MockModel{Responses: []mocks.MockModelResponse{{
+			Res: ai.AIResponse{Text: "answer", Reasoning: "thinking", ReasoningTokens: 4},
+		}}},
+		Prompt: func(_ context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
+			return &testPromptBuilder{}, nil
+		},
+		Middleware: []agent.Middleware{
+			agent.NewAgentMiddleware(post, agent.AgentMiddlewareConfig{
+				Output: agent.PreserveOutput,
+				MapInput: func(_ context.Context, result agent.WorkflowResult) (agent.RunInput, error) {
+					mappedResult = result
+					return textRunInput("post"), nil
+				},
+			}),
+		},
+	})
+
+	workflow, err := main.NewRun(context.Background(), textRunInput("question"))
+	if err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	consumeWorkflow(t, workflow)
+	if mappedResult.Text != "answer" || mappedResult.Reasoning != "thinking" {
+		t.Fatalf("middleware did not receive separated text/reasoning: %+v", mappedResult)
+	}
+	if workflow.Result().Reasoning != "thinking" {
+		t.Fatalf("preserved output should retain upstream reasoning: %+v", workflow.Result())
+	}
+}
+
 func TestAgentMiddlewareRunsInOrderWithPriorStageResults(t *testing.T) {
 	var order []string
 	firstStageCount := -1

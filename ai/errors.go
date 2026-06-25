@@ -19,6 +19,12 @@ var (
 	ErrNilModelRepository = errors.New("model repository is nil")
 	// ErrInvalidToolCall indicates a malformed tool call.
 	ErrInvalidToolCall = errors.New("invalid tool call")
+	// ErrInvalidToolDefinition indicates a malformed tool definition.
+	ErrInvalidToolDefinition = errors.New("invalid tool definition")
+	// ErrInvalidResponseFormat indicates a malformed structured response request.
+	ErrInvalidResponseFormat = errors.New("invalid response format")
+	// ErrUnsupportedCapability indicates that a provider cannot satisfy a request feature.
+	ErrUnsupportedCapability = errors.New("unsupported provider capability")
 	// ErrTokenizerUnsupported indicates that a tokenizer does not support an operation.
 	ErrTokenizerUnsupported = errors.New("tokenizer operation unsupported")
 )

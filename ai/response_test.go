@@ -7,6 +7,39 @@ import (
 	"github.com/lace-ai/gai/ai"
 )
 
+func TestAIResponseAppendTokenSeparatesThoughtsAndToolCalls(t *testing.T) {
+	var response ai.AIResponse
+
+	response.AppendToken(ai.Token{Type: ai.TokenTypeText, Text: "answer", TokenUsage: 2})
+	response.AppendToken(ai.Token{Type: ai.TokenTypeThought, Text: "reasoning", TokenUsage: 3})
+	response.AppendToken(ai.Token{
+		Type: ai.TokenTypeToolCall,
+		ToolCall: &ai.ToolCall{
+			ID:   "call-1",
+			Type: "function",
+			Name: "search",
+			Args: json.RawMessage(`{"query":"x"}`),
+		},
+		TokenUsage: 1,
+	})
+
+	if response.Text != "answer" {
+		t.Fatalf("expected visible text only, got %q", response.Text)
+	}
+	if response.Reasoning != "reasoning" {
+		t.Fatalf("expected reasoning to be separated, got %q", response.Reasoning)
+	}
+	if len(response.ToolCalls) != 1 || response.ToolCalls[0].Name != "search" {
+		t.Fatalf("expected tool call to be recorded, got %#v", response.ToolCalls)
+	}
+	if response.OutputTokens != 6 {
+		t.Fatalf("unexpected output tokens: %d", response.OutputTokens)
+	}
+	if response.ReasoningTokens != 3 {
+		t.Fatalf("unexpected reasoning tokens: %d", response.ReasoningTokens)
+	}
+}
+
 type expectedWrapToken struct {
 	typ          ai.TokenType
 	data         string

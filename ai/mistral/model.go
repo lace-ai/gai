@@ -43,10 +43,13 @@ func (m *Model) Close() error {
 }
 
 type chatCompletionRequest struct {
-	Model     string               `json:"model"`
-	Messages  []chatMessageRequest `json:"messages"`
-	MaxTokens *int                 `json:"max_tokens,omitempty"`
-	Stream    bool                 `json:"stream,omitempty"`
+	Model          string               `json:"model"`
+	Messages       []chatMessageRequest `json:"messages"`
+	MaxTokens      *int                 `json:"max_tokens,omitempty"`
+	Stream         bool                 `json:"stream,omitempty"`
+	Tools          []chatToolRequest    `json:"tools,omitempty"`
+	ToolChoice     any                  `json:"tool_choice,omitempty"`
+	ResponseFormat *chatResponseFormat  `json:"response_format,omitempty"`
 }
 
 type chatMessageRequest struct {
@@ -54,16 +57,136 @@ type chatMessageRequest struct {
 	Content string `json:"content"`
 }
 
+type chatToolRequest struct {
+	Type     string                  `json:"type"`
+	Function chatToolFunctionRequest `json:"function"`
+}
+
+type chatToolFunctionRequest struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Parameters  json.RawMessage `json:"parameters"`
+}
+
+type chatResponseFormat struct {
+	Type       string                  `json:"type"`
+	JSONSchema *chatResponseJSONSchema `json:"json_schema,omitempty"`
+}
+
+type chatResponseJSONSchema struct {
+	Name   string          `json:"name"`
+	Schema json.RawMessage `json:"schema"`
+}
+
 type chatCompletionResponse struct {
 	Choices []struct {
 		Message struct {
-			Content string `json:"content"`
+			Content   string          `json:"content"`
+			ToolCalls json.RawMessage `json:"tool_calls"`
 		} `json:"message"`
 	} `json:"choices"`
 	Usage struct {
 		PromptTokens     int `json:"prompt_tokens"`
 		CompletionTokens int `json:"completion_tokens"`
 	} `json:"usage"`
+}
+
+func buildChatCompletionRequest(req ai.AIRequest, modelName string, stream bool) (chatCompletionRequest, error) {
+	if err := req.ResponseFormat.Validate(); err != nil {
+		return chatCompletionRequest{}, err
+	}
+	payload := chatCompletionRequest{
+		Model: modelName,
+		Messages: []chatMessageRequest{
+			{
+				Role:    "user",
+				Content: req.Prompt,
+			},
+		},
+		Stream: stream,
+	}
+	if req.MaxTokens > 0 {
+		payload.MaxTokens = &req.MaxTokens
+	}
+	if len(req.Tools) > 0 {
+		tools, err := mapChatTools(req.Tools)
+		if err != nil {
+			return chatCompletionRequest{}, err
+		}
+		payload.Tools = tools
+		toolChoice, err := mapChatToolChoice(req.ToolChoice)
+		if err != nil {
+			return chatCompletionRequest{}, err
+		}
+		payload.ToolChoice = toolChoice
+	}
+	responseFormat, err := mapChatResponseFormat(req.ResponseFormat)
+	if err != nil {
+		return chatCompletionRequest{}, err
+	}
+	payload.ResponseFormat = responseFormat
+	return payload, nil
+}
+
+func mapChatTools(definitions []ai.ToolDefinition) ([]chatToolRequest, error) {
+	tools := make([]chatToolRequest, 0, len(definitions))
+	for _, definition := range definitions {
+		if err := definition.Validate(); err != nil {
+			return nil, err
+		}
+		tools = append(tools, chatToolRequest{
+			Type: "function",
+			Function: chatToolFunctionRequest{
+				Name:        definition.Name,
+				Description: definition.Description,
+				Parameters:  append(json.RawMessage(nil), definition.Parameters...),
+			},
+		})
+	}
+	return tools, nil
+}
+
+func mapChatToolChoice(choice ai.ToolChoice) (any, error) {
+	switch choice.Mode {
+	case ai.ToolChoiceNone:
+		return "none", nil
+	case ai.ToolChoiceRequired:
+		if len(choice.Names) == 1 {
+			return map[string]any{
+				"type": "function",
+				"function": map[string]string{
+					"name": choice.Names[0],
+				},
+			}, nil
+		}
+		return "required", nil
+	case ai.ToolChoiceAuto, "":
+		return "auto", nil
+	default:
+		return nil, fmt.Errorf("unsupported mistral tool choice mode %q", choice.Mode)
+	}
+}
+
+func mapChatResponseFormat(format ai.ResponseFormat) (*chatResponseFormat, error) {
+	if err := format.Validate(); err != nil {
+		return nil, err
+	}
+	switch format.Type {
+	case "", ai.ResponseFormatText:
+		return nil, nil
+	case ai.ResponseFormatJSONObject:
+		return &chatResponseFormat{Type: "json_object"}, nil
+	case ai.ResponseFormatJSONSchema:
+		return &chatResponseFormat{
+			Type: "json_schema",
+			JSONSchema: &chatResponseJSONSchema{
+				Name:   format.Name,
+				Schema: append(json.RawMessage(nil), format.Schema...),
+			},
+		}, nil
+	default:
+		return nil, fmt.Errorf("%w: %s", ai.ErrInvalidResponseFormat, format.Type)
+	}
 }
 
 type Tokenizer struct {
@@ -325,18 +448,11 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 		}()
 		defer close(raw)
 
-		payload := chatCompletionRequest{
-			Model: m.name,
-			Messages: []chatMessageRequest{
-				{
-					Role:    "user",
-					Content: prompt,
-				},
-			},
-			Stream: true,
-		}
-		if req.MaxTokens > 0 {
-			payload.MaxTokens = &req.MaxTokens
+		payload, err := buildChatCompletionRequest(req, m.name, true)
+		if err != nil {
+			streamErr = err
+			raw <- ai.Token{Err: err, Type: ai.TokenTypeErr}
+			return
 		}
 
 		body, err := json.Marshal(payload)
@@ -668,17 +784,9 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 		})
 	}
 
-	payload := chatCompletionRequest{
-		Model: m.name,
-		Messages: []chatMessageRequest{
-			{
-				Role:    "user",
-				Content: prompt,
-			},
-		},
-	}
-	if req.MaxTokens > 0 {
-		payload.MaxTokens = &req.MaxTokens
+	payload, err := buildChatCompletionRequest(req, m.name, false)
+	if err != nil {
+		return nil, err
 	}
 
 	body, err := json.Marshal(payload)
@@ -723,6 +831,10 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 	if len(parsed.Choices) == 0 {
 		return nil, ErrNoChoices
 	}
+	toolCalls, err := mapChatResponseToolCalls(parsed.Choices[0].Message.ToolCalls)
+	if err != nil {
+		return nil, err
+	}
 	span.SetAttributes(
 		attribute.Int("ai.input_tokens", parsed.Usage.PromptTokens),
 		attribute.Int("ai.output_tokens", parsed.Usage.CompletionTokens),
@@ -742,7 +854,50 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 
 	return &ai.AIResponse{
 		Text:         parsed.Choices[0].Message.Content,
+		ToolCalls:    toolCalls,
+		Raw:          append([]byte(nil), resBody...),
 		InputTokens:  parsed.Usage.PromptTokens,
 		OutputTokens: parsed.Usage.CompletionTokens,
 	}, nil
+}
+
+func mapChatResponseToolCalls(raw json.RawMessage) ([]ai.ToolCall, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+
+	var entries []mistralStreamToolCallEntry
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return nil, fmt.Errorf("decode tool_calls: %w", err)
+	}
+
+	result := make([]ai.ToolCall, 0, len(entries))
+	for i, entry := range entries {
+		toolName := strings.TrimSpace(entry.Function.Name)
+		if toolName == "" {
+			return nil, fmt.Errorf("map tool_calls[%d]: missing tool name", i)
+		}
+		args := json.RawMessage(strings.TrimSpace(entry.Function.Arguments))
+		if len(args) == 0 {
+			args = json.RawMessage("{}")
+		}
+		if !json.Valid(args) {
+			return nil, fmt.Errorf("map tool_calls[%d]: invalid JSON arguments for tool %q", i, toolName)
+		}
+		callType := strings.TrimSpace(entry.Type)
+		if callType == "" {
+			callType = "function"
+		}
+		callID := strings.TrimSpace(entry.ID)
+		if callID == "" {
+			callID = ai.GenerateToolCallID(toolName)
+		}
+		result = append(result, ai.ToolCall{
+			ID:   callID,
+			Type: callType,
+			Name: toolName,
+			Args: args,
+		})
+	}
+	return result, nil
 }

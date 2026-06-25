@@ -10,14 +10,6 @@ import (
 	"github.com/lace-ai/gai/ai"
 )
 
-// ToolArg describes one tool argument in a provider-independent form.
-type ToolArg struct {
-	// ArgType is the argument's JSON Schema type.
-	ArgType string `json:"type"`
-	// Description explains the argument to the model.
-	Description string `json:"description"`
-}
-
 // ToolResponse is the result of a tool invocation.
 type ToolResponse struct {
 	// Status indicates whether the tool invocation was successful or resulted in an error.
@@ -62,8 +54,8 @@ type Tool interface {
 	Name() string
 	// Description explains when and how the model should use the tool.
 	Description() string
-	// Params returns the tool parameters as JSON Schema.
-	Params() string
+	// Params returns the structured tool argument schema.
+	Params() ai.ToolParameters
 	// Function invokes the tool for req.
 	Function(ctx context.Context, req *ai.ToolCall) *ToolResponse
 }
@@ -101,6 +93,27 @@ func DecodeToolArgs[T any](req *ai.ToolCall, target *T) error {
 		return fmt.Errorf("%w: %w", ErrToolCallMalformed, err)
 	}
 	return nil
+}
+
+// ToolDefinitions converts runtime tools into provider-neutral model request
+// definitions. Tool execution remains owned by loop.Tool.
+func ToolDefinitions(tools []Tool) ([]ai.ToolDefinition, error) {
+	definitions := make([]ai.ToolDefinition, 0, len(tools))
+	for index, tool := range tools {
+		if tool == nil {
+			return nil, fmt.Errorf("%w: tool at index %d is nil", ai.ErrInvalidToolDefinition, index)
+		}
+		params, err := tool.Params().JSONSchema()
+		if err != nil {
+			return nil, fmt.Errorf("tool %q: %w", tool.Name(), err)
+		}
+		definition, err := ai.NewToolDefinition(tool.Name(), tool.Description(), params)
+		if err != nil {
+			return nil, fmt.Errorf("tool %q: %w", tool.Name(), err)
+		}
+		definitions = append(definitions, definition)
+	}
+	return definitions, nil
 }
 
 // ToolCallToString returns a diagnostic representation of tc.

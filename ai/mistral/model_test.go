@@ -75,6 +75,168 @@ func TestModelGenerate(t *testing.T) {
 	}
 }
 
+func TestModelGenerateMapsRequestCapabilities(t *testing.T) {
+	var gotReq chatCompletionRequest
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotReq); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}],"usage":{"prompt_tokens":1,"completion_tokens":2}}`))
+	}))
+	defer ts.Close()
+
+	p := New("test-key", nil)
+	p.baseURL = ts.URL
+
+	m, err := p.Model(MistralSmallLatest)
+	if err != nil {
+		t.Fatalf("Model error: %v", err)
+	}
+
+	_, err = m.Generate(context.Background(), ai.AIRequest{
+		Prompt: "hello",
+		Tools: []ai.ToolDefinition{
+			{
+				Type:        "function",
+				Name:        "search",
+				Description: "Searches documents.",
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"}}}`),
+			},
+		},
+		ToolChoice: ai.ToolChoice{
+			Mode:  ai.ToolChoiceRequired,
+			Names: []string{"search"},
+		},
+		ResponseFormat: ai.ResponseFormat{
+			Type:   ai.ResponseFormatJSONSchema,
+			Name:   "answer",
+			Schema: json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}}}`),
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate error: %v", err)
+	}
+
+	if len(gotReq.Tools) != 1 {
+		t.Fatalf("expected 1 tool, got %d", len(gotReq.Tools))
+	}
+	if gotReq.Tools[0].Type != "function" || gotReq.Tools[0].Function.Name != "search" {
+		t.Fatalf("unexpected tool mapping: %#v", gotReq.Tools[0])
+	}
+	choice, ok := gotReq.ToolChoice.(map[string]any)
+	if !ok {
+		t.Fatalf("expected named tool choice map, got %#v", gotReq.ToolChoice)
+	}
+	function, ok := choice["function"].(map[string]any)
+	if !ok || function["name"] != "search" {
+		t.Fatalf("unexpected tool choice: %#v", gotReq.ToolChoice)
+	}
+	if gotReq.ResponseFormat == nil || gotReq.ResponseFormat.Type != "json_schema" {
+		t.Fatalf("unexpected response format: %#v", gotReq.ResponseFormat)
+	}
+	if gotReq.ResponseFormat.JSONSchema == nil || gotReq.ResponseFormat.JSONSchema.Name != "answer" {
+		t.Fatalf("unexpected response schema: %#v", gotReq.ResponseFormat.JSONSchema)
+	}
+}
+
+func TestBuildChatCompletionRequestRejectsUnsupportedToolChoiceMode(t *testing.T) {
+	_, err := buildChatCompletionRequest(ai.AIRequest{
+		Prompt: "hello",
+		Tools: []ai.ToolDefinition{
+			{
+				Type:        "function",
+				Name:        "search",
+				Description: "Searches documents.",
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"}}}`),
+			},
+		},
+		ToolChoice: ai.ToolChoice{
+			Mode: "sometimes",
+		},
+	}, MistralSmallLatest, false)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), `unsupported mistral tool choice mode "sometimes"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestModelGenerateMapsMultipleResponseToolCalls(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"choices":[{
+				"message":{
+					"content":"",
+					"tool_calls":[
+						{"id":"call_1","type":"function","function":{"name":"first_tool","arguments":"{\"value\":1}"}},
+						{"id":"call_2","type":"function","function":{"name":"second_tool","arguments":"{\"value\":2}"}}
+					]
+				}
+			}],
+			"usage":{"prompt_tokens":3,"completion_tokens":4}
+		}`))
+	}))
+	defer ts.Close()
+
+	p := New("test-key", nil)
+	p.baseURL = ts.URL
+
+	m, err := p.Model(MistralSmallLatest)
+	if err != nil {
+		t.Fatalf("Model error: %v", err)
+	}
+
+	res, err := m.Generate(context.Background(), ai.AIRequest{Prompt: "call tools"})
+	if err != nil {
+		t.Fatalf("Generate error: %v", err)
+	}
+
+	if len(res.ToolCalls) != 2 {
+		t.Fatalf("expected 2 tool calls, got %#v", res.ToolCalls)
+	}
+	if res.ToolCalls[0].ID != "call_1" || res.ToolCalls[0].Name != "first_tool" || string(res.ToolCalls[0].Args) != `{"value":1}` {
+		t.Fatalf("unexpected first tool call: %#v", res.ToolCalls[0])
+	}
+	if res.ToolCalls[1].ID != "call_2" || res.ToolCalls[1].Name != "second_tool" || string(res.ToolCalls[1].Args) != `{"value":2}` {
+		t.Fatalf("unexpected second tool call: %#v", res.ToolCalls[1])
+	}
+}
+
+func TestMapChatResponseToolCallsRejectsMalformedEntries(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     json.RawMessage
+		wantErr string
+	}{
+		{
+			name:    "missing tool name",
+			raw:     json.RawMessage(`[{"id":"call_1","type":"function","function":{"arguments":"{\"value\":1}"}}]`),
+			wantErr: "map tool_calls[0]: missing tool name",
+		},
+		{
+			name:    "invalid JSON arguments",
+			raw:     json.RawMessage(`[{"id":"call_1","type":"function","function":{"name":"search","arguments":"{\"value\""}}]`),
+			wantErr: `map tool_calls[0]: invalid JSON arguments for tool "search"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := mapChatResponseToolCalls(tt.raw)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("expected error containing %q, got %q", tt.wantErr, err.Error())
+			}
+		})
+	}
+}
+
 func TestModelGenerateNoChoices(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

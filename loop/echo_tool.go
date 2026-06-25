@@ -25,9 +25,19 @@ func (t *EchoTool) Description() string {
 	return "Returns the same text passed in arguments."
 }
 
-// Params returns the echo tool's JSON Schema parameters.
-func (t *EchoTool) Params() string {
-	return `{"type":"object","required":["text"],"properties":{"text":{"type":"string","description":"Text to echo back"}}}`
+// Params returns the echo tool's argument schema.
+func (t *EchoTool) Params() ai.ToolParameters {
+	return ai.ToolParameters{
+		Strict: true,
+		Properties: []ai.ToolParameter{
+			{
+				Name:        "text",
+				Type:        ai.ToolParameterString,
+				Description: "Text to echo back",
+				Required:    true,
+			},
+		},
+	}
 }
 
 type echoArgs struct {

@@ -225,16 +225,21 @@ type Model interface {
 
 </summary>
 
-Providers receive a rendered prompt string and an optional output-token cap:
+Providers receive a rendered prompt string plus provider-neutral capability
+requests for native tools, structured responses, and reasoning:
 
 ```go
 type AIRequest struct {
-    Prompt    string
-    MaxTokens int
+    Prompt         string
+    MaxTokens      int
+    Tools          []ToolDefinition
+    ToolChoice     ToolChoice
+    ResponseFormat ResponseFormat
+    Reasoning      ReasoningConfig
 }
 ```
 
-`AIResponse` contains the generated `Text` plus `InputTokens` and `OutputTokens`. Agent runs normally create the prompt string through a `context.PromptBuilder`; direct model calls can supply it themselves.
+`AIResponse` contains visible `Text`, separate `Reasoning`, structured `ToolCalls`, optional provider `Raw` data, and token usage. Agent runs normally create the prompt string through a `context.PromptBuilder`; direct model calls can supply it themselves. Workflow results follow the same split: `WorkflowResult.Text` is visible output and `WorkflowResult.Reasoning` is thought-token output.
 
 </details>
 
@@ -535,8 +540,27 @@ Tools must implement:
 type Tool interface {
     Name() string
     Description() string
-    Params() string
+    Params() ai.ToolParameters
     Function(ctx context.Context, req *ai.ToolCall) *ToolResponse
+}
+```
+
+`Params` returns a structured object schema. The runtime serializes it to JSON
+Schema for provider-native tool calling and for the prompt fallback:
+
+```go
+func (t *SaveMemoryTool) Params() ai.ToolParameters {
+    return ai.ToolParameters{
+        Strict: true,
+        Properties: []ai.ToolParameter{
+            {
+                Name:        "memory",
+                Type:        ai.ToolParameterString,
+                Description: "The memory text to save.",
+                Required:    true,
+            },
+        },
+    }
 }
 ```
 
@@ -553,6 +577,9 @@ Tool calls are expected to arrive as JSON with this shape:
 ```
 
 Tool call IDs are generated internally by the runtime and are not model-controlled.
+When a provider supports native tool calling, the loop sends tool definitions
+through `AIRequest.Tools`. Prompt-rendered JSON tool calls are retained as a
+fallback compatibility protocol.
 
 </details>
 
@@ -568,7 +595,7 @@ Tool call IDs are generated internally by the runtime and are not model-controll
 - `DetectToolCallsInStream` detects tool-call JSON objects in streamed text tokens.
 - `CallTool` runs a tool by name.
 - `DecodeToolArgs` unmarshals tool arguments into a typed struct.
-- `Renderer.RenderToolSignatures` formats tool metadata for prompting.
+- `Renderer.RenderToolSignatures` formats tool metadata for prompting and returns schema errors.
 
 </details>
 

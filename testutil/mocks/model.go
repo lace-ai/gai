@@ -46,11 +46,16 @@ func (m *MockModel) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan
 			out <- ai.Token{Type: ai.TokenTypeErr, Err: err}
 			return
 		}
-		if res == nil || res.Text == "" {
+		if res == nil || (res.Text == "" && res.Reasoning == "") {
 			return
 		}
 
-		out <- ai.Token{Type: ai.TokenTypeText, Data: []byte(res.Text)}
+		if res.Reasoning != "" {
+			out <- ai.Token{Type: ai.TokenTypeThought, Text: res.Reasoning, Data: []byte(res.Reasoning), TokenUsage: res.ReasoningTokens}
+		}
+		if res.Text != "" {
+			out <- ai.Token{Type: ai.TokenTypeText, Data: []byte(res.Text)}
+		}
 	}()
 
 	return out

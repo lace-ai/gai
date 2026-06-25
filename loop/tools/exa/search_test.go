@@ -57,8 +57,11 @@ func TestSearchTool(t *testing.T) {
 	if tool.Name() != "web_search" {
 		t.Fatalf("Name = %q, want web_search", tool.Name())
 	}
-	if tool.Description() == "" || tool.Params() == "" {
+	if tool.Description() == "" {
 		t.Fatal("expected default prompt metadata")
+	}
+	if _, err := tool.Params().JSONSchema(); err != nil {
+		t.Fatalf("default params invalid: %v", err)
 	}
 
 	response := tool.Function(context.Background(), &ai.ToolCall{
@@ -87,7 +90,13 @@ func TestSearchToolAllowsCustomPromptMetadata(t *testing.T) {
 
 	tool, err := exa.NewSearchTool("secret",
 		exa.WithPromptDescription("Use this only for live web lookups."),
-		exa.WithPromptParams(`{"type":"object","required":["query","reason"],"properties":{"query":{"type":"string"},"reason":{"type":"string"}}}`),
+		exa.WithPromptParams(ai.ToolParameters{
+			Strict: true,
+			Properties: []ai.ToolParameter{
+				{Name: "query", Type: ai.ToolParameterString, Required: true},
+				{Name: "reason", Type: ai.ToolParameterString, Required: true},
+			},
+		}),
 	)
 	if err != nil {
 		t.Fatalf("NewSearchTool: %v", err)
@@ -95,7 +104,11 @@ func TestSearchToolAllowsCustomPromptMetadata(t *testing.T) {
 	if got := tool.Description(); got != "Use this only for live web lookups." {
 		t.Fatalf("Description = %q", got)
 	}
-	if got := tool.Params(); got != `{"type":"object","required":["query","reason"],"properties":{"query":{"type":"string"},"reason":{"type":"string"}}}` {
+	params, err := tool.Params().JSONSchema()
+	if err != nil {
+		t.Fatalf("Params JSONSchema: %v", err)
+	}
+	if got := string(params); got != `{"type":"object","required":["query","reason"],"properties":{"query":{"type":"string"},"reason":{"type":"string"}},"additionalProperties":false}` {
 		t.Fatalf("Params = %q", got)
 	}
 }
@@ -226,7 +239,9 @@ func TestNewSearchToolValidatesConfiguration(t *testing.T) {
 		{name: "unsupported type", apiKey: "secret", options: []exa.Option{exa.WithSearchType("neural")}, wantErr: exa.ErrInvalidOption},
 		{name: "too many results", apiKey: "secret", options: []exa.Option{exa.WithNumResults(101)}, wantErr: exa.ErrInvalidOption},
 		{name: "empty prompt description", apiKey: "secret", options: []exa.Option{exa.WithPromptDescription(" ")}, wantErr: exa.ErrInvalidOption},
-		{name: "invalid prompt params", apiKey: "secret", options: []exa.Option{exa.WithPromptParams("{bad}")}, wantErr: exa.ErrInvalidOption},
+		{name: "invalid prompt params", apiKey: "secret", options: []exa.Option{exa.WithPromptParams(ai.ToolParameters{
+			Properties: []ai.ToolParameter{{Name: "value", Type: ai.ToolParameterType("unsupported")}},
+		})}, wantErr: exa.ErrInvalidOption},
 	}
 
 	for _, test := range tests {

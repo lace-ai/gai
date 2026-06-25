@@ -98,6 +98,9 @@ func (i *Iteration) partMessages() []gaictx.Message {
 			}
 		case IterationTypeResponse:
 			if part.Response != nil {
+				if part.Response.Text == "" {
+					continue
+				}
 				msgs = append(msgs, gaictx.Message{
 					Role:    gaictx.RoleAssistant,
 					Content: gaictx.NewTextContent(part.Response.Text),
@@ -149,7 +152,7 @@ func (i *Iteration) AppendToken(t ai.Token) {
 		} else {
 			i.Parts = append(i.Parts, IterationPart{
 				Type:     IterationTypeResponse,
-				Response: &ai.AIResponse{Text: text, OutputTokens: t.TokenUsage},
+				Response: &ai.AIResponse{Reasoning: text, OutputTokens: t.TokenUsage, ReasoningTokens: t.TokenUsage},
 			})
 		}
 	case ai.TokenTypeToolCall:

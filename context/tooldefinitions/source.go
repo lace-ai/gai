@@ -3,7 +3,6 @@ package tooldefinitions
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -113,7 +112,12 @@ func (s *Source) Function(ctx context.Context, tokenBudget int) (part gaictx.Par
 	if renderer == nil {
 		renderer = &gaictx.XMLRenderer{}
 	}
-	part = newPart(definitions, s.usageProtocol, s.usageProtocol+renderer.RenderToolSignatures(toToolSignatures(s.tools)))
+	signatures, err := renderer.RenderToolSignatures(toToolSignatures(s.tools))
+	if err != nil {
+		observer.Failed(ctx, "render_tool_signatures", err)
+		return nil, err
+	}
+	part = newPart(definitions, s.usageProtocol, s.usageProtocol+signatures)
 	observer.Succeeded(ctx, definitionNames(definitions))
 	return part, nil
 }
@@ -139,7 +143,6 @@ func definitionFromTool(tool loop.Tool, index int) (definition, error) {
 	result := definition{
 		name:        strings.TrimSpace(tool.Name()),
 		description: strings.TrimSpace(tool.Description()),
-		parameters:  strings.TrimSpace(tool.Params()),
 	}
 	if result.name == "" {
 		return definition{}, fmt.Errorf("%w: tool at index %d has an empty name", ErrToolInvalid, index)
@@ -147,9 +150,11 @@ func definitionFromTool(tool loop.Tool, index int) (definition, error) {
 	if result.description == "" {
 		return definition{}, fmt.Errorf("%w: tool %q has an empty description", ErrToolInvalid, result.name)
 	}
-	if result.parameters == "" || !json.Valid([]byte(result.parameters)) {
+	params, err := tool.Params().JSONSchema()
+	if err != nil {
 		return definition{}, fmt.Errorf("%w: tool %q has invalid parameters", ErrToolInvalid, result.name)
 	}
+	result.parameters = string(params)
 	return result, nil
 }
 

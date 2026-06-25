@@ -79,6 +79,151 @@ func TestBuildThoughtToken(t *testing.T) {
 	}
 }
 
+func TestBuildGenerateContentConfigMapsCapabilities(t *testing.T) {
+	cfg, err := buildGenerateContentConfig(ai.AIRequest{
+		MaxTokens: 64,
+		Tools: []ai.ToolDefinition{
+			{
+				Type:        "function",
+				Name:        "search",
+				Description: "Searches documents.",
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"}}}`),
+			},
+		},
+		ToolChoice: ai.ToolChoice{
+			Mode:  ai.ToolChoiceRequired,
+			Names: []string{"search"},
+		},
+		ResponseFormat: ai.ResponseFormat{
+			Type:   ai.ResponseFormatJSONSchema,
+			Name:   "answer",
+			Schema: json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}}}`),
+		},
+		Reasoning: ai.ReasoningConfig{
+			Enabled:         true,
+			IncludeThoughts: true,
+			BudgetTokens:    128,
+			Effort:          ai.ReasoningEffortHigh,
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildGenerateContentConfig error: %v", err)
+	}
+
+	if cfg.MaxOutputTokens != 64 {
+		t.Fatalf("unexpected max output tokens: %d", cfg.MaxOutputTokens)
+	}
+	if len(cfg.Tools) != 1 || len(cfg.Tools[0].FunctionDeclarations) != 1 {
+		t.Fatalf("expected one function declaration, got %#v", cfg.Tools)
+	}
+	if cfg.Tools[0].FunctionDeclarations[0].Name != "search" {
+		t.Fatalf("unexpected function declaration: %#v", cfg.Tools[0].FunctionDeclarations[0])
+	}
+	if cfg.ToolConfig == nil || cfg.ToolConfig.FunctionCallingConfig == nil {
+		t.Fatal("expected function calling config")
+	}
+	if cfg.ToolConfig.FunctionCallingConfig.Mode != genai.FunctionCallingConfigModeAny {
+		t.Fatalf("unexpected function calling mode: %s", cfg.ToolConfig.FunctionCallingConfig.Mode)
+	}
+	if len(cfg.ToolConfig.FunctionCallingConfig.AllowedFunctionNames) != 1 || cfg.ToolConfig.FunctionCallingConfig.AllowedFunctionNames[0] != "search" {
+		t.Fatalf("unexpected allowed functions: %#v", cfg.ToolConfig.FunctionCallingConfig.AllowedFunctionNames)
+	}
+	if cfg.ResponseMIMEType != "application/json" || cfg.ResponseJsonSchema == nil {
+		t.Fatalf("expected JSON response schema, got mime=%q schema=%#v", cfg.ResponseMIMEType, cfg.ResponseJsonSchema)
+	}
+	if cfg.ThinkingConfig == nil || !cfg.ThinkingConfig.IncludeThoughts {
+		t.Fatalf("expected thinking config with included thoughts, got %#v", cfg.ThinkingConfig)
+	}
+	if cfg.ThinkingConfig.ThinkingBudget == nil || *cfg.ThinkingConfig.ThinkingBudget != 128 {
+		t.Fatalf("unexpected thinking budget: %#v", cfg.ThinkingConfig.ThinkingBudget)
+	}
+	if cfg.ThinkingConfig.ThinkingLevel != genai.ThinkingLevelHigh {
+		t.Fatalf("unexpected thinking level: %s", cfg.ThinkingConfig.ThinkingLevel)
+	}
+}
+
+func TestBuildGenerateContentConfigRejectsUnsupportedToolChoices(t *testing.T) {
+	tool := ai.ToolDefinition{
+		Type:        "function",
+		Name:        "search",
+		Description: "Searches documents.",
+		Parameters:  json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"}}}`),
+	}
+
+	tests := []struct {
+		name    string
+		choice  ai.ToolChoice
+		wantErr string
+	}{
+		{
+			name: "auto names unsupported",
+			choice: ai.ToolChoice{
+				Mode:  ai.ToolChoiceAuto,
+				Names: []string{"search"},
+			},
+			wantErr: "Gemini SDK cannot enforce allowed tool names in auto mode",
+		},
+		{
+			name: "none names invalid",
+			choice: ai.ToolChoice{
+				Mode:  ai.ToolChoiceNone,
+				Names: []string{"search"},
+			},
+			wantErr: "no tools may be called",
+		},
+		{
+			name: "unknown mode",
+			choice: ai.ToolChoice{
+				Mode: "sometimes",
+			},
+			wantErr: `unsupported gemini tool choice mode "sometimes"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := buildGenerateContentConfig(ai.AIRequest{
+				Tools:      []ai.ToolDefinition{tool},
+				ToolChoice: tt.choice,
+			})
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("expected error containing %q, got %q", tt.wantErr, err.Error())
+			}
+		})
+	}
+}
+
+func TestMapGenerateContentResponseSeparatesTextReasoningAndToolCalls(t *testing.T) {
+	text, reasoning, toolCalls, err := mapGenerateContentResponse(&genai.GenerateContentResponse{
+		Candidates: []*genai.Candidate{
+			{
+				Content: &genai.Content{
+					Parts: []*genai.Part{
+						{Text: "visible"},
+						{Text: "private", Thought: true},
+						{FunctionCall: &genai.FunctionCall{Name: "search", Args: map[string]any{"query": "x"}}},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("mapGenerateContentResponse error: %v", err)
+	}
+	if text != "visible" {
+		t.Fatalf("unexpected text: %q", text)
+	}
+	if reasoning != "private" {
+		t.Fatalf("unexpected reasoning: %q", reasoning)
+	}
+	if len(toolCalls) != 1 || toolCalls[0].Name != "search" {
+		t.Fatalf("unexpected tool calls: %#v", toolCalls)
+	}
+}
+
 func TestModelTokenizer(t *testing.T) {
 	m := &Model{name: "gemini-2.5-flash"}
 	tokenizer := m.Tokenizer()

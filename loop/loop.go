@@ -131,8 +131,14 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInfor
 
 		retryCount := 0
 		completedToolCalls := map[string]struct{}{}
+		toolDefinitions, err := ToolDefinitions(a.Tools)
+		if err != nil {
+			loopErr = err
+			errCh <- err
+			return
+		}
 
-		_, err := a.PromptBuilder.BuildContext(ctx)
+		_, err = a.PromptBuilder.BuildContext(ctx)
 		if err != nil {
 			loopErr = fmt.Errorf("%w: %w", ErrBuildPrompt, err)
 			errCh <- loopErr
@@ -165,6 +171,7 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInfor
 			request := ai.AIRequest{
 				Prompt:    prompt,
 				MaxTokens: a.MaxTokens,
+				Tools:     toolDefinitions,
 			}
 			input := a.PromptBuilder.Input()
 			if input.User != nil {

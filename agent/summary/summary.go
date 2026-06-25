@@ -160,7 +160,7 @@ func (s Summarizer) Summarize(ctx context.Context, req Request) (string, error) 
 			return "", token.Err
 		}
 		switch token.Type {
-		case ai.TokenTypeText, ai.TokenTypeThought:
+		case ai.TokenTypeText:
 			if token.Text != "" {
 				summary = append(summary, token.Text...)
 			} else {
