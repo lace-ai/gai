@@ -33,9 +33,8 @@ func TestNewToolDefinitionRejectsInvalidSchema(t *testing.T) {
 }
 
 func TestToolParametersJSONSchema(t *testing.T) {
-	allowExtra := false
 	params := ai.ToolParameters{
-		AdditionalProperties: &allowExtra,
+		Strict: true,
 		Properties: []ai.ToolParameter{
 			{
 				Name:        "query",
@@ -73,6 +72,22 @@ func TestToolParametersJSONSchema(t *testing.T) {
 		t.Fatalf("JSONSchema error: %v", err)
 	}
 	want := `{"type":"object","required":["query","filters"],"properties":{"filters":{"type":"array","items":{"type":"string"}},"mode":{"type":"string","enum":["fast","deep"],"default":"fast"},"options":{"type":"object","required":["include_archived"],"properties":{"include_archived":{"type":"boolean"},"limit":{"type":"integer"}}},"query":{"type":"string","description":"Search query"}},"additionalProperties":false}`
+	if string(got) != want {
+		t.Fatalf("JSONSchema = %s, want %s", got, want)
+	}
+}
+
+func TestToolParametersAllowsExplicitAdditionalPropertiesOverride(t *testing.T) {
+	allowExtra := true
+	params := ai.ToolParameters{
+		Strict:               true,
+		AdditionalProperties: &allowExtra,
+	}
+	got, err := params.JSONSchema()
+	if err != nil {
+		t.Fatalf("JSONSchema error: %v", err)
+	}
+	want := `{"type":"object","additionalProperties":true}`
 	if string(got) != want {
 		t.Fatalf("JSONSchema = %s, want %s", got, want)
 	}

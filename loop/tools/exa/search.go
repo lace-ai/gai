@@ -175,6 +175,7 @@ func NewSearchTool(apiKey string, options ...Option) (*SearchTool, error) {
 		numResults:  defaultNumResults,
 		description: "Searches the web for current or factual information and returns relevant pages with excerpts.",
 		params: ai.ToolParameters{
+			Strict: true,
 			Properties: []ai.ToolParameter{
 				{
 					Name:        "query",

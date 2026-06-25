@@ -28,6 +28,7 @@ func (t *EchoTool) Description() string {
 // Params returns the echo tool's argument schema.
 func (t *EchoTool) Params() ai.ToolParameters {
 	return ai.ToolParameters{
+		Strict: true,
 		Properties: []ai.ToolParameter{
 			{
 				Name:        "text",

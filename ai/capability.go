@@ -33,6 +33,7 @@ const (
 // ToolParameters describes a function tool's object arguments.
 type ToolParameters struct {
 	Properties           []ToolParameter
+	Strict               bool
 	AdditionalProperties *bool
 }
 
@@ -42,6 +43,7 @@ type ToolParameter struct {
 	Type                 ToolParameterType
 	Description          string
 	Required             bool
+	Strict               bool
 	Enum                 []any
 	Default              any
 	Items                *ToolParameter
@@ -77,7 +79,7 @@ func (params ToolParameters) schema() (toolParameterSchema, error) {
 	result := toolParameterSchema{
 		Type:                 ToolParameterObject,
 		Properties:           map[string]toolParameterSchema{},
-		AdditionalProperties: params.AdditionalProperties,
+		AdditionalProperties: additionalPropertiesValue(params.Strict, params.AdditionalProperties),
 	}
 	required := make([]string, 0)
 	for _, property := range params.Properties {
@@ -118,7 +120,7 @@ func (param ToolParameter) schema(allowUnnamed bool) (toolParameterSchema, error
 		Description:          strings.TrimSpace(param.Description),
 		Enum:                 param.Enum,
 		Default:              param.Default,
-		AdditionalProperties: param.AdditionalProperties,
+		AdditionalProperties: additionalPropertiesValue(param.Strict, param.AdditionalProperties),
 	}
 	switch param.Type {
 	case ToolParameterObject:
@@ -158,6 +160,17 @@ func (param ToolParameter) schema(allowUnnamed bool) (toolParameterSchema, error
 		result.Items = &itemSchema
 	}
 	return result, nil
+}
+
+func additionalPropertiesValue(strict bool, configured *bool) *bool {
+	if configured != nil {
+		return configured
+	}
+	if !strict {
+		return nil
+	}
+	value := false
+	return &value
 }
 
 func isSupportedToolParameterType(typ ToolParameterType) bool {

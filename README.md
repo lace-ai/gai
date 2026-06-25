@@ -551,6 +551,7 @@ Schema for provider-native tool calling and for the prompt fallback:
 ```go
 func (t *SaveMemoryTool) Params() ai.ToolParameters {
     return ai.ToolParameters{
+        Strict: true,
         Properties: []ai.ToolParameter{
             {
                 Name:        "memory",

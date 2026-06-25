@@ -91,6 +91,7 @@ func TestSearchToolAllowsCustomPromptMetadata(t *testing.T) {
 	tool, err := exa.NewSearchTool("secret",
 		exa.WithPromptDescription("Use this only for live web lookups."),
 		exa.WithPromptParams(ai.ToolParameters{
+			Strict: true,
 			Properties: []ai.ToolParameter{
 				{Name: "query", Type: ai.ToolParameterString, Required: true},
 				{Name: "reason", Type: ai.ToolParameterString, Required: true},
@@ -107,7 +108,7 @@ func TestSearchToolAllowsCustomPromptMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Params JSONSchema: %v", err)
 	}
-	if got := string(params); got != `{"type":"object","required":["query","reason"],"properties":{"query":{"type":"string"},"reason":{"type":"string"}}}` {
+	if got := string(params); got != `{"type":"object","required":["query","reason"],"properties":{"query":{"type":"string"},"reason":{"type":"string"}},"additionalProperties":false}` {
 		t.Fatalf("Params = %q", got)
 	}
 }
