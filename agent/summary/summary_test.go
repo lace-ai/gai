@@ -7,7 +7,6 @@ import (
 
 	"github.com/lace-ai/gai/agent/summary"
 	"github.com/lace-ai/gai/ai"
-	"github.com/lace-ai/gai/loop"
 	"github.com/lace-ai/gai/testutil/mocks"
 )
 
@@ -117,24 +116,4 @@ func (m toolCallModel) Close() error {
 
 func (m toolCallModel) Tokenizer() ai.Tokenizer {
 	return &mocks.MockTokenizer{}
-}
-
-type staticTool struct {
-	name string
-}
-
-func (t staticTool) Name() string {
-	return t.name
-}
-
-func (t staticTool) Description() string {
-	return "static test tool"
-}
-
-func (t staticTool) Params() ai.ToolParameters {
-	return ai.ToolParameters{}
-}
-
-func (t staticTool) Function(context.Context, *ai.ToolCall) *loop.ToolResponse {
-	return loop.NewToolSuccess("ok")
 }
