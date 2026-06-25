@@ -127,7 +127,7 @@ func TestSourceErrorHandling(t *testing.T) {
 	}{
 		{name: "empty", wantErr: tooldefinitions.ErrToolsEmpty},
 		{name: "nil tool", tools: []loop.Tool{nil}, wantErr: tooldefinitions.ErrToolInvalid},
-		{name: "nil option", tools: []loop.Tool{staticTool{name: "search", description: "Searches"}}, options: []tooldefinitions.Option{nil}, wantErr: tooldefinitions.ErrToolInvalid},
+		{name: "nil option", tools: []loop.Tool{staticTool{name: "search", description: "Searches", params: testParams("query")}}, options: []tooldefinitions.Option{nil}, wantErr: tooldefinitions.ErrToolInvalid},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
