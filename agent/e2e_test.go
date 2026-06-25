@@ -44,7 +44,10 @@ func (m *scriptedWorkflowModel) GenerateStream(ctx context.Context, req ai.AIReq
 			select {
 			case out <- token:
 			case <-ctx.Done():
-				out <- ai.Token{Type: ai.TokenTypeErr, Err: ctx.Err()}
+				select {
+				case out <- ai.Token{Type: ai.TokenTypeErr, Err: ctx.Err()}:
+				default:
+				}
 				return
 			}
 		}
