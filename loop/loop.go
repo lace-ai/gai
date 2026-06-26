@@ -130,7 +130,6 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInfor
 		defer close(statusCh)
 
 		retryCount := 0
-		completedToolCalls := map[string]struct{}{}
 		toolDefinitions, err := ToolDefinitions(a.Tools)
 		if err != nil {
 			loopErr = err
@@ -197,11 +196,6 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInfor
 				}
 
 				if t.Type == ai.TokenTypeToolCall && t.ToolCall != nil {
-					signature := toolCallSignature(*t.ToolCall)
-					if _, ok := completedToolCalls[signature]; ok {
-						continue
-					}
-
 					iteration.AppendToken(t)
 					tokenCh <- t
 					totalTokenCount++
@@ -272,12 +266,6 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInfor
 				return
 			}
 
-			for _, tc := range toolCalls {
-				part := iteration.Parts[tc.id]
-				if part.ToolResp != nil {
-					completedToolCalls[toolCallSignature(tc.toolCall)] = struct{}{}
-				}
-			}
 			toolErrorCount := 0
 			for _, part := range iteration.Parts {
 				if part.ToolResp != nil && part.ToolResp.Err != nil {

@@ -439,60 +439,6 @@ func TestLoopHandlesManyToolCallsInOneIteration(t *testing.T) {
 	}
 }
 
-func TestLoopSuppressesRepeatedCompletedToolCall(t *testing.T) {
-	t.Parallel()
-
-	toolCall := ai.Token{
-		Type: ai.TokenTypeToolCall,
-		ToolCall: &ai.ToolCall{
-			ID:   "call-1",
-			Type: "function",
-			Name: "echo",
-			Args: json.RawMessage(`{"text":"repeat"}`),
-		},
-	}
-	formattedToolCall := ai.Token{
-		Type: ai.TokenTypeToolCall,
-		ToolCall: &ai.ToolCall{
-			ID:   "call-2",
-			Type: "function",
-			Name: "echo",
-			Args: json.RawMessage("{\n  \"text\": \"repeat\"\n}"),
-		},
-	}
-
-	model := &scriptedStreamModel{
-		sequences: [][]ai.Token{
-			{toolCall},
-			{formattedToolCall},
-		},
-	}
-
-	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
-	l.MaxLoopIterations = 3
-
-	tokenCh, _, errCh := l.Loop(context.Background())
-	var tokens []ai.Token
-	for token := range tokenCh {
-		tokens = append(tokens, token)
-	}
-	for err := range errCh {
-		if err != nil {
-			t.Fatalf("unexpected loop error: %v", err)
-		}
-	}
-
-	if len(tokens) != 1 {
-		t.Fatalf("expected duplicate tool call to be suppressed, got %d tokens", len(tokens))
-	}
-	if len(l.Iterations) != 2 {
-		t.Fatalf("expected two iterations including suppressed duplicate, got %d", len(l.Iterations))
-	}
-	if got := len(l.Iterations[1].Parts); got != 0 {
-		t.Fatalf("expected suppressed duplicate iteration to have no parts, got %d", got)
-	}
-}
-
 func TestLoopAppendsIterationMessagesToIncrementalPrompt(t *testing.T) {
 	t.Parallel()
 
