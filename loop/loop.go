@@ -47,7 +47,7 @@ type Loop struct {
 	ToolResponseProcessor ToolResponseProcessor
 }
 
-// Validate applies default limits and checks required loop dependencies.
+// Validate applies default iteration limits and checks required loop dependencies.
 func (l *Loop) Validate() error {
 	if l == nil {
 		return ErrNilLoop
