@@ -1,13 +1,56 @@
 package loop_test
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"testing"
 
 	"github.com/lace-ai/gai/ai"
 	"github.com/lace-ai/gai/loop"
 )
+
+func TestNewToolErrorHandlesNilError(t *testing.T) {
+	t.Parallel()
+
+	response := loop.NewToolError(nil)
+
+	if err := response.ErrorValue(); !errors.Is(err, loop.ErrToolErrorMissing) {
+		t.Fatalf("error = %v, want ErrToolErrorMissing", err)
+	}
+	if got := response.String(); got != loop.ErrToolErrorMissing.Error() {
+		t.Fatalf("String() = %q, want %q", got, loop.ErrToolErrorMissing.Error())
+	}
+}
+
+func TestToolResponseStringHandlesNilErrorPointer(t *testing.T) {
+	t.Parallel()
+
+	var err error
+	response := &loop.ToolResponse{Status: "error", Err: &err}
+
+	if got := response.String(); got != "" {
+		t.Fatalf("String() = %q, want empty string", got)
+	}
+}
+
+func TestCallToolRejectsNilTool(t *testing.T) {
+	t.Parallel()
+
+	req := &ai.ToolCall{
+		ID:   "call_1",
+		Type: "function",
+		Name: "test_tool",
+		Args: json.RawMessage(`{}`),
+	}
+
+	response := loop.CallTool(context.Background(), req, []loop.Tool{nil})
+
+	if err := response.ErrorValue(); !errors.Is(err, ai.ErrInvalidToolDefinition) {
+		t.Fatalf("error = %v, want ErrInvalidToolDefinition", err)
+	}
+}
 
 func TestDecodeToolArgs(t *testing.T) {
 	t.Parallel()

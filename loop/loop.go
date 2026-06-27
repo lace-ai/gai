@@ -49,7 +49,7 @@ type Loop struct {
 // Validate applies default limits and checks required loop dependencies.
 func (a *Loop) Validate() error {
 	if a == nil {
-		return ErrNilAgent
+		return ErrNilLoop
 	}
 	if a.MaxLoopIterations <= 0 {
 		a.MaxLoopIterations = defaultMaxLoopIterations
@@ -114,13 +114,7 @@ func (a *Loop) Run(ctx context.Context) <-chan Event {
 
 		for i := range a.MaxLoopIterations {
 			iteration := Iteration{Count: i + 1}
-			var userMessage *gaictx.Message
-			if i == 0 {
-				input := a.PromptBuilder.Input()
-				if input.User != nil {
-					userMessage = &gaictx.Message{Role: gaictx.RoleUser, Content: input.User}
-				}
-			}
+			userMessage := userMessageForIteration(a.PromptBuilder, i)
 			var toolCalls []iterationToolCall
 			var iterState *loopIterationState
 			var iterationErr error
@@ -222,32 +216,8 @@ func (a *Loop) Run(ctx context.Context) <-chan Event {
 				iterState.finish(nil)
 			}
 
-			wg := sync.WaitGroup{}
-			var preProcessErr error
-			var preProcessErrMu sync.Mutex
-			for _, tc := range toolCalls {
-				wg.Add(1)
-				go func(tc iterationToolCall) {
-					defer wg.Done()
-
-					toolRes := CallTool(iterCtx, &tc.toolCall, a.Tools)
-					if a.PreProcessToolRes != nil {
-						if err := a.PreProcessToolRes.Process(tc.toolCall, toolRes); err != nil {
-							preProcessErrMu.Lock()
-							if preProcessErr == nil {
-								preProcessErr = fmt.Errorf("pre-processing tool response failed: %w", err)
-							}
-							preProcessErrMu.Unlock()
-							return
-						}
-					}
-
-					iteration.Parts[tc.id].ToolResp = toolRes
-				}(tc)
-			}
-			wg.Wait()
-			if preProcessErr != nil {
-				iterationErr = preProcessErr
+			if err := a.executeToolCalls(iterCtx, &iteration, toolCalls); err != nil {
+				iterationErr = err
 				sendLoopError(ctx, events, runState, iterationErr)
 				cancel()
 				iterState.finish(iterationErr)
@@ -280,6 +250,47 @@ func (a *Loop) Run(ctx context.Context) <-chan Event {
 	}()
 
 	return events
+}
+
+func userMessageForIteration(promptBuilder gaictx.PromptBuilder, index int) *gaictx.Message {
+	if index != 0 || promptBuilder == nil {
+		return nil
+	}
+	input := promptBuilder.Input()
+	if input.User == nil {
+		return nil
+	}
+	return &gaictx.Message{Role: gaictx.RoleUser, Content: input.User}
+}
+
+func (a *Loop) executeToolCalls(ctx context.Context, iteration *Iteration, toolCalls []iterationToolCall) error {
+	var wg sync.WaitGroup
+	var toolErr error
+	var toolErrMu sync.Mutex
+
+	for _, tc := range toolCalls {
+		wg.Add(1)
+		go func(tc iterationToolCall) {
+			defer wg.Done()
+
+			toolRes := CallTool(ctx, &tc.toolCall, a.Tools)
+			if a.PreProcessToolRes != nil {
+				if err := a.PreProcessToolRes.Process(tc.toolCall, toolRes); err != nil {
+					toolErrMu.Lock()
+					if toolErr == nil {
+						toolErr = fmt.Errorf("%w: %w", ErrPreProcessToolRes, err)
+					}
+					toolErrMu.Unlock()
+					return
+				}
+			}
+
+			iteration.Parts[tc.id].ToolResp = toolRes
+		}(tc)
+	}
+	wg.Wait()
+
+	return toolErr
 }
 
 func sendLoopError(ctx context.Context, events chan<- Event, state *loopRunState, err error) {

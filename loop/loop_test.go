@@ -36,6 +36,14 @@ type countingPromptBuilder struct {
 	count atomic.Int32
 }
 
+type failingPreProcessor struct {
+	err error
+}
+
+func (p failingPreProcessor) Process(req ai.ToolCall, res *loop.ToolResponse) error {
+	return p.err
+}
+
 func (b *countingPromptBuilder) PrependContextSource(ctx context.Context, source gaictx.ContextSource) error {
 	return nil
 }
@@ -453,6 +461,42 @@ func TestLoopHandlesManyToolCallsInOneIteration(t *testing.T) {
 				t.Fatalf("expected %d tool errors, got %d", tt.wantToolErrors, toolErrs)
 			}
 		})
+	}
+}
+
+func TestLoopWrapsToolPreprocessErrors(t *testing.T) {
+	t.Parallel()
+
+	model := &scriptedStreamModel{
+		sequences: [][]ai.Token{
+			{
+				{
+					Type: ai.TokenTypeToolCall,
+					ToolCall: &ai.ToolCall{
+						ID:   "call-1",
+						Type: "function",
+						Name: "echo",
+						Args: json.RawMessage(`{"text":"payload"}`),
+					},
+				},
+			},
+		},
+	}
+
+	l := loop.New(
+		model,
+		[]loop.Tool{loop.NewEchoTool()},
+		testPromptBuilder(),
+		failingPreProcessor{err: errors.New("reject tool response")},
+	)
+
+	events := collectLoopEvents(t, l, context.Background())
+	err := loopError(events)
+	if !errors.Is(err, loop.ErrPreProcessToolRes) {
+		t.Fatalf("error = %v, want ErrPreProcessToolRes", err)
+	}
+	if len(l.Iterations) != 0 {
+		t.Fatalf("expected preprocess failure to skip persisted iteration, got %d", len(l.Iterations))
 	}
 }
 

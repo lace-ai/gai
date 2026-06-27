@@ -3,8 +3,8 @@ package loop
 import "errors"
 
 var (
-	// ErrNilAgent indicates an operation on a nil Loop.
-	ErrNilAgent = errors.New("agent is nil")
+	// ErrNilLoop indicates an operation on a nil Loop.
+	ErrNilLoop = errors.New("loop is nil")
 	// ErrModelNotConfigured indicates that a Loop has no model.
 	ErrModelNotConfigured = errors.New("model is not configured")
 	// ErrPromptNotConfigured indicates that a Loop has no prompt builder.
@@ -15,6 +15,8 @@ var (
 	ErrToolCallMalformed = errors.New("tool call payload is malformed")
 	// ErrToolNotFound indicates that no configured tool matches a call.
 	ErrToolNotFound = errors.New("tool not found")
+	// ErrToolErrorMissing indicates that a tool error response has no error.
+	ErrToolErrorMissing = errors.New("tool error missing")
 	// ErrMaxIterations indicates that the loop reached its iteration limit.
 	ErrMaxIterations = errors.New("max loop iterations exceeded")
 	// ErrPromptPathEmpty indicates that no prompt file path was provided.

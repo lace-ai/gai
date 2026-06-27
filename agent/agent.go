@@ -120,7 +120,7 @@ func (a *Agent) middleware() []Middleware {
 
 func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error) {
 	if a == nil {
-		return nil, loop.ErrNilAgent
+		return nil, loop.ErrNilLoop
 	}
 	if a.def.Model == nil {
 		return nil, loop.ErrModelNotConfigured
