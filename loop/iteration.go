@@ -27,6 +27,14 @@ type IterationInformation struct {
 	PartCount int
 	// RetryCount is the number of consecutive generation retries.
 	RetryCount int
+	// Retrying reports that this status describes a failed generation attempt
+	// that will be retried for the same iteration.
+	Retrying bool
+	// AttemptID is the one-based model generation attempt for IterationCount.
+	AttemptID int
+	// DiscardIteration reports that any streamed tokens from this attempt should
+	// be discarded by callers that maintain visible token state.
+	DiscardIteration bool
 }
 
 // Iteration records one model generation and its tool interactions.

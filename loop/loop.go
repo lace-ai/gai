@@ -119,77 +119,86 @@ func (a *Loop) Run(ctx context.Context) (<-chan ai.Token, <-chan IterationInform
 			return
 		}
 
-		var iteration Iteration
 		for i := range a.MaxLoopIterations {
-			iteration = Iteration{Count: i + 1}
+			iteration := Iteration{Count: i + 1}
 			var toolCalls []iterationToolCall
-
-			iterCtx, iterState := runState.startIteration(ctx, iteration.Count)
-			iterCtx, cancel := context.WithCancel(iterCtx)
+			var iterState *loopIterationState
 			var iterationErr error
+			var iterCtx context.Context
+			var cancel context.CancelFunc
 
-			prompt, err := a.PromptBuilder.BuildPrompt(iterCtx, a)
-			if err != nil {
-				iterationErr = fmt.Errorf("%w: %w", ErrBuildPrompt, err)
-				errCh <- runState.fail(iterationErr)
-				cancel()
-				iterState.finish(iterationErr)
-				return
-			}
+			for attempt := 1; ; attempt++ {
+				attemptIteration := Iteration{Count: iteration.Count}
+				toolCalls = nil
 
-			request := ai.AIRequest{
-				Prompt:    prompt,
-				MaxTokens: a.MaxTokens,
-				Tools:     toolDefinitions,
-			}
-			input := a.PromptBuilder.Input()
-			if input.User != nil {
-				iteration.UserMessage = &gaictx.Message{Role: gaictx.RoleUser, Content: input.User}
-			}
+				iterCtx, iterState = runState.startIteration(ctx, iteration.Count, attempt)
+				iterCtx, cancel = context.WithCancel(iterCtx)
 
-			tokens := a.Model.GenerateStream(iterCtx, request)
+				prompt, err := a.PromptBuilder.BuildPrompt(iterCtx, a)
+				if err != nil {
+					iterationErr = fmt.Errorf("%w: %w", ErrBuildPrompt, err)
+					errCh <- runState.fail(iterationErr)
+					cancel()
+					iterState.finish(iterationErr)
+					return
+				}
 
-			retrying := false
-			for t := range tokens {
-				if t.Err != nil {
-					if runState.canRetry(a.RetryCount) {
-						retrying = true
-						break
-					} else {
-						iterationErr = fmt.Errorf("%w limit:%v error: %v", ErrMaxRetries, a.RetryCount, t.Err)
-						errCh <- runState.fail(iterationErr)
-						cancel()
-						iterState.finish(iterationErr)
-						return
+				request := ai.AIRequest{
+					Prompt:    prompt,
+					MaxTokens: a.MaxTokens,
+					Tools:     toolDefinitions,
+				}
+				input := a.PromptBuilder.Input()
+				if input.User != nil {
+					attemptIteration.UserMessage = &gaictx.Message{Role: gaictx.RoleUser, Content: input.User}
+				}
+
+				tokens := a.Model.GenerateStream(iterCtx, request)
+
+				retrying := false
+				for t := range tokens {
+					if t.Err != nil {
+						if runState.canRetry(a.RetryCount) {
+							retrying = true
+							break
+						} else {
+							iterationErr = fmt.Errorf("%w limit:%v error: %v", ErrMaxRetries, a.RetryCount, t.Err)
+							errCh <- runState.fail(iterationErr)
+							cancel()
+							iterState.finish(iterationErr)
+							return
+						}
 					}
+
+					if t.Type == ai.TokenTypeToolCall && t.ToolCall != nil {
+						attemptIteration.AppendToken(t)
+						tokenCh <- t
+
+						toolReq := t.ToolCall
+						partIdx := len(attemptIteration.Parts) - 1
+
+						toolCalls = append(toolCalls, iterationToolCall{
+							id:       partIdx,
+							toolCall: *toolReq,
+						})
+					} else {
+						attemptIteration.AppendToken(t)
+						tokenCh <- t
+					}
+					runState.recordToken(t)
+					iterState.recordToken(t)
 				}
 
-				if t.Type == ai.TokenTypeToolCall && t.ToolCall != nil {
-					iteration.AppendToken(t)
-					tokenCh <- t
-
-					toolReq := t.ToolCall
-					partIdx := len(iteration.Parts) - 1
-
-					toolCalls = append(toolCalls, iterationToolCall{
-						id:       partIdx,
-						toolCall: *toolReq,
-					})
-				} else {
-					iteration.AppendToken(t)
-					tokenCh <- t
+				if !retrying {
+					iteration = attemptIteration
+					break
 				}
-				runState.recordToken(t)
-				iterState.recordToken(t)
-			}
 
-			if retrying {
 				runState.retry()
 				iterState.markRetrying(runState.retryCount)
-				statusCh <- runState.retryStatus(iteration)
+				statusCh <- runState.retryStatus(attemptIteration)
 				cancel()
 				iterState.finish(nil)
-				continue
 			}
 
 			wg := sync.WaitGroup{}
@@ -234,6 +243,7 @@ func (a *Loop) Run(ctx context.Context) (<-chan ai.Token, <-chan IterationInform
 				IterationCount: iteration.Count,
 				PartCount:      len(iteration.Parts),
 				RetryCount:     runState.retryCount,
+				AttemptID:      iterState.attemptID(),
 			}
 			if len(toolCalls) == 0 {
 				cancel()

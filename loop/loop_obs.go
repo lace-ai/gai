@@ -33,6 +33,7 @@ type loopIterationState struct {
 type loopIterationStats struct {
 	Retrying       bool
 	Final          bool
+	AttemptID      int
 	PartCount      int
 	RetryCount     int
 	ToolCallCount  int
@@ -69,7 +70,7 @@ func newLoopRunState(ctx context.Context, l *Loop) (context.Context, *loopRunSta
 	return ctx, &loopRunState{obs: &loopObserver{span: span}}
 }
 
-func (s *loopRunState) startIteration(ctx context.Context, count int) (context.Context, *loopIterationState) {
+func (s *loopRunState) startIteration(ctx context.Context, count int, attempt int) (context.Context, *loopIterationState) {
 	incrementalPrompt := false
 	if s != nil {
 		s.stats.IterationCount = count
@@ -77,9 +78,13 @@ func (s *loopRunState) startIteration(ctx context.Context, count int) (context.C
 	}
 	ctx, span := gai.StartOperationSpan(ctx, loopTracerName, "loop", "loop.operation", "iteration",
 		attribute.Int("loop.iteration", count),
+		attribute.Int("loop.attempt", attempt),
 		attribute.Bool("loop.incremental_prompt", incrementalPrompt),
 	)
-	return ctx, &loopIterationState{obs: &iterationObserver{span: span}}
+	return ctx, &loopIterationState{
+		obs:   &iterationObserver{span: span},
+		stats: loopIterationStats{AttemptID: attempt},
+	}
 }
 
 func (s *loopRunState) recordToken(token ai.Token) {
@@ -119,9 +124,12 @@ func (s *loopRunState) retryStatus(iteration Iteration) IterationInformation {
 		retryCount = s.retryCount
 	}
 	return IterationInformation{
-		IterationCount: iteration.Count,
-		PartCount:      len(iteration.Parts),
-		RetryCount:     retryCount,
+		IterationCount:   iteration.Count,
+		PartCount:        len(iteration.Parts),
+		RetryCount:       retryCount,
+		Retrying:         true,
+		AttemptID:        retryCount,
+		DiscardIteration: true,
 	}
 }
 
@@ -194,6 +202,13 @@ func (s *loopIterationState) markFinal() {
 	s.stats.Final = true
 }
 
+func (s *loopIterationState) attemptID() int {
+	if s == nil {
+		return 0
+	}
+	return s.stats.AttemptID
+}
+
 func (s *loopIterationState) finish(err error) {
 	if s == nil || s.obs == nil {
 		return
@@ -206,6 +221,7 @@ func (o *iterationObserver) finish(err error, stats loopIterationStats) {
 		return
 	}
 	attrs := []attribute.KeyValue{
+		attribute.Int("loop.attempt", stats.AttemptID),
 		attribute.Int("loop.part_count", stats.PartCount),
 		attribute.Int("loop.retry_count", stats.RetryCount),
 		attribute.Int("loop.tool_call_count", stats.ToolCallCount),
