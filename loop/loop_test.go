@@ -555,6 +555,32 @@ func TestLoopRetryStatusMarksPartialTokensDiscardable(t *testing.T) {
 	}
 }
 
+func TestLoopDoesNotRetryCanceledStream(t *testing.T) {
+	t.Parallel()
+
+	model := &scriptedStreamModel{
+		sequences: [][]ai.Token{
+			{{Err: context.Canceled}},
+			{{Type: ai.TokenTypeText, Data: []byte("should not run")}},
+		},
+	}
+	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
+	l.MaxLoopIterations = 1
+	l.RetryCount = 3
+
+	events := collectLoopEvents(t, l, context.Background())
+	err := loopError(events)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+	if got := len(model.Requests()); got != 1 {
+		t.Fatalf("expected no retry after cancellation, got %d model requests", got)
+	}
+	if retries := loopEventsOfType(events, loop.EventRetry); len(retries) != 0 {
+		t.Fatalf("expected no retry events after cancellation, got %#v", retries)
+	}
+}
+
 func TestLoopAppendsIterationMessagesToIncrementalPrompt(t *testing.T) {
 	t.Parallel()
 

@@ -2,6 +2,7 @@ package loop
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -125,7 +126,8 @@ func (a *Loop) Run(ctx context.Context) <-chan Event {
 
 				iterCtx, iterState = runState.startIteration(ctx, iteration.Count, attempt)
 				iterCtx, cancel = context.WithCancel(iterCtx)
-				if err := sendEvent(ctx, events, AttemptStartEvent(iteration.Count, attempt, runState.retryCount)); err != nil {
+				attemptID := iterState.attemptID()
+				if err := sendEvent(ctx, events, AttemptStartEvent(iteration.Count, attemptID, runState.retryCount)); err != nil {
 					sendLoopError(ctx, events, runState, err)
 					cancel()
 					iterState.finish(err)
@@ -156,16 +158,24 @@ func (a *Loop) Run(ctx context.Context) <-chan Event {
 				retrying := false
 				for t := range tokens {
 					if t.Err != nil {
-						if runState.canRetry(a.RetryCount) {
-							retrying = true
-							break
-						} else {
-							iterationErr = fmt.Errorf("%w limit:%v error: %v", ErrMaxRetries, a.RetryCount, t.Err)
+						if errors.Is(t.Err, context.Canceled) || errors.Is(t.Err, context.DeadlineExceeded) {
+							iterationErr = t.Err
 							sendLoopError(ctx, events, runState, iterationErr)
 							cancel()
 							iterState.finish(iterationErr)
 							return
 						}
+
+						if runState.canRetry(a.RetryCount) {
+							retrying = true
+							break
+						}
+
+						iterationErr = fmt.Errorf("%w: limit=%d: %w", ErrMaxRetries, a.RetryCount, t.Err)
+						sendLoopError(ctx, events, runState, iterationErr)
+						cancel()
+						iterState.finish(iterationErr)
+						return
 					}
 
 					if t.Type == ai.TokenTypeToolCall && t.ToolCall != nil {
@@ -183,7 +193,7 @@ func (a *Loop) Run(ctx context.Context) <-chan Event {
 					}
 					runState.recordToken(t)
 					iterState.recordToken(t)
-					if err := sendEvent(ctx, events, TokenEvent(iteration.Count, iterState.attemptID(), runState.retryCount, t)); err != nil {
+					if err := sendEvent(ctx, events, TokenEvent(iteration.Count, attemptID, runState.retryCount, t)); err != nil {
 						sendLoopError(ctx, events, runState, err)
 						cancel()
 						iterState.finish(err)
@@ -198,7 +208,7 @@ func (a *Loop) Run(ctx context.Context) <-chan Event {
 
 				runState.retry()
 				iterState.markRetrying(runState.retryCount)
-				if err := sendEvent(ctx, events, RetryEvent(iteration.Count, iterState.attemptID(), runState.retryCount, attemptIteration)); err != nil {
+				if err := sendEvent(ctx, events, RetryEvent(iteration.Count, attemptID, runState.retryCount, attemptIteration)); err != nil {
 					sendLoopError(ctx, events, runState, err)
 					cancel()
 					iterState.finish(err)
