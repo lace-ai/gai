@@ -36,11 +36,11 @@ type countingPromptBuilder struct {
 	count atomic.Int32
 }
 
-type failingPreProcessor struct {
+type failingToolResponseProcessor struct {
 	err error
 }
 
-func (p failingPreProcessor) Process(req ai.ToolCall, res *loop.ToolResponse) error {
+func (p failingToolResponseProcessor) Process(req ai.ToolCall, res *loop.ToolResponse) error {
 	return p.err
 }
 
@@ -487,13 +487,20 @@ func TestLoopWrapsToolPreprocessErrors(t *testing.T) {
 		model,
 		[]loop.Tool{loop.NewEchoTool()},
 		testPromptBuilder(),
-		failingPreProcessor{err: errors.New("reject tool response")},
+		failingToolResponseProcessor{err: errors.New("reject tool response")},
 	)
 
 	events := collectLoopEvents(t, l, context.Background())
 	err := loopError(events)
-	if !errors.Is(err, loop.ErrPreProcessToolRes) {
-		t.Fatalf("error = %v, want ErrPreProcessToolRes", err)
+	if !errors.Is(err, loop.ErrToolResponseProcess) {
+		t.Fatalf("error = %v, want ErrToolResponseProcess", err)
+	}
+	errorEvents := loopEventsOfType(events, loop.EventError)
+	if len(errorEvents) != 1 {
+		t.Fatalf("expected 1 error event, got %d", len(errorEvents))
+	}
+	if errorEvents[0].IterationCount != 1 || errorEvents[0].AttemptID != 1 {
+		t.Fatalf("expected attempt metadata on error event, got %#v", errorEvents[0])
 	}
 	if len(l.Iterations) != 0 {
 		t.Fatalf("expected preprocess failure to skip persisted iteration, got %d", len(l.Iterations))
@@ -550,8 +557,37 @@ func TestLoopRetriesDoNotConsumeIterations(t *testing.T) {
 	if finalEvent.AttemptID != 4 {
 		t.Fatalf("expected final attempt 4, got %d", finalEvent.AttemptID)
 	}
+	if finalEvent.RetryCount != 3 {
+		t.Fatalf("expected final retry count 3, got %d", finalEvent.RetryCount)
+	}
 	if l.Iterations[0].UserMessage == nil {
 		t.Fatal("expected completed first iteration to retain user message")
+	}
+}
+
+func TestLoopStreamErrorsIncludeAttemptMetadata(t *testing.T) {
+	t.Parallel()
+
+	model := &scriptedStreamModel{
+		sequences: [][]ai.Token{
+			{{Err: errors.New("fatal stream error")}},
+		},
+	}
+	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
+	l.MaxLoopIterations = 1
+	l.RetryCount = 0
+
+	events := collectLoopEvents(t, l, context.Background())
+	err := loopError(events)
+	if !errors.Is(err, loop.ErrMaxRetries) {
+		t.Fatalf("error = %v, want ErrMaxRetries", err)
+	}
+	errorEvents := loopEventsOfType(events, loop.EventError)
+	if len(errorEvents) != 1 {
+		t.Fatalf("expected 1 error event, got %d", len(errorEvents))
+	}
+	if errorEvents[0].IterationCount != 1 || errorEvents[0].AttemptID != 1 || errorEvents[0].RetryCount != 0 {
+		t.Fatalf("expected attempt metadata on error event, got %#v", errorEvents[0])
 	}
 }
 

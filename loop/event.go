@@ -87,6 +87,18 @@ func ErrorEvent(err error) Event {
 	return Event{Type: EventError, Err: err}
 }
 
+// AttemptErrorEvent reports a terminal error that occurred inside a specific
+// model generation attempt.
+func AttemptErrorEvent(iterationCount, attemptID, retryCount int, err error) Event {
+	return Event{
+		Type:           EventError,
+		IterationCount: iterationCount,
+		AttemptID:      attemptID,
+		RetryCount:     retryCount,
+		Err:            err,
+	}
+}
+
 func sendEvent(ctx context.Context, ch chan<- Event, event Event) error {
 	select {
 	case ch <- event:

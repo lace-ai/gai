@@ -52,6 +52,7 @@ func (r *ToolResponse) ErrorValue() error {
 }
 
 // Tool defines a function that a model may request during a loop run.
+// Implementations must be safe for concurrent use.
 type Tool interface {
 	// Name returns the function name exposed to the model.
 	Name() string

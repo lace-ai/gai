@@ -15,9 +15,10 @@ const (
 	defaultRetryCount        = 3
 )
 
-// ToolResPreProcessor can inspect or modify a tool response before the loop
-// records it and builds the next prompt.
-type ToolResPreProcessor interface {
+// ToolResponseProcessor can inspect or modify a tool response before the loop
+// records it and builds the next prompt. Implementations must be safe for
+// concurrent use.
+type ToolResponseProcessor interface {
 	// Process handles the response produced for req.
 	Process(req ai.ToolCall, res *ToolResponse) error
 }
@@ -42,43 +43,43 @@ type Loop struct {
 	RetryCount int
 	// PromptBuilder constructs the prompt for each iteration.
 	PromptBuilder gaictx.PromptBuilder
-	// PreProcessToolRes optionally processes tool responses before they are recorded.
-	PreProcessToolRes ToolResPreProcessor
+	// ToolResponseProcessor optionally processes tool responses before they are recorded.
+	ToolResponseProcessor ToolResponseProcessor
 }
 
 // Validate applies default limits and checks required loop dependencies.
-func (a *Loop) Validate() error {
-	if a == nil {
+func (l *Loop) Validate() error {
+	if l == nil {
 		return ErrNilLoop
 	}
-	if a.MaxLoopIterations <= 0 {
-		a.MaxLoopIterations = defaultMaxLoopIterations
+	if l.MaxLoopIterations <= 0 {
+		l.MaxLoopIterations = defaultMaxLoopIterations
 	}
-	if a.Model == nil {
+	if l.Model == nil {
 		return ErrModelNotConfigured
 	}
-	if a.PromptBuilder == nil {
+	if l.PromptBuilder == nil {
 		return ErrPromptNotConfigured
 	}
 	return nil
 }
 
 // New constructs a Loop with default iteration and retry limits.
-func New(model ai.Model, tools []Tool, promptBuilder gaictx.PromptBuilder, toolResPreProcessor ToolResPreProcessor) *Loop {
-	agent := &Loop{
-		Model:             model,
-		Tools:             tools,
-		MaxLoopIterations: defaultMaxLoopIterations,
-		RetryCount:        defaultRetryCount,
-		PromptBuilder:     promptBuilder,
-		PreProcessToolRes: toolResPreProcessor,
+func New(model ai.Model, tools []Tool, promptBuilder gaictx.PromptBuilder, toolResponseProcessor ToolResponseProcessor) *Loop {
+	l := &Loop{
+		Model:                 model,
+		Tools:                 tools,
+		MaxLoopIterations:     defaultMaxLoopIterations,
+		RetryCount:            defaultRetryCount,
+		PromptBuilder:         promptBuilder,
+		ToolResponseProcessor: toolResponseProcessor,
 	}
-	return agent
+	return l
 }
 
-type iterationToolCall struct {
-	id       int
-	toolCall ai.ToolCall
+type pendingToolCall struct {
+	partIndex int
+	call      ai.ToolCall
 }
 
 // Run starts asynchronous model and tool execution.
@@ -86,36 +87,36 @@ type iterationToolCall struct {
 // The returned channel carries every token, retry, iteration, and terminal
 // event in the exact order it occurred. Callers must consume the channel until
 // it closes or cancel ctx.
-func (a *Loop) Run(ctx context.Context) <-chan Event {
+func (l *Loop) Run(ctx context.Context) <-chan Event {
 	events := make(chan Event, 32)
 
-	if err := a.Validate(); err != nil {
+	if err := l.Validate(); err != nil {
 		events <- ErrorEvent(err)
 		close(events)
 		return events
 	}
 
 	go func() {
-		ctx, runState := newLoopRunState(ctx, a)
+		ctx, runState := newLoopRunState(ctx, l)
 		defer runState.finish()
 		defer close(events)
 
-		toolDefinitions, err := ToolDefinitions(a.Tools)
+		toolDefinitions, err := ToolDefinitions(l.Tools)
 		if err != nil {
 			sendLoopError(ctx, events, runState, err)
 			return
 		}
 
-		_, err = a.PromptBuilder.BuildContext(ctx)
+		_, err = l.PromptBuilder.BuildContext(ctx)
 		if err != nil {
 			sendLoopError(ctx, events, runState, fmt.Errorf("%w: %w", ErrBuildPrompt, err))
 			return
 		}
 
-		for i := range a.MaxLoopIterations {
+		for i := range l.MaxLoopIterations {
 			iteration := Iteration{Count: i + 1}
-			userMessage := userMessageForIteration(a.PromptBuilder, i)
-			var toolCalls []iterationToolCall
+			userMessage := userMessageForIteration(l.PromptBuilder, i)
+			var toolCalls []pendingToolCall
 			var iterState *loopIterationState
 			var iterationErr error
 			var iterCtx context.Context
@@ -129,16 +130,16 @@ func (a *Loop) Run(ctx context.Context) <-chan Event {
 				iterCtx, cancel = context.WithCancel(iterCtx)
 				attemptID := iterState.attemptID()
 				if err := sendEvent(ctx, events, AttemptStartEvent(iteration.Count, attemptID, runState.retryCount)); err != nil {
-					sendLoopError(ctx, events, runState, err)
+					sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, err)
 					cancel()
 					iterState.finish(err)
 					return
 				}
 
-				prompt, err := a.PromptBuilder.BuildPrompt(iterCtx, a)
+				prompt, err := l.PromptBuilder.BuildPrompt(iterCtx, l)
 				if err != nil {
 					iterationErr = fmt.Errorf("%w: %w", ErrBuildPrompt, err)
-					sendLoopError(ctx, events, runState, iterationErr)
+					sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, iterationErr)
 					cancel()
 					iterState.finish(iterationErr)
 					return
@@ -146,30 +147,30 @@ func (a *Loop) Run(ctx context.Context) <-chan Event {
 
 				request := ai.AIRequest{
 					Prompt:    prompt,
-					MaxTokens: a.MaxTokens,
+					MaxTokens: l.MaxTokens,
 					Tools:     toolDefinitions,
 				}
 
-				tokens := a.Model.GenerateStream(iterCtx, request)
+				tokens := l.Model.GenerateStream(iterCtx, request)
 
 				retrying := false
 				for t := range tokens {
 					if t.Err != nil {
 						if errors.Is(t.Err, context.Canceled) || errors.Is(t.Err, context.DeadlineExceeded) {
 							iterationErr = t.Err
-							sendLoopError(ctx, events, runState, iterationErr)
+							sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, iterationErr)
 							cancel()
 							iterState.finish(iterationErr)
 							return
 						}
 
-						if runState.canRetry(a.RetryCount) {
+						if runState.canRetry(l.RetryCount) {
 							retrying = true
 							break
 						}
 
-						iterationErr = fmt.Errorf("%w: limit=%d: %w", ErrMaxRetries, a.RetryCount, t.Err)
-						sendLoopError(ctx, events, runState, iterationErr)
+						iterationErr = fmt.Errorf("%w: limit=%d: %w", ErrMaxRetries, l.RetryCount, t.Err)
+						sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, iterationErr)
 						cancel()
 						iterState.finish(iterationErr)
 						return
@@ -181,9 +182,9 @@ func (a *Loop) Run(ctx context.Context) <-chan Event {
 						toolReq := t.ToolCall
 						partIdx := len(attemptIteration.Parts) - 1
 
-						toolCalls = append(toolCalls, iterationToolCall{
-							id:       partIdx,
-							toolCall: *toolReq,
+						toolCalls = append(toolCalls, pendingToolCall{
+							partIndex: partIdx,
+							call:      *toolReq,
 						})
 					} else {
 						attemptIteration.AppendToken(t)
@@ -191,7 +192,7 @@ func (a *Loop) Run(ctx context.Context) <-chan Event {
 					runState.recordToken(t)
 					iterState.recordToken(t)
 					if err := sendEvent(ctx, events, TokenEvent(iteration.Count, attemptID, runState.retryCount, t)); err != nil {
-						sendLoopError(ctx, events, runState, err)
+						sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, err)
 						cancel()
 						iterState.finish(err)
 						return
@@ -207,7 +208,7 @@ func (a *Loop) Run(ctx context.Context) <-chan Event {
 				runState.retry()
 				iterState.markRetrying(runState.retryCount)
 				if err := sendEvent(ctx, events, RetryEvent(iteration.Count, attemptID, runState.retryCount, attemptIteration)); err != nil {
-					sendLoopError(ctx, events, runState, err)
+					sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, err)
 					cancel()
 					iterState.finish(err)
 					return
@@ -216,9 +217,9 @@ func (a *Loop) Run(ctx context.Context) <-chan Event {
 				iterState.finish(nil)
 			}
 
-			if err := a.executeToolCalls(iterCtx, &iteration, toolCalls); err != nil {
+			if err := l.executeToolCalls(iterCtx, &iteration, toolCalls); err != nil {
 				iterationErr = err
-				sendLoopError(ctx, events, runState, iterationErr)
+				sendAttemptError(ctx, events, runState, iteration.Count, iterState.attemptID(), runState.retryCount, iterationErr)
 				cancel()
 				iterState.finish(iterationErr)
 				return
@@ -226,15 +227,17 @@ func (a *Loop) Run(ctx context.Context) <-chan Event {
 
 			iterState.recordToolResponses(iteration)
 
-			a.Iterations = append(a.Iterations, iteration)
-			runState.resetRetries()
+			l.Iterations = append(l.Iterations, iteration)
+			attemptID := iterState.attemptID()
+			retryCount := runState.retryCount
 
-			if err := sendEvent(ctx, events, IterationDoneEvent(iteration, iterState.attemptID(), runState.retryCount)); err != nil {
-				sendLoopError(ctx, events, runState, err)
+			if err := sendEvent(ctx, events, IterationDoneEvent(iteration, attemptID, retryCount)); err != nil {
+				sendAttemptError(ctx, events, runState, iteration.Count, attemptID, retryCount, err)
 				cancel()
 				iterState.finish(err)
 				return
 			}
+			runState.resetRetries()
 			if len(toolCalls) == 0 {
 				cancel()
 				iterState.markFinal()
@@ -246,7 +249,7 @@ func (a *Loop) Run(ctx context.Context) <-chan Event {
 			iterState.finish(iterationErr)
 		}
 
-		sendLoopError(ctx, events, runState, fmt.Errorf("%w: limit=%d", ErrMaxIterations, a.MaxLoopIterations))
+		sendLoopError(ctx, events, runState, fmt.Errorf("%w: limit=%d", ErrMaxIterations, l.MaxLoopIterations))
 	}()
 
 	return events
@@ -263,29 +266,32 @@ func userMessageForIteration(promptBuilder gaictx.PromptBuilder, index int) *gai
 	return &gaictx.Message{Role: gaictx.RoleUser, Content: input.User}
 }
 
-func (a *Loop) executeToolCalls(ctx context.Context, iteration *Iteration, toolCalls []iterationToolCall) error {
+// executeToolCalls records tool responses on iteration. Tool execution
+// failures are stored in ToolResponse.Err and are not returned. Only framework
+// or tool-response processing failures are returned.
+func (l *Loop) executeToolCalls(ctx context.Context, iteration *Iteration, toolCalls []pendingToolCall) error {
 	var wg sync.WaitGroup
 	var toolErr error
 	var toolErrMu sync.Mutex
 
 	for _, tc := range toolCalls {
 		wg.Add(1)
-		go func(tc iterationToolCall) {
+		go func(tc pendingToolCall) {
 			defer wg.Done()
 
-			toolRes := CallTool(ctx, &tc.toolCall, a.Tools)
-			if a.PreProcessToolRes != nil {
-				if err := a.PreProcessToolRes.Process(tc.toolCall, toolRes); err != nil {
+			toolRes := CallTool(ctx, &tc.call, l.Tools)
+			if l.ToolResponseProcessor != nil {
+				if err := l.ToolResponseProcessor.Process(tc.call, toolRes); err != nil {
 					toolErrMu.Lock()
 					if toolErr == nil {
-						toolErr = fmt.Errorf("%w: %w", ErrPreProcessToolRes, err)
+						toolErr = fmt.Errorf("%w: %w", ErrToolResponseProcess, err)
 					}
 					toolErrMu.Unlock()
 					return
 				}
 			}
 
-			iteration.Parts[tc.id].ToolResp = toolRes
+			iteration.Parts[tc.partIndex].ToolResp = toolRes
 		}(tc)
 	}
 	wg.Wait()
@@ -300,11 +306,18 @@ func sendLoopError(ctx context.Context, events chan<- Event, state *loopRunState
 	_ = sendEvent(ctx, events, ErrorEvent(err))
 }
 
+func sendAttemptError(ctx context.Context, events chan<- Event, state *loopRunState, iterationCount, attemptID, retryCount int, err error) {
+	if state != nil {
+		state.fail(err)
+	}
+	_ = sendEvent(ctx, events, AttemptErrorEvent(iterationCount, attemptID, retryCount, err))
+}
+
 // Messages returns the completed iterations as ordered conversation messages.
-func (a *Loop) Messages() []gaictx.Message {
+func (l *Loop) Messages() []gaictx.Message {
 	var msgs []gaictx.Message
 
-	for _, i := range a.Iterations {
+	for _, i := range l.Iterations {
 		msgs = append(msgs, i.Messages()...)
 	}
 

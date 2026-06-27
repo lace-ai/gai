@@ -27,8 +27,8 @@ var (
 	ErrPromptMissing = errors.New("prompt file is missing")
 	// ErrArgsDecodeTarget indicates a nil target passed to DecodeToolArgs.
 	ErrArgsDecodeTarget = errors.New("tool args decode target is nil")
-	// ErrPreProcessToolRes indicates that tool-response preprocessing failed.
-	ErrPreProcessToolRes = errors.New("pre-process tool response error")
+	// ErrToolResponseProcess indicates that tool-response processing failed.
+	ErrToolResponseProcess = errors.New("tool response process error")
 	// ErrBuildPrompt indicates that prompt construction failed.
 	ErrBuildPrompt = errors.New("build prompt error")
 	// ErrMaxRetries indicates that model generation exhausted its retry limit.

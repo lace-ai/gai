@@ -54,8 +54,8 @@ type Definition struct {
 	Limits Limits
 	// Tokenizer overrides Model.Tokenizer when it is non-nil.
 	Tokenizer ai.Tokenizer
-	// Preprocessor can transform tool responses before they enter the transcript.
-	Preprocessor loop.ToolResPreProcessor
+	// ToolResponseProcessor can transform tool responses before they enter the transcript.
+	ToolResponseProcessor loop.ToolResponseProcessor
 	// DebugSink receives agent and workflow lifecycle events.
 	DebugSink gai.DebugSink
 	// Middleware transforms the run stream in declaration order.
@@ -156,7 +156,7 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 		}
 	}
 
-	l := loop.New(a.def.Model, a.def.Tools, promptBuilder, a.def.Preprocessor)
+	l := loop.New(a.def.Model, a.def.Tools, promptBuilder, a.def.ToolResponseProcessor)
 	if a.def.Limits.MaxLoopIterations > 0 {
 		l.MaxLoopIterations = a.def.Limits.MaxLoopIterations
 	}
