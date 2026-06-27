@@ -53,9 +53,6 @@ func (a *Loop) Validate() error {
 	if a.MaxLoopIterations <= 0 {
 		a.MaxLoopIterations = defaultMaxLoopIterations
 	}
-	if a.RetryCount < 0 {
-		a.RetryCount = defaultRetryCount
-	}
 	if a.Model == nil {
 		return ErrModelNotConfigured
 	}
