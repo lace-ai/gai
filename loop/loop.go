@@ -114,6 +114,13 @@ func (a *Loop) Run(ctx context.Context) <-chan Event {
 
 		for i := range a.MaxLoopIterations {
 			iteration := Iteration{Count: i + 1}
+			var userMessage *gaictx.Message
+			if i == 0 {
+				input := a.PromptBuilder.Input()
+				if input.User != nil {
+					userMessage = &gaictx.Message{Role: gaictx.RoleUser, Content: input.User}
+				}
+			}
 			var toolCalls []iterationToolCall
 			var iterState *loopIterationState
 			var iterationErr error
@@ -147,10 +154,6 @@ func (a *Loop) Run(ctx context.Context) <-chan Event {
 					Prompt:    prompt,
 					MaxTokens: a.MaxTokens,
 					Tools:     toolDefinitions,
-				}
-				input := a.PromptBuilder.Input()
-				if input.User != nil {
-					attemptIteration.UserMessage = &gaictx.Message{Role: gaictx.RoleUser, Content: input.User}
 				}
 
 				tokens := a.Model.GenerateStream(iterCtx, request)
@@ -202,6 +205,7 @@ func (a *Loop) Run(ctx context.Context) <-chan Event {
 				}
 
 				if !retrying {
+					attemptIteration.UserMessage = userMessage
 					iteration = attemptIteration
 					break
 				}

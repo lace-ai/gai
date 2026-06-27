@@ -495,6 +495,9 @@ func TestLoopRetriesDoNotConsumeIterations(t *testing.T) {
 		if event.AttemptID != i+1 {
 			t.Fatalf("retry event %d expected attempt %d, got %d", i, i+1, event.AttemptID)
 		}
+		if event.Iteration != nil && event.Iteration.UserMessage != nil {
+			t.Fatalf("retry event %d should not retain user message: %#v", i, event.Iteration.UserMessage)
+		}
 	}
 	finalEvent := iterations[0]
 	if finalEvent.IterationCount != 1 {
@@ -502,6 +505,9 @@ func TestLoopRetriesDoNotConsumeIterations(t *testing.T) {
 	}
 	if finalEvent.AttemptID != 4 {
 		t.Fatalf("expected final attempt 4, got %d", finalEvent.AttemptID)
+	}
+	if l.Iterations[0].UserMessage == nil {
+		t.Fatal("expected completed first iteration to retain user message")
 	}
 }
 
@@ -641,6 +647,15 @@ func TestLoopAppendsIterationMessagesToIncrementalPrompt(t *testing.T) {
 	}
 	if !strings.Contains(requests[1].Prompt, "payload") {
 		t.Fatalf("second request should include appended tool delta: %q", requests[1].Prompt)
+	}
+	if len(l.Iterations) != 2 {
+		t.Fatalf("expected 2 stored iterations, got %d", len(l.Iterations))
+	}
+	if l.Iterations[0].UserMessage == nil {
+		t.Fatal("expected first stored iteration to retain user message")
+	}
+	if l.Iterations[1].UserMessage != nil {
+		t.Fatalf("expected later stored iterations to omit user message, got %#v", l.Iterations[1].UserMessage)
 	}
 }
 
