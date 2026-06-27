@@ -164,14 +164,64 @@ func (w *Workflow) Run(ctx context.Context) (<-chan ai.Token, <-chan loop.Iterat
 
 	ctx, obs := newWorkflowObserver(ctx, w)
 	obs.Started(ctx)
-	tokens, statuses, errs := w.Loop.Run(ctx)
-	stream := w.capturePrimary(ctx, Stream{Tokens: tokens, Statuses: statuses, Errors: errs}, obs)
+	stream := w.capturePrimary(ctx, loopEventsToStream(ctx, w.Loop.Run(ctx)), obs)
 	run := &MiddlewareContext{workflow: w}
 	for _, middleware := range w.middleware {
 		stream = middleware.Process(ctx, run, stream)
 	}
 	stream = w.captureFinal(ctx, stream, obs)
 	return stream.Tokens, stream.Statuses, stream.Errors
+}
+
+func loopEventsToStream(ctx context.Context, events <-chan loop.Event) Stream {
+	tokens := make(chan ai.Token, 16)
+	statuses := make(chan loop.IterationInformation, 16)
+	errs := make(chan error, 1)
+
+	go func() {
+		defer close(tokens)
+		defer close(statuses)
+		defer close(errs)
+
+		for event := range events {
+			switch event.Type {
+			case loop.EventToken:
+				if event.Token != nil {
+					send(ctx, tokens, *event.Token)
+				}
+			case loop.EventRetry:
+				status := loop.IterationInformation{
+					IterationCount:   event.IterationCount,
+					AttemptID:        event.AttemptID,
+					RetryCount:       event.RetryCount,
+					PartCount:        event.PartCount,
+					Retrying:         true,
+					DiscardIteration: true,
+				}
+				if event.Iteration != nil {
+					status.Iteration = *event.Iteration
+				}
+				send(ctx, statuses, status)
+			case loop.EventIterationDone:
+				status := loop.IterationInformation{
+					IterationCount: event.IterationCount,
+					AttemptID:      event.AttemptID,
+					RetryCount:     event.RetryCount,
+					PartCount:      event.PartCount,
+				}
+				if event.Iteration != nil {
+					status.Iteration = *event.Iteration
+				}
+				send(ctx, statuses, status)
+			case loop.EventError:
+				if event.Err != nil {
+					send(ctx, errs, event.Err)
+				}
+			}
+		}
+	}()
+
+	return Stream{Tokens: tokens, Statuses: statuses, Errors: errs}
 }
 
 // Result returns a concurrency-safe snapshot. Complete is true after all three

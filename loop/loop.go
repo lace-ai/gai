@@ -82,40 +82,32 @@ type iterationToolCall struct {
 
 // Run starts asynchronous model and tool execution.
 //
-// The returned channels carry generated tokens, iteration snapshots, and
-// terminal errors respectively. All three channels are closed when execution
-// ends. Callers should consume every channel concurrently so execution cannot
-// block when one stream's buffer fills.
-func (a *Loop) Run(ctx context.Context) (<-chan ai.Token, <-chan IterationInformation, <-chan error) {
-	errCh := make(chan error, 1)
-	tokenCh := make(chan ai.Token, 16)
-	statusCh := make(chan IterationInformation, 16)
+// The returned channel carries every token, retry, iteration, and terminal
+// event in the exact order it occurred. Callers must consume the channel until
+// it closes or cancel ctx.
+func (a *Loop) Run(ctx context.Context) <-chan Event {
+	events := make(chan Event, 32)
 
 	if err := a.Validate(); err != nil {
-		errCh <- err
-		close(errCh)
-		close(tokenCh)
-		close(statusCh)
-		return tokenCh, statusCh, errCh
+		events <- ErrorEvent(err)
+		close(events)
+		return events
 	}
 
 	go func() {
 		ctx, runState := newLoopRunState(ctx, a)
 		defer runState.finish()
-		defer close(errCh)
-		defer close(tokenCh)
-		defer close(statusCh)
+		defer close(events)
 
 		toolDefinitions, err := ToolDefinitions(a.Tools)
 		if err != nil {
-			runState.fail(err)
-			errCh <- err
+			sendLoopError(ctx, events, runState, err)
 			return
 		}
 
 		_, err = a.PromptBuilder.BuildContext(ctx)
 		if err != nil {
-			errCh <- runState.fail(fmt.Errorf("%w: %w", ErrBuildPrompt, err))
+			sendLoopError(ctx, events, runState, fmt.Errorf("%w: %w", ErrBuildPrompt, err))
 			return
 		}
 
@@ -133,11 +125,17 @@ func (a *Loop) Run(ctx context.Context) (<-chan ai.Token, <-chan IterationInform
 
 				iterCtx, iterState = runState.startIteration(ctx, iteration.Count, attempt)
 				iterCtx, cancel = context.WithCancel(iterCtx)
+				if err := sendEvent(ctx, events, AttemptStartEvent(iteration.Count, attempt, runState.retryCount)); err != nil {
+					sendLoopError(ctx, events, runState, err)
+					cancel()
+					iterState.finish(err)
+					return
+				}
 
 				prompt, err := a.PromptBuilder.BuildPrompt(iterCtx, a)
 				if err != nil {
 					iterationErr = fmt.Errorf("%w: %w", ErrBuildPrompt, err)
-					errCh <- runState.fail(iterationErr)
+					sendLoopError(ctx, events, runState, iterationErr)
 					cancel()
 					iterState.finish(iterationErr)
 					return
@@ -163,7 +161,7 @@ func (a *Loop) Run(ctx context.Context) (<-chan ai.Token, <-chan IterationInform
 							break
 						} else {
 							iterationErr = fmt.Errorf("%w limit:%v error: %v", ErrMaxRetries, a.RetryCount, t.Err)
-							errCh <- runState.fail(iterationErr)
+							sendLoopError(ctx, events, runState, iterationErr)
 							cancel()
 							iterState.finish(iterationErr)
 							return
@@ -172,7 +170,6 @@ func (a *Loop) Run(ctx context.Context) (<-chan ai.Token, <-chan IterationInform
 
 					if t.Type == ai.TokenTypeToolCall && t.ToolCall != nil {
 						attemptIteration.AppendToken(t)
-						tokenCh <- t
 
 						toolReq := t.ToolCall
 						partIdx := len(attemptIteration.Parts) - 1
@@ -183,10 +180,15 @@ func (a *Loop) Run(ctx context.Context) (<-chan ai.Token, <-chan IterationInform
 						})
 					} else {
 						attemptIteration.AppendToken(t)
-						tokenCh <- t
 					}
 					runState.recordToken(t)
 					iterState.recordToken(t)
+					if err := sendEvent(ctx, events, TokenEvent(iteration.Count, iterState.attemptID(), runState.retryCount, t)); err != nil {
+						sendLoopError(ctx, events, runState, err)
+						cancel()
+						iterState.finish(err)
+						return
+					}
 				}
 
 				if !retrying {
@@ -196,7 +198,12 @@ func (a *Loop) Run(ctx context.Context) (<-chan ai.Token, <-chan IterationInform
 
 				runState.retry()
 				iterState.markRetrying(runState.retryCount)
-				statusCh <- runState.retryStatus(attemptIteration)
+				if err := sendEvent(ctx, events, RetryEvent(iteration.Count, iterState.attemptID(), runState.retryCount, attemptIteration)); err != nil {
+					sendLoopError(ctx, events, runState, err)
+					cancel()
+					iterState.finish(err)
+					return
+				}
 				cancel()
 				iterState.finish(nil)
 			}
@@ -227,7 +234,7 @@ func (a *Loop) Run(ctx context.Context) (<-chan ai.Token, <-chan IterationInform
 			wg.Wait()
 			if preProcessErr != nil {
 				iterationErr = preProcessErr
-				errCh <- runState.fail(iterationErr)
+				sendLoopError(ctx, events, runState, iterationErr)
 				cancel()
 				iterState.finish(iterationErr)
 				return
@@ -238,27 +245,34 @@ func (a *Loop) Run(ctx context.Context) (<-chan ai.Token, <-chan IterationInform
 			a.Iterations = append(a.Iterations, iteration)
 			runState.resetRetries()
 
-			statusCh <- IterationInformation{
-				Iteration:      iteration,
-				IterationCount: iteration.Count,
-				PartCount:      len(iteration.Parts),
-				RetryCount:     runState.retryCount,
-				AttemptID:      iterState.attemptID(),
+			if err := sendEvent(ctx, events, IterationDoneEvent(iteration, iterState.attemptID(), runState.retryCount)); err != nil {
+				sendLoopError(ctx, events, runState, err)
+				cancel()
+				iterState.finish(err)
+				return
 			}
 			if len(toolCalls) == 0 {
 				cancel()
 				iterState.markFinal()
 				iterState.finish(nil)
+				_ = sendEvent(ctx, events, DoneEvent())
 				return
 			}
 			cancel()
 			iterState.finish(iterationErr)
 		}
 
-		errCh <- runState.fail(fmt.Errorf("%w: limit=%d", ErrMaxIterations, a.MaxLoopIterations))
+		sendLoopError(ctx, events, runState, fmt.Errorf("%w: limit=%d", ErrMaxIterations, a.MaxLoopIterations))
 	}()
 
-	return tokenCh, statusCh, errCh
+	return events
+}
+
+func sendLoopError(ctx context.Context, events chan<- Event, state *loopRunState, err error) {
+	if state != nil {
+		state.fail(err)
+	}
+	_ = sendEvent(ctx, events, ErrorEvent(err))
 }
 
 // Messages returns the completed iterations as ordered conversation messages.

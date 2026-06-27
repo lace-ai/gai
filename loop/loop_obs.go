@@ -118,21 +118,6 @@ func (s *loopRunState) resetRetries() {
 	s.retryCount = 0
 }
 
-func (s *loopRunState) retryStatus(iteration Iteration) IterationInformation {
-	retryCount := 0
-	if s != nil {
-		retryCount = s.retryCount
-	}
-	return IterationInformation{
-		IterationCount:   iteration.Count,
-		PartCount:        len(iteration.Parts),
-		RetryCount:       retryCount,
-		Retrying:         true,
-		AttemptID:        retryCount,
-		DiscardIteration: true,
-	}
-}
-
 func (s *loopRunState) fail(err error) error {
 	if s == nil {
 		return err

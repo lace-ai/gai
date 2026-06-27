@@ -182,6 +182,36 @@ func (m *scriptedStreamModel) Requests() []ai.AIRequest {
 	return requests
 }
 
+func collectLoopEvents(t *testing.T, l *loop.Loop, ctx context.Context) []loop.Event {
+	t.Helper()
+
+	var events []loop.Event
+	for event := range l.Run(ctx) {
+		events = append(events, event)
+	}
+	return events
+}
+
+func loopError(events []loop.Event) error {
+	var err error
+	for _, event := range events {
+		if event.Type == loop.EventError {
+			err = event.Err
+		}
+	}
+	return err
+}
+
+func loopEventsOfType(events []loop.Event, eventType loop.EventType) []loop.Event {
+	var filtered []loop.Event
+	for _, event := range events {
+		if event.Type == eventType {
+			filtered = append(filtered, event)
+		}
+	}
+	return filtered
+}
+
 func renderTestMessages(messages []gaictx.Message) string {
 	var builder strings.Builder
 	for i, message := range messages {
@@ -297,14 +327,7 @@ func TestLoop(t *testing.T) {
 			l := loop.New(wrapStreamModel{Model: model}, tools, testPromptBuilder(), nil)
 			l.MaxLoopIterations = tt.maxIterations
 
-			tokenCh, _, errCh := l.Run(context.Background())
-			for range tokenCh {
-			}
-
-			var err error
-			for e := range errCh {
-				err = e
-			}
+			err := loopError(collectLoopEvents(t, l, context.Background()))
 
 			if (err != nil) != tt.wantError {
 				t.Fatalf("Loop failed: %v", err)
@@ -402,14 +425,8 @@ func TestLoopHandlesManyToolCallsInOneIteration(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 
-			tokenCh, _, errCh := l.Run(ctx)
-			for range tokenCh {
-			}
-
-			for err := range errCh {
-				if err != nil {
-					t.Fatalf("unexpected loop error: %v", err)
-				}
+			if err := loopError(collectLoopEvents(t, l, ctx)); err != nil {
+				t.Fatalf("unexpected loop error: %v", err)
 			}
 
 			if len(l.Iterations) != tt.wantTotalIteration {
@@ -454,18 +471,9 @@ func TestLoopRetriesDoNotConsumeIterations(t *testing.T) {
 	l.MaxLoopIterations = 1
 	l.RetryCount = 3
 
-	tokenCh, statusCh, errCh := l.Run(context.Background())
-	for range tokenCh {
-	}
-
-	var statuses []loop.IterationInformation
-	for status := range statusCh {
-		statuses = append(statuses, status)
-	}
-	for err := range errCh {
-		if err != nil {
-			t.Fatalf("unexpected loop error: %v", err)
-		}
+	events := collectLoopEvents(t, l, context.Background())
+	if err := loopError(events); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
 	}
 
 	if len(l.Iterations) != 1 {
@@ -474,27 +482,26 @@ func TestLoopRetriesDoNotConsumeIterations(t *testing.T) {
 	if got := len(model.Requests()); got != 4 {
 		t.Fatalf("expected 4 model attempts, got %d", got)
 	}
-	if len(statuses) != 4 {
-		t.Fatalf("expected 3 retry statuses plus final status, got %d", len(statuses))
+	retries := loopEventsOfType(events, loop.EventRetry)
+	iterations := loopEventsOfType(events, loop.EventIterationDone)
+	if len(retries) != 3 || len(iterations) != 1 {
+		t.Fatalf("expected 3 retries and 1 completed iteration, got retries=%d iterations=%d events=%#v", len(retries), len(iterations), events)
 	}
 	for i := 0; i < 3; i++ {
-		status := statuses[i]
-		if !status.Retrying || !status.DiscardIteration {
-			t.Fatalf("retry status %d should mark attempt discardable: %#v", i, status)
+		event := retries[i]
+		if event.IterationCount != 1 {
+			t.Fatalf("retry event %d consumed an iteration: %#v", i, event)
 		}
-		if status.IterationCount != 1 {
-			t.Fatalf("retry status %d consumed an iteration: %#v", i, status)
-		}
-		if status.AttemptID != i+1 {
-			t.Fatalf("retry status %d expected attempt %d, got %d", i, i+1, status.AttemptID)
+		if event.AttemptID != i+1 {
+			t.Fatalf("retry event %d expected attempt %d, got %d", i, i+1, event.AttemptID)
 		}
 	}
-	finalStatus := statuses[3]
-	if finalStatus.Retrying || finalStatus.DiscardIteration {
-		t.Fatalf("final status should not be discardable: %#v", finalStatus)
+	finalEvent := iterations[0]
+	if finalEvent.IterationCount != 1 {
+		t.Fatalf("expected final iteration count 1, got %d", finalEvent.IterationCount)
 	}
-	if finalStatus.IterationCount != 1 {
-		t.Fatalf("expected final iteration count 1, got %d", finalStatus.IterationCount)
+	if finalEvent.AttemptID != 4 {
+		t.Fatalf("expected final attempt 4, got %d", finalEvent.AttemptID)
 	}
 }
 
@@ -516,37 +523,32 @@ func TestLoopRetryStatusMarksPartialTokensDiscardable(t *testing.T) {
 	l.MaxLoopIterations = 1
 	l.RetryCount = 1
 
-	tokenCh, statusCh, errCh := l.Run(context.Background())
-	var streamed []ai.Token
-	for token := range tokenCh {
-		streamed = append(streamed, token)
+	events := collectLoopEvents(t, l, context.Background())
+	if err := loopError(events); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
 	}
 
-	var statuses []loop.IterationInformation
-	for status := range statusCh {
-		statuses = append(statuses, status)
+	tokenEvents := loopEventsOfType(events, loop.EventToken)
+	if len(tokenEvents) != 2 {
+		t.Fatalf("expected partial and final token to stream, got %d", len(tokenEvents))
 	}
-	for err := range errCh {
-		if err != nil {
-			t.Fatalf("unexpected loop error: %v", err)
-		}
+	if string(tokenEvents[0].Token.Data) != "partial" || string(tokenEvents[1].Token.Data) != "final" {
+		t.Fatalf("unexpected token events: %#v", tokenEvents)
 	}
-
-	if len(streamed) != 2 {
-		t.Fatalf("expected partial and final token to stream, got %d", len(streamed))
+	if tokenEvents[0].AttemptID != 1 || tokenEvents[1].AttemptID != 2 {
+		t.Fatalf("expected token attempt IDs 1 and 2, got %#v", tokenEvents)
 	}
-	if string(streamed[0].Data) != "partial" || string(streamed[1].Data) != "final" {
-		t.Fatalf("unexpected streamed tokens: %#v", streamed)
+	retries := loopEventsOfType(events, loop.EventRetry)
+	iterations := loopEventsOfType(events, loop.EventIterationDone)
+	if len(retries) != 1 || len(iterations) != 1 {
+		t.Fatalf("expected retry and final iteration events, got retries=%d iterations=%d", len(retries), len(iterations))
 	}
-	if len(statuses) != 2 {
-		t.Fatalf("expected retry and final statuses, got %d", len(statuses))
+	retryEvent := retries[0]
+	if retryEvent.AttemptID != 1 {
+		t.Fatalf("expected retry event for attempt 1, got %#v", retryEvent)
 	}
-	retryStatus := statuses[0]
-	if !retryStatus.Retrying || !retryStatus.DiscardIteration {
-		t.Fatalf("expected retry status to mark partial tokens discardable: %#v", retryStatus)
-	}
-	if retryStatus.PartCount != 1 {
-		t.Fatalf("expected retry status to report partial attempt part count, got %d", retryStatus.PartCount)
+	if retryEvent.PartCount != 1 {
+		t.Fatalf("expected retry event to report partial attempt part count, got %d", retryEvent.PartCount)
 	}
 	if got := l.Iterations[0].Parts[0].Response.Text; got != "final" {
 		t.Fatalf("expected persisted iteration to use successful attempt only, got %q", got)
@@ -588,13 +590,8 @@ func TestLoopAppendsIterationMessagesToIncrementalPrompt(t *testing.T) {
 	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, promptBuilder, nil)
 	l.MaxLoopIterations = 3
 
-	tokenCh, _, errCh := l.Run(context.Background())
-	for range tokenCh {
-	}
-	for err := range errCh {
-		if err != nil {
-			t.Fatalf("unexpected loop error: %v", err)
-		}
+	if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
 	}
 
 	if got := buildCount.Load(); got != 1 {
@@ -647,13 +644,8 @@ func TestLoopFallsBackToBuildPromptEveryIteration(t *testing.T) {
 	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, promptBuilder, nil)
 	l.MaxLoopIterations = 3
 
-	tokenCh, _, errCh := l.Run(context.Background())
-	for range tokenCh {
-	}
-	for err := range errCh {
-		if err != nil {
-			t.Fatalf("unexpected loop error: %v", err)
-		}
+	if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
 	}
 
 	if got := promptBuilder.count.Load(); got != 2 {
