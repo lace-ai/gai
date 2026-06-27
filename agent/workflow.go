@@ -164,7 +164,7 @@ func (w *Workflow) Run(ctx context.Context) (<-chan ai.Token, <-chan loop.Iterat
 
 	ctx, obs := newWorkflowObserver(ctx, w)
 	obs.Started(ctx)
-	tokens, statuses, errs := w.Loop.Loop(ctx)
+	tokens, statuses, errs := w.Loop.Run(ctx)
 	stream := w.capturePrimary(ctx, Stream{Tokens: tokens, Statuses: statuses, Errors: errs}, obs)
 	run := &MiddlewareContext{workflow: w}
 	for _, middleware := range w.middleware {

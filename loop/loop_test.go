@@ -297,7 +297,7 @@ func TestLoop(t *testing.T) {
 			l := loop.New(wrapStreamModel{Model: model}, tools, testPromptBuilder(), nil)
 			l.MaxLoopIterations = tt.maxIterations
 
-			tokenCh, _, errCh := l.Loop(context.Background())
+			tokenCh, _, errCh := l.Run(context.Background())
 			for range tokenCh {
 			}
 
@@ -402,7 +402,7 @@ func TestLoopHandlesManyToolCallsInOneIteration(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 
-			tokenCh, _, errCh := l.Loop(ctx)
+			tokenCh, _, errCh := l.Run(ctx)
 			for range tokenCh {
 			}
 
@@ -474,7 +474,7 @@ func TestLoopAppendsIterationMessagesToIncrementalPrompt(t *testing.T) {
 	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, promptBuilder, nil)
 	l.MaxLoopIterations = 3
 
-	tokenCh, _, errCh := l.Loop(context.Background())
+	tokenCh, _, errCh := l.Run(context.Background())
 	for range tokenCh {
 	}
 	for err := range errCh {
@@ -533,7 +533,7 @@ func TestLoopFallsBackToBuildPromptEveryIteration(t *testing.T) {
 	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, promptBuilder, nil)
 	l.MaxLoopIterations = 3
 
-	tokenCh, _, errCh := l.Loop(context.Background())
+	tokenCh, _, errCh := l.Run(context.Background())
 	for range tokenCh {
 	}
 	for err := range errCh {
