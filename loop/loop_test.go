@@ -591,6 +591,45 @@ func TestLoopStreamErrorsIncludeAttemptMetadata(t *testing.T) {
 	}
 }
 
+func TestLoopTerminalStreamErrorIncludesPartialAttemptIteration(t *testing.T) {
+	t.Parallel()
+
+	model := &scriptedStreamModel{
+		sequences: [][]ai.Token{
+			{
+				{Type: ai.TokenTypeText, Data: []byte("partial")},
+				{Err: errors.New("fatal stream error")},
+			},
+		},
+	}
+	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
+	l.MaxLoopIterations = 1
+	l.RetryCount = 0
+
+	events := collectLoopEvents(t, l, context.Background())
+	err := loopError(events)
+	if !errors.Is(err, loop.ErrMaxRetries) {
+		t.Fatalf("error = %v, want ErrMaxRetries", err)
+	}
+	errorEvents := loopEventsOfType(events, loop.EventError)
+	if len(errorEvents) != 1 {
+		t.Fatalf("expected 1 error event, got %d", len(errorEvents))
+	}
+	errorEvent := errorEvents[0]
+	if errorEvent.PartCount != 1 {
+		t.Fatalf("expected partial attempt part count 1, got %d", errorEvent.PartCount)
+	}
+	if errorEvent.Iteration == nil {
+		t.Fatal("expected partial attempt iteration on error event")
+	}
+	if got := errorEvent.Iteration.Parts[0].Response.Text; got != "partial" {
+		t.Fatalf("expected partial attempt text, got %q", got)
+	}
+	if len(l.Iterations) != 0 {
+		t.Fatalf("expected terminal stream failure to skip persisted iteration, got %d", len(l.Iterations))
+	}
+}
+
 func TestLoopRetryStatusMarksPartialTokensDiscardable(t *testing.T) {
 	t.Parallel()
 

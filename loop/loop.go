@@ -130,7 +130,7 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 				iterCtx, cancel = context.WithCancel(iterCtx)
 				attemptID := iterState.attemptID()
 				if err := sendEvent(ctx, events, AttemptStartEvent(iteration.Count, attemptID, runState.retryCount)); err != nil {
-					sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, err)
+					sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, nil, err)
 					cancel()
 					iterState.finish(err)
 					return
@@ -139,7 +139,7 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 				prompt, err := l.PromptBuilder.BuildPrompt(iterCtx, l)
 				if err != nil {
 					iterationErr = fmt.Errorf("%w: %w", ErrBuildPrompt, err)
-					sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, iterationErr)
+					sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, nil, iterationErr)
 					cancel()
 					iterState.finish(iterationErr)
 					return
@@ -158,7 +158,7 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 					if t.Err != nil {
 						if errors.Is(t.Err, context.Canceled) || errors.Is(t.Err, context.DeadlineExceeded) {
 							iterationErr = t.Err
-							sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, iterationErr)
+							sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, iterationErr)
 							cancel()
 							iterState.finish(iterationErr)
 							return
@@ -170,7 +170,7 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 						}
 
 						iterationErr = fmt.Errorf("%w: limit=%d: %w", ErrMaxRetries, l.RetryCount, t.Err)
-						sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, iterationErr)
+						sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, iterationErr)
 						cancel()
 						iterState.finish(iterationErr)
 						return
@@ -192,7 +192,7 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 					runState.recordToken(t)
 					iterState.recordToken(t)
 					if err := sendEvent(ctx, events, TokenEvent(iteration.Count, attemptID, runState.retryCount, t)); err != nil {
-						sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, err)
+						sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, nil, err)
 						cancel()
 						iterState.finish(err)
 						return
@@ -208,7 +208,7 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 				runState.retry()
 				iterState.markRetrying(runState.retryCount)
 				if err := sendEvent(ctx, events, RetryEvent(iteration.Count, attemptID, runState.retryCount, attemptIteration)); err != nil {
-					sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, err)
+					sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, nil, err)
 					cancel()
 					iterState.finish(err)
 					return
@@ -219,7 +219,7 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 
 			if err := l.executeToolCalls(iterCtx, &iteration, toolCalls); err != nil {
 				iterationErr = err
-				sendAttemptError(ctx, events, runState, iteration.Count, iterState.attemptID(), runState.retryCount, iterationErr)
+				sendAttemptError(ctx, events, runState, iteration.Count, iterState.attemptID(), runState.retryCount, nil, iterationErr)
 				cancel()
 				iterState.finish(iterationErr)
 				return
@@ -232,7 +232,7 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 			retryCount := runState.retryCount
 
 			if err := sendEvent(ctx, events, IterationDoneEvent(iteration, attemptID, retryCount)); err != nil {
-				sendAttemptError(ctx, events, runState, iteration.Count, attemptID, retryCount, err)
+				sendAttemptError(ctx, events, runState, iteration.Count, attemptID, retryCount, nil, err)
 				cancel()
 				iterState.finish(err)
 				return
@@ -306,11 +306,11 @@ func sendLoopError(ctx context.Context, events chan<- Event, state *loopRunState
 	_ = sendEvent(ctx, events, ErrorEvent(err))
 }
 
-func sendAttemptError(ctx context.Context, events chan<- Event, state *loopRunState, iterationCount, attemptID, retryCount int, err error) {
+func sendAttemptError(ctx context.Context, events chan<- Event, state *loopRunState, iterationCount, attemptID, retryCount int, attemptIteration *Iteration, err error) {
 	if state != nil {
 		state.fail(err)
 	}
-	_ = sendEvent(ctx, events, AttemptErrorEvent(iterationCount, attemptID, retryCount, err))
+	_ = sendEvent(ctx, events, AttemptErrorEvent(iterationCount, attemptID, retryCount, attemptIteration, err))
 }
 
 // Messages returns the completed iterations as ordered conversation messages.

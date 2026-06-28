@@ -89,14 +89,20 @@ func ErrorEvent(err error) Event {
 
 // AttemptErrorEvent reports a terminal error that occurred inside a specific
 // model generation attempt.
-func AttemptErrorEvent(iterationCount, attemptID, retryCount int, err error) Event {
-	return Event{
+func AttemptErrorEvent(iterationCount, attemptID, retryCount int, attemptIteration *Iteration, err error) Event {
+	event := Event{
 		Type:           EventError,
 		IterationCount: iterationCount,
 		AttemptID:      attemptID,
 		RetryCount:     retryCount,
 		Err:            err,
 	}
+	if attemptIteration != nil {
+		iteration := *attemptIteration
+		event.PartCount = len(iteration.Parts)
+		event.Iteration = &iteration
+	}
+	return event
 }
 
 func sendEvent(ctx context.Context, ch chan<- Event, event Event) error {
