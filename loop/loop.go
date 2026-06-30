@@ -308,7 +308,9 @@ func sendLoopError(ctx context.Context, events chan<- Event, state *loopRunState
 
 func sendAttemptError(ctx context.Context, events chan<- Event, state *loopRunState, iterationCount, attemptID, retryCount int, attemptIteration *Iteration, err error) {
 	if state != nil {
-		state.fail(err)
+		if failErr := state.fail(err); failErr != nil {
+			err = errors.Join(err, failErr)
+		}
 	}
 	_ = sendEvent(ctx, events, AttemptErrorEvent(iterationCount, attemptID, retryCount, attemptIteration, err))
 }
