@@ -36,6 +36,14 @@ type countingPromptBuilder struct {
 	count atomic.Int32
 }
 
+type failingToolResponseProcessor struct {
+	err error
+}
+
+func (p failingToolResponseProcessor) Process(req ai.ToolCall, res *loop.ToolResponse) error {
+	return p.err
+}
+
 func (b *countingPromptBuilder) PrependContextSource(ctx context.Context, source gaictx.ContextSource) error {
 	return nil
 }
@@ -182,6 +190,36 @@ func (m *scriptedStreamModel) Requests() []ai.AIRequest {
 	return requests
 }
 
+func collectLoopEvents(t *testing.T, l *loop.Loop, ctx context.Context) []loop.Event {
+	t.Helper()
+
+	var events []loop.Event
+	for event := range l.Run(ctx) {
+		events = append(events, event)
+	}
+	return events
+}
+
+func loopError(events []loop.Event) error {
+	var err error
+	for _, event := range events {
+		if event.Type == loop.EventError {
+			err = event.Err
+		}
+	}
+	return err
+}
+
+func loopEventsOfType(events []loop.Event, eventType loop.EventType) []loop.Event {
+	var filtered []loop.Event
+	for _, event := range events {
+		if event.Type == eventType {
+			filtered = append(filtered, event)
+		}
+	}
+	return filtered
+}
+
 func renderTestMessages(messages []gaictx.Message) string {
 	var builder strings.Builder
 	for i, message := range messages {
@@ -297,14 +335,7 @@ func TestLoop(t *testing.T) {
 			l := loop.New(wrapStreamModel{Model: model}, tools, testPromptBuilder(), nil)
 			l.MaxLoopIterations = tt.maxIterations
 
-			tokenCh, _, errCh := l.Loop(context.Background())
-			for range tokenCh {
-			}
-
-			var err error
-			for e := range errCh {
-				err = e
-			}
+			err := loopError(collectLoopEvents(t, l, context.Background()))
 
 			if (err != nil) != tt.wantError {
 				t.Fatalf("Loop failed: %v", err)
@@ -402,14 +433,8 @@ func TestLoopHandlesManyToolCallsInOneIteration(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 
-			tokenCh, _, errCh := l.Loop(ctx)
-			for range tokenCh {
-			}
-
-			for err := range errCh {
-				if err != nil {
-					t.Fatalf("unexpected loop error: %v", err)
-				}
+			if err := loopError(collectLoopEvents(t, l, ctx)); err != nil {
+				t.Fatalf("unexpected loop error: %v", err)
 			}
 
 			if len(l.Iterations) != tt.wantTotalIteration {
@@ -439,57 +464,245 @@ func TestLoopHandlesManyToolCallsInOneIteration(t *testing.T) {
 	}
 }
 
-func TestLoopSuppressesRepeatedCompletedToolCall(t *testing.T) {
+func TestLoopWrapsToolPreprocessErrors(t *testing.T) {
 	t.Parallel()
-
-	toolCall := ai.Token{
-		Type: ai.TokenTypeToolCall,
-		ToolCall: &ai.ToolCall{
-			ID:   "call-1",
-			Type: "function",
-			Name: "echo",
-			Args: json.RawMessage(`{"text":"repeat"}`),
-		},
-	}
-	formattedToolCall := ai.Token{
-		Type: ai.TokenTypeToolCall,
-		ToolCall: &ai.ToolCall{
-			ID:   "call-2",
-			Type: "function",
-			Name: "echo",
-			Args: json.RawMessage("{\n  \"text\": \"repeat\"\n}"),
-		},
-	}
 
 	model := &scriptedStreamModel{
 		sequences: [][]ai.Token{
-			{toolCall},
-			{formattedToolCall},
+			{
+				{
+					Type: ai.TokenTypeToolCall,
+					ToolCall: &ai.ToolCall{
+						ID:   "call-1",
+						Type: "function",
+						Name: "echo",
+						Args: json.RawMessage(`{"text":"payload"}`),
+					},
+				},
+			},
 		},
 	}
 
-	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
-	l.MaxLoopIterations = 3
+	l := loop.New(
+		model,
+		[]loop.Tool{loop.NewEchoTool()},
+		testPromptBuilder(),
+		failingToolResponseProcessor{err: errors.New("reject tool response")},
+	)
 
-	tokenCh, _, errCh := l.Loop(context.Background())
-	var tokens []ai.Token
-	for token := range tokenCh {
-		tokens = append(tokens, token)
+	events := collectLoopEvents(t, l, context.Background())
+	err := loopError(events)
+	if !errors.Is(err, loop.ErrToolResponseProcess) {
+		t.Fatalf("error = %v, want ErrToolResponseProcess", err)
 	}
-	for err := range errCh {
-		if err != nil {
-			t.Fatalf("unexpected loop error: %v", err)
+	errorEvents := loopEventsOfType(events, loop.EventError)
+	if len(errorEvents) != 1 {
+		t.Fatalf("expected 1 error event, got %d", len(errorEvents))
+	}
+	if errorEvents[0].IterationCount != 1 || errorEvents[0].AttemptID != 1 {
+		t.Fatalf("expected attempt metadata on error event, got %#v", errorEvents[0])
+	}
+	if len(l.Iterations) != 0 {
+		t.Fatalf("expected preprocess failure to skip persisted iteration, got %d", len(l.Iterations))
+	}
+}
+
+func TestLoopRetriesDoNotConsumeIterations(t *testing.T) {
+	t.Parallel()
+
+	model := &scriptedStreamModel{
+		sequences: [][]ai.Token{
+			{{Err: errors.New("temporary 1")}},
+			{{Err: errors.New("temporary 2")}},
+			{{Err: errors.New("temporary 3")}},
+			{{Type: ai.TokenTypeText, Data: []byte("done")}},
+		},
+	}
+	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
+	l.MaxLoopIterations = 1
+	l.RetryCount = 3
+
+	events := collectLoopEvents(t, l, context.Background())
+	if err := loopError(events); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+
+	if len(l.Iterations) != 1 {
+		t.Fatalf("expected retry attempts to complete one iteration, got %d", len(l.Iterations))
+	}
+	if got := len(model.Requests()); got != 4 {
+		t.Fatalf("expected 4 model attempts, got %d", got)
+	}
+	retries := loopEventsOfType(events, loop.EventRetry)
+	iterations := loopEventsOfType(events, loop.EventIterationDone)
+	if len(retries) != 3 || len(iterations) != 1 {
+		t.Fatalf("expected 3 retries and 1 completed iteration, got retries=%d iterations=%d events=%#v", len(retries), len(iterations), events)
+	}
+	for i := 0; i < 3; i++ {
+		event := retries[i]
+		if event.IterationCount != 1 {
+			t.Fatalf("retry event %d consumed an iteration: %#v", i, event)
+		}
+		if event.AttemptID != i+1 {
+			t.Fatalf("retry event %d expected attempt %d, got %d", i, i+1, event.AttemptID)
+		}
+		if event.Iteration != nil && event.Iteration.UserMessage != nil {
+			t.Fatalf("retry event %d should not retain user message: %#v", i, event.Iteration.UserMessage)
 		}
 	}
+	finalEvent := iterations[0]
+	if finalEvent.IterationCount != 1 {
+		t.Fatalf("expected final iteration count 1, got %d", finalEvent.IterationCount)
+	}
+	if finalEvent.AttemptID != 4 {
+		t.Fatalf("expected final attempt 4, got %d", finalEvent.AttemptID)
+	}
+	if finalEvent.RetryCount != 3 {
+		t.Fatalf("expected final retry count 3, got %d", finalEvent.RetryCount)
+	}
+	if l.Iterations[0].UserMessage == nil {
+		t.Fatal("expected completed first iteration to retain user message")
+	}
+}
 
-	if len(tokens) != 1 {
-		t.Fatalf("expected duplicate tool call to be suppressed, got %d tokens", len(tokens))
+func TestLoopStreamErrorsIncludeAttemptMetadata(t *testing.T) {
+	t.Parallel()
+
+	model := &scriptedStreamModel{
+		sequences: [][]ai.Token{
+			{{Err: errors.New("fatal stream error")}},
+		},
 	}
-	if len(l.Iterations) != 2 {
-		t.Fatalf("expected two iterations including suppressed duplicate, got %d", len(l.Iterations))
+	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
+	l.MaxLoopIterations = 1
+	l.RetryCount = 0
+
+	events := collectLoopEvents(t, l, context.Background())
+	err := loopError(events)
+	if !errors.Is(err, loop.ErrMaxRetries) {
+		t.Fatalf("error = %v, want ErrMaxRetries", err)
 	}
-	if got := len(l.Iterations[1].Parts); got != 0 {
-		t.Fatalf("expected suppressed duplicate iteration to have no parts, got %d", got)
+	errorEvents := loopEventsOfType(events, loop.EventError)
+	if len(errorEvents) != 1 {
+		t.Fatalf("expected 1 error event, got %d", len(errorEvents))
+	}
+	if errorEvents[0].IterationCount != 1 || errorEvents[0].AttemptID != 1 || errorEvents[0].RetryCount != 0 {
+		t.Fatalf("expected attempt metadata on error event, got %#v", errorEvents[0])
+	}
+}
+
+func TestLoopTerminalStreamErrorIncludesPartialAttemptIteration(t *testing.T) {
+	t.Parallel()
+
+	model := &scriptedStreamModel{
+		sequences: [][]ai.Token{
+			{
+				{Type: ai.TokenTypeText, Data: []byte("partial")},
+				{Err: errors.New("fatal stream error")},
+			},
+		},
+	}
+	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
+	l.MaxLoopIterations = 1
+	l.RetryCount = 0
+
+	events := collectLoopEvents(t, l, context.Background())
+	err := loopError(events)
+	if !errors.Is(err, loop.ErrMaxRetries) {
+		t.Fatalf("error = %v, want ErrMaxRetries", err)
+	}
+	errorEvents := loopEventsOfType(events, loop.EventError)
+	if len(errorEvents) != 1 {
+		t.Fatalf("expected 1 error event, got %d", len(errorEvents))
+	}
+	errorEvent := errorEvents[0]
+	if errorEvent.PartCount != 1 {
+		t.Fatalf("expected partial attempt part count 1, got %d", errorEvent.PartCount)
+	}
+	if errorEvent.Iteration == nil {
+		t.Fatal("expected partial attempt iteration on error event")
+	}
+	if got := errorEvent.Iteration.Parts[0].Response.Text; got != "partial" {
+		t.Fatalf("expected partial attempt text, got %q", got)
+	}
+	if len(l.Iterations) != 0 {
+		t.Fatalf("expected terminal stream failure to skip persisted iteration, got %d", len(l.Iterations))
+	}
+}
+
+func TestLoopRetryStatusMarksPartialTokensDiscardable(t *testing.T) {
+	t.Parallel()
+
+	model := &scriptedStreamModel{
+		sequences: [][]ai.Token{
+			{
+				{Type: ai.TokenTypeText, Data: []byte("partial")},
+				{Err: errors.New("temporary")},
+			},
+			{
+				{Type: ai.TokenTypeText, Data: []byte("final")},
+			},
+		},
+	}
+	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
+	l.MaxLoopIterations = 1
+	l.RetryCount = 1
+
+	events := collectLoopEvents(t, l, context.Background())
+	if err := loopError(events); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+
+	tokenEvents := loopEventsOfType(events, loop.EventToken)
+	if len(tokenEvents) != 2 {
+		t.Fatalf("expected partial and final token to stream, got %d", len(tokenEvents))
+	}
+	if string(tokenEvents[0].Token.Data) != "partial" || string(tokenEvents[1].Token.Data) != "final" {
+		t.Fatalf("unexpected token events: %#v", tokenEvents)
+	}
+	if tokenEvents[0].AttemptID != 1 || tokenEvents[1].AttemptID != 2 {
+		t.Fatalf("expected token attempt IDs 1 and 2, got %#v", tokenEvents)
+	}
+	retries := loopEventsOfType(events, loop.EventRetry)
+	iterations := loopEventsOfType(events, loop.EventIterationDone)
+	if len(retries) != 1 || len(iterations) != 1 {
+		t.Fatalf("expected retry and final iteration events, got retries=%d iterations=%d", len(retries), len(iterations))
+	}
+	retryEvent := retries[0]
+	if retryEvent.AttemptID != 1 {
+		t.Fatalf("expected retry event for attempt 1, got %#v", retryEvent)
+	}
+	if retryEvent.PartCount != 1 {
+		t.Fatalf("expected retry event to report partial attempt part count, got %d", retryEvent.PartCount)
+	}
+	if got := l.Iterations[0].Parts[0].Response.Text; got != "final" {
+		t.Fatalf("expected persisted iteration to use successful attempt only, got %q", got)
+	}
+}
+
+func TestLoopDoesNotRetryCanceledStream(t *testing.T) {
+	t.Parallel()
+
+	model := &scriptedStreamModel{
+		sequences: [][]ai.Token{
+			{{Err: context.Canceled}},
+			{{Type: ai.TokenTypeText, Data: []byte("should not run")}},
+		},
+	}
+	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
+	l.MaxLoopIterations = 1
+	l.RetryCount = 3
+
+	events := collectLoopEvents(t, l, context.Background())
+	err := loopError(events)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+	if got := len(model.Requests()); got != 1 {
+		t.Fatalf("expected no retry after cancellation, got %d model requests", got)
+	}
+	if retries := loopEventsOfType(events, loop.EventRetry); len(retries) != 0 {
+		t.Fatalf("expected no retry events after cancellation, got %#v", retries)
 	}
 }
 
@@ -528,13 +741,8 @@ func TestLoopAppendsIterationMessagesToIncrementalPrompt(t *testing.T) {
 	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, promptBuilder, nil)
 	l.MaxLoopIterations = 3
 
-	tokenCh, _, errCh := l.Loop(context.Background())
-	for range tokenCh {
-	}
-	for err := range errCh {
-		if err != nil {
-			t.Fatalf("unexpected loop error: %v", err)
-		}
+	if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
 	}
 
 	if got := buildCount.Load(); got != 1 {
@@ -558,6 +766,15 @@ func TestLoopAppendsIterationMessagesToIncrementalPrompt(t *testing.T) {
 	}
 	if !strings.Contains(requests[1].Prompt, "payload") {
 		t.Fatalf("second request should include appended tool delta: %q", requests[1].Prompt)
+	}
+	if len(l.Iterations) != 2 {
+		t.Fatalf("expected 2 stored iterations, got %d", len(l.Iterations))
+	}
+	if l.Iterations[0].UserMessage == nil {
+		t.Fatal("expected first stored iteration to retain user message")
+	}
+	if l.Iterations[1].UserMessage != nil {
+		t.Fatalf("expected later stored iterations to omit user message, got %#v", l.Iterations[1].UserMessage)
 	}
 }
 
@@ -587,13 +804,8 @@ func TestLoopFallsBackToBuildPromptEveryIteration(t *testing.T) {
 	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, promptBuilder, nil)
 	l.MaxLoopIterations = 3
 
-	tokenCh, _, errCh := l.Loop(context.Background())
-	for range tokenCh {
-	}
-	for err := range errCh {
-		if err != nil {
-			t.Fatalf("unexpected loop error: %v", err)
-		}
+	if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
 	}
 
 	if got := promptBuilder.count.Load(); got != 2 {

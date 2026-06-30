@@ -2,6 +2,7 @@ package agent_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -162,6 +163,58 @@ func TestAgentWorkflowEndToEndWithToolCall(t *testing.T) {
 	}
 	if !strings.Contains(requests[1].Prompt, "tool res: tool says hi") {
 		t.Fatalf("second prompt did not include tool result:\n%s", requests[1].Prompt)
+	}
+}
+
+func TestAgentWorkflowMarksTerminalFailedAttemptDiscardable(t *testing.T) {
+	model := &scriptedWorkflowModel{
+		scripts: [][]ai.Token{
+			{
+				{Type: ai.TokenTypeText, Text: "partial"},
+				{Err: errors.New("fatal stream error")},
+			},
+		},
+	}
+	assistant := agent.New(agent.Definition{
+		Name:  "terminal-failure",
+		Model: model,
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return gaictx.New(gaictx.Definition{
+				Renderer: &gaictx.SimpleRenderer{},
+			}), nil
+		},
+		Limits: agent.Limits{
+			MaxLoopIterations: 1,
+		},
+	})
+
+	workflow, err := assistant.NewRun(context.Background(), textRunInput("fail"))
+	if err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	workflow.Loop.RetryCount = 0
+	consumed := consumeWorkflow(t, workflow)
+	if len(consumed.errs) != 1 {
+		t.Fatalf("expected one workflow error, got %d", len(consumed.errs))
+	}
+	if !errors.Is(consumed.errs[0], loop.ErrMaxRetries) {
+		t.Fatalf("error = %v, want ErrMaxRetries", consumed.errs[0])
+	}
+	if got := tokensText(consumed.tokens); got != "partial" {
+		t.Fatalf("expected partial token to stream before failure, got %q", got)
+	}
+	if len(consumed.statuses) != 1 {
+		t.Fatalf("expected one discard status, got %#v", consumed.statuses)
+	}
+	status := consumed.statuses[0]
+	if !status.DiscardIteration || status.Retrying {
+		t.Fatalf("expected terminal failed attempt to be discardable without retrying, got %#v", status)
+	}
+	if status.IterationCount != 1 || status.AttemptID != 1 || status.PartCount != 1 {
+		t.Fatalf("expected failed attempt metadata, got %#v", status)
+	}
+	if got := status.Iteration.Parts[0].Response.Text; got != "partial" {
+		t.Fatalf("expected discard status to carry partial attempt text, got %q", got)
 	}
 }
 

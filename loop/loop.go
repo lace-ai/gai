@@ -2,13 +2,12 @@ package loop
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
-	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
 	gaictx "github.com/lace-ai/gai/context"
-	"go.opentelemetry.io/otel/attribute"
 )
 
 const (
@@ -16,11 +15,10 @@ const (
 	defaultRetryCount        = 3
 )
 
-const loopTracerName = "github.com/lace-ai/gai/loop"
-
-// ToolResPreProcessor can inspect or modify a tool response before the loop
-// records it and builds the next prompt.
-type ToolResPreProcessor interface {
+// ToolResponseProcessor can inspect or modify a tool response before the loop
+// records it and builds the next prompt. Implementations must be safe for
+// concurrent use.
+type ToolResponseProcessor interface {
 	// Process handles the response produced for req.
 	Process(req ai.ToolCall, res *ToolResponse) error
 }
@@ -45,306 +43,283 @@ type Loop struct {
 	RetryCount int
 	// PromptBuilder constructs the prompt for each iteration.
 	PromptBuilder gaictx.PromptBuilder
-	// PreProcessToolRes optionally processes tool responses before they are recorded.
-	PreProcessToolRes ToolResPreProcessor
+	// ToolResponseProcessor optionally processes tool responses before they are recorded.
+	ToolResponseProcessor ToolResponseProcessor
 }
 
-// Validate applies default limits and checks required loop dependencies.
-func (a *Loop) Validate() error {
-	if a == nil {
-		return ErrNilAgent
+// Validate applies default iteration limits and checks required loop dependencies.
+func (l *Loop) Validate() error {
+	if l == nil {
+		return ErrNilLoop
 	}
-	if a.MaxLoopIterations <= 0 {
-		a.MaxLoopIterations = defaultMaxLoopIterations
+	if l.MaxLoopIterations <= 0 {
+		l.MaxLoopIterations = defaultMaxLoopIterations
 	}
-	if a.Model == nil {
+	if l.Model == nil {
 		return ErrModelNotConfigured
 	}
-	if a.PromptBuilder == nil {
+	if l.PromptBuilder == nil {
 		return ErrPromptNotConfigured
 	}
 	return nil
 }
 
 // New constructs a Loop with default iteration and retry limits.
-func New(model ai.Model, tools []Tool, promptBuilder gaictx.PromptBuilder, toolResPreProcessor ToolResPreProcessor) *Loop {
-	agent := &Loop{
-		Model:             model,
-		Tools:             tools,
-		MaxLoopIterations: defaultMaxLoopIterations,
-		RetryCount:        defaultRetryCount,
-		PromptBuilder:     promptBuilder,
-		PreProcessToolRes: toolResPreProcessor,
+func New(model ai.Model, tools []Tool, promptBuilder gaictx.PromptBuilder, toolResponseProcessor ToolResponseProcessor) *Loop {
+	l := &Loop{
+		Model:                 model,
+		Tools:                 tools,
+		MaxLoopIterations:     defaultMaxLoopIterations,
+		RetryCount:            defaultRetryCount,
+		PromptBuilder:         promptBuilder,
+		ToolResponseProcessor: toolResponseProcessor,
 	}
-	return agent
+	return l
 }
 
-type iterationToolCall struct {
-	id       int
-	toolCall ai.ToolCall
+type pendingToolCall struct {
+	partIndex int
+	call      ai.ToolCall
 }
 
-// Loop starts asynchronous model and tool execution.
+// Run starts asynchronous model and tool execution.
 //
-// The returned channels carry generated tokens, iteration snapshots, and
-// terminal errors respectively. All three channels are closed when execution
-// ends. Callers should consume every channel concurrently so execution cannot
-// block when one stream's buffer fills.
-func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInformation, <-chan error) {
-	errCh := make(chan error, 1)
-	tokenCh := make(chan ai.Token, 16)
-	statusCh := make(chan IterationInformation, 16)
+// The returned channel carries every token, retry, iteration, and terminal
+// event in the exact order it occurred. Callers must consume the channel until
+// it closes or cancel ctx.
+func (l *Loop) Run(ctx context.Context) <-chan Event {
+	events := make(chan Event, 32)
 
-	if err := a.Validate(); err != nil {
-		errCh <- err
-		close(errCh)
-		close(tokenCh)
-		close(statusCh)
-		return tokenCh, statusCh, errCh
+	if err := l.Validate(); err != nil {
+		events <- ErrorEvent(err)
+		close(events)
+		return events
 	}
 
 	go func() {
-		ctx, loopSpan := gai.StartOperationSpan(ctx, loopTracerName, "loop", "loop.operation", "run",
-			attribute.Int("loop.max_iterations", a.MaxLoopIterations),
-			attribute.Int("loop.retry_limit", a.RetryCount),
-			attribute.Int("loop.max_tokens", a.MaxTokens),
-			attribute.Int("loop.tool_count", len(a.Tools)),
-			attribute.String("ai.model", a.Model.Name()),
-		)
-		var loopErr error
-		iterationCount := 0
-		totalTokenCount := 0
-		totalToolCallCount := 0
-		incrementalPrompt := false
-		defer func() {
-			loopSpan.SetAttributes(
-				attribute.Int("loop.iteration_count", iterationCount),
-				attribute.Int("loop.token_count", totalTokenCount),
-				attribute.Int("loop.tool_call_count", totalToolCallCount),
-				attribute.Bool("loop.incremental_prompt", incrementalPrompt),
-			)
-			gai.EndSpan(loopSpan, loopErr)
-		}()
-		defer close(errCh)
-		defer close(tokenCh)
-		defer close(statusCh)
+		ctx, runState := newLoopRunState(ctx, l)
+		defer runState.finish()
+		defer close(events)
 
-		retryCount := 0
-		completedToolCalls := map[string]struct{}{}
-		toolDefinitions, err := ToolDefinitions(a.Tools)
+		toolDefinitions, err := ToolDefinitions(l.Tools)
 		if err != nil {
-			loopErr = err
-			errCh <- err
+			sendLoopError(ctx, events, runState, err)
 			return
 		}
 
-		_, err = a.PromptBuilder.BuildContext(ctx)
+		_, err = l.PromptBuilder.BuildContext(ctx)
 		if err != nil {
-			loopErr = fmt.Errorf("%w: %w", ErrBuildPrompt, err)
-			errCh <- loopErr
+			sendLoopError(ctx, events, runState, fmt.Errorf("%w: %w", ErrBuildPrompt, err))
 			return
 		}
 
-		var iteration Iteration
-		for i := range a.MaxLoopIterations {
-			iteration = Iteration{Count: i + 1}
-			iterationCount = iteration.Count
-			var toolCalls []iterationToolCall
-
-			iterCtx, iterationSpan := gai.StartOperationSpan(ctx, loopTracerName, "loop", "loop.operation", "iteration",
-				attribute.Int("loop.iteration", iteration.Count),
-				attribute.Bool("loop.incremental_prompt", incrementalPrompt),
-			)
-			iterCtx, cancel := context.WithCancel(iterCtx)
+		for i := range l.MaxLoopIterations {
+			iteration := Iteration{Count: i + 1}
+			userMessage := userMessageForIteration(l.PromptBuilder, i)
+			var toolCalls []pendingToolCall
+			var iterState *loopIterationState
 			var iterationErr error
+			var iterCtx context.Context
+			var cancel context.CancelFunc
 
-			prompt, err := a.PromptBuilder.BuildPrompt(iterCtx, a)
-			if err != nil {
-				iterationErr = fmt.Errorf("%w: %w", ErrBuildPrompt, err)
-				loopErr = iterationErr
-				errCh <- iterationErr
-				cancel()
-				gai.EndSpan(iterationSpan, iterationErr)
-				return
-			}
+			for attempt := 1; ; attempt++ {
+				attemptIteration := Iteration{Count: iteration.Count}
+				toolCalls = nil
 
-			request := ai.AIRequest{
-				Prompt:    prompt,
-				MaxTokens: a.MaxTokens,
-				Tools:     toolDefinitions,
-			}
-			input := a.PromptBuilder.Input()
-			if input.User != nil {
-				iteration.UserMessage = &gaictx.Message{Role: gaictx.RoleUser, Content: input.User}
-			}
+				iterCtx, iterState = runState.startIteration(ctx, iteration.Count, attempt)
+				iterCtx, cancel = context.WithCancel(iterCtx)
+				attemptID := iterState.attemptID()
+				if err := sendEvent(ctx, events, AttemptStartEvent(iteration.Count, attemptID, runState.retryCount)); err != nil {
+					sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, nil, err)
+					cancel()
+					iterState.finish(err)
+					return
+				}
 
-			tokens := a.Model.GenerateStream(iterCtx, request)
+				prompt, err := l.PromptBuilder.BuildPrompt(iterCtx, l)
+				if err != nil {
+					iterationErr = fmt.Errorf("%w: %w", ErrBuildPrompt, err)
+					sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, nil, iterationErr)
+					cancel()
+					iterState.finish(iterationErr)
+					return
+				}
 
-			retrying := false
-			for t := range tokens {
-				if t.Err != nil {
-					if retryCount < a.RetryCount {
-						retrying = true
-						break
-					} else {
-						iterationErr = fmt.Errorf("%w limit:%v error: %v", ErrMaxRetries, a.RetryCount, t.Err)
-						loopErr = iterationErr
-						errCh <- iterationErr
+				request := ai.AIRequest{
+					Prompt:    prompt,
+					MaxTokens: l.MaxTokens,
+					Tools:     toolDefinitions,
+				}
+
+				tokens := l.Model.GenerateStream(iterCtx, request)
+
+				retrying := false
+				for t := range tokens {
+					if t.Err != nil {
+						if errors.Is(t.Err, context.Canceled) || errors.Is(t.Err, context.DeadlineExceeded) {
+							iterationErr = t.Err
+							sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, iterationErr)
+							cancel()
+							iterState.finish(iterationErr)
+							return
+						}
+
+						if runState.canRetry(l.RetryCount) {
+							retrying = true
+							break
+						}
+
+						iterationErr = fmt.Errorf("%w: limit=%d: %w", ErrMaxRetries, l.RetryCount, t.Err)
+						sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, iterationErr)
 						cancel()
-						gai.EndSpan(iterationSpan, iterationErr)
+						iterState.finish(iterationErr)
+						return
+					}
+
+					if t.Type == ai.TokenTypeToolCall && t.ToolCall != nil {
+						attemptIteration.AppendToken(t)
+
+						toolReq := t.ToolCall
+						partIdx := len(attemptIteration.Parts) - 1
+
+						toolCalls = append(toolCalls, pendingToolCall{
+							partIndex: partIdx,
+							call:      *toolReq,
+						})
+					} else {
+						attemptIteration.AppendToken(t)
+					}
+					runState.recordToken(t)
+					iterState.recordToken(t)
+					if err := sendEvent(ctx, events, TokenEvent(iteration.Count, attemptID, runState.retryCount, t)); err != nil {
+						sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, nil, err)
+						cancel()
+						iterState.finish(err)
 						return
 					}
 				}
 
-				if t.Type == ai.TokenTypeToolCall && t.ToolCall != nil {
-					signature := toolCallSignature(*t.ToolCall)
-					if _, ok := completedToolCalls[signature]; ok {
-						continue
-					}
-
-					iteration.AppendToken(t)
-					tokenCh <- t
-					totalTokenCount++
-
-					toolReq := t.ToolCall
-					partIdx := len(iteration.Parts) - 1
-
-					toolCalls = append(toolCalls, iterationToolCall{
-						id:       partIdx,
-						toolCall: *toolReq,
-					})
-					totalToolCallCount++
-				} else {
-					iteration.AppendToken(t)
-					tokenCh <- t
-					totalTokenCount++
+				if !retrying {
+					attemptIteration.UserMessage = userMessage
+					iteration = attemptIteration
+					break
 				}
-			}
 
-			if retrying {
-				retryCount++
-				statusCh <- IterationInformation{
-					IterationCount: iteration.Count,
-					PartCount:      len(iteration.Parts),
-					RetryCount:     retryCount,
+				runState.retry()
+				iterState.markRetrying(runState.retryCount)
+				if err := sendEvent(ctx, events, RetryEvent(iteration.Count, attemptID, runState.retryCount, attemptIteration)); err != nil {
+					sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, nil, err)
+					cancel()
+					iterState.finish(err)
+					return
 				}
 				cancel()
-				iterationSpan.SetAttributes(
-					attribute.Bool("loop.retrying", true),
-					attribute.Int("loop.part_count", len(iteration.Parts)),
-					attribute.Int("loop.retry_count", retryCount),
-					attribute.Int("loop.tool_call_count", len(toolCalls)),
-				)
-				gai.EndSpan(iterationSpan, nil)
-				continue
+				iterState.finish(nil)
 			}
 
-			wg := sync.WaitGroup{}
-			var preProcessErr error
-			var preProcessErrMu sync.Mutex
-			for _, tc := range toolCalls {
-				wg.Add(1)
-				go func(tc iterationToolCall) {
-					defer wg.Done()
-
-					toolRes := CallTool(iterCtx, &tc.toolCall, a.Tools)
-					if a.PreProcessToolRes != nil {
-						if err := a.PreProcessToolRes.Process(tc.toolCall, toolRes); err != nil {
-							preProcessErrMu.Lock()
-							if preProcessErr == nil {
-								preProcessErr = fmt.Errorf("pre-processing tool response failed: %w", err)
-							}
-							preProcessErrMu.Unlock()
-							return
-						}
-					}
-
-					iteration.Parts[tc.id].ToolResp = toolRes
-				}(tc)
-			}
-			wg.Wait()
-			if preProcessErr != nil {
-				iterationErr = preProcessErr
-				loopErr = iterationErr
-				errCh <- iterationErr
+			if err := l.executeToolCalls(iterCtx, &iteration, toolCalls); err != nil {
+				iterationErr = err
+				sendAttemptError(ctx, events, runState, iteration.Count, iterState.attemptID(), runState.retryCount, nil, iterationErr)
 				cancel()
-				gai.EndSpan(iterationSpan, iterationErr)
+				iterState.finish(iterationErr)
 				return
 			}
 
-			for _, tc := range toolCalls {
-				part := iteration.Parts[tc.id]
-				if part.ToolResp != nil {
-					completedToolCalls[toolCallSignature(tc.toolCall)] = struct{}{}
-				}
-			}
-			toolErrorCount := 0
-			for _, part := range iteration.Parts {
-				if part.ToolResp != nil && part.ToolResp.Err != nil {
-					toolErrorCount++
-				}
-			}
+			iterState.recordToolResponses(iteration)
 
-			a.Iterations = append(a.Iterations, iteration)
-			if retrying {
-				statusCh <- IterationInformation{
-					IterationCount: iteration.Count,
-					PartCount:      len(iteration.Parts),
-					RetryCount:     retryCount,
-				}
-				cancel()
-				iterationSpan.SetAttributes(
-					attribute.Bool("loop.retrying", true),
-					attribute.Int("loop.part_count", len(iteration.Parts)),
-					attribute.Int("loop.retry_count", retryCount),
-					attribute.Int("loop.tool_call_count", len(toolCalls)),
-					attribute.Int("loop.tool_error_count", toolErrorCount),
-				)
-				gai.EndSpan(iterationSpan, iterationErr)
-				continue
-			}
-			retryCount = 0
+			l.Iterations = append(l.Iterations, iteration)
+			attemptID := iterState.attemptID()
+			retryCount := runState.retryCount
 
-			statusCh <- IterationInformation{
-				Iteration:      iteration,
-				IterationCount: iteration.Count,
-				PartCount:      len(iteration.Parts),
-				RetryCount:     retryCount,
-			}
-			if len(toolCalls) == 0 && !retrying {
+			if err := sendEvent(ctx, events, IterationDoneEvent(iteration, attemptID, retryCount)); err != nil {
+				sendAttemptError(ctx, events, runState, iteration.Count, attemptID, retryCount, nil, err)
 				cancel()
-				iterationSpan.SetAttributes(
-					attribute.Bool("loop.final_iteration", true),
-					attribute.Int("loop.part_count", len(iteration.Parts)),
-					attribute.Int("loop.retry_count", retryCount),
-					attribute.Int("loop.tool_call_count", len(toolCalls)),
-					attribute.Int("loop.tool_error_count", toolErrorCount),
-				)
-				gai.EndSpan(iterationSpan, nil)
+				iterState.finish(err)
+				return
+			}
+			runState.resetRetries()
+			if len(toolCalls) == 0 {
+				cancel()
+				iterState.markFinal()
+				iterState.finish(nil)
+				_ = sendEvent(ctx, events, DoneEvent())
 				return
 			}
 			cancel()
-			iterationSpan.SetAttributes(
-				attribute.Int("loop.part_count", len(iteration.Parts)),
-				attribute.Int("loop.retry_count", retryCount),
-				attribute.Int("loop.tool_call_count", len(toolCalls)),
-				attribute.Int("loop.tool_error_count", toolErrorCount),
-			)
-			gai.EndSpan(iterationSpan, iterationErr)
+			iterState.finish(iterationErr)
 		}
 
-		loopErr = fmt.Errorf("%w: limit=%d", ErrMaxIterations, a.MaxLoopIterations)
-		errCh <- loopErr
+		sendLoopError(ctx, events, runState, fmt.Errorf("%w: limit=%d", ErrMaxIterations, l.MaxLoopIterations))
 	}()
 
-	return tokenCh, statusCh, errCh
+	return events
+}
+
+func userMessageForIteration(promptBuilder gaictx.PromptBuilder, index int) *gaictx.Message {
+	if index != 0 || promptBuilder == nil {
+		return nil
+	}
+	input := promptBuilder.Input()
+	if input.User == nil {
+		return nil
+	}
+	return &gaictx.Message{Role: gaictx.RoleUser, Content: input.User}
+}
+
+// executeToolCalls records tool responses on iteration. Tool execution
+// failures are stored in ToolResponse.Err and are not returned. Only framework
+// or tool-response processing failures are returned.
+func (l *Loop) executeToolCalls(ctx context.Context, iteration *Iteration, toolCalls []pendingToolCall) error {
+	var wg sync.WaitGroup
+	var toolErr error
+	var toolErrMu sync.Mutex
+
+	for _, tc := range toolCalls {
+		wg.Add(1)
+		go func(tc pendingToolCall) {
+			defer wg.Done()
+
+			toolRes := CallTool(ctx, &tc.call, l.Tools)
+			if l.ToolResponseProcessor != nil {
+				if err := l.ToolResponseProcessor.Process(tc.call, toolRes); err != nil {
+					toolErrMu.Lock()
+					if toolErr == nil {
+						toolErr = fmt.Errorf("%w: %w", ErrToolResponseProcess, err)
+					}
+					toolErrMu.Unlock()
+					return
+				}
+			}
+
+			iteration.Parts[tc.partIndex].ToolResp = toolRes
+		}(tc)
+	}
+	wg.Wait()
+
+	return toolErr
+}
+
+func sendLoopError(ctx context.Context, events chan<- Event, state *loopRunState, err error) {
+	if state != nil {
+		state.fail(err)
+	}
+	_ = sendEvent(ctx, events, ErrorEvent(err))
+}
+
+func sendAttemptError(ctx context.Context, events chan<- Event, state *loopRunState, iterationCount, attemptID, retryCount int, attemptIteration *Iteration, err error) {
+	if state != nil {
+		if failErr := state.fail(err); failErr != nil {
+			err = errors.Join(err, failErr)
+		}
+	}
+	_ = sendEvent(ctx, events, AttemptErrorEvent(iterationCount, attemptID, retryCount, attemptIteration, err))
 }
 
 // Messages returns the completed iterations as ordered conversation messages.
-func (a *Loop) Messages() []gaictx.Message {
+func (l *Loop) Messages() []gaictx.Message {
 	var msgs []gaictx.Message
 
-	for _, i := range a.Iterations {
+	for _, i := range l.Iterations {
 		msgs = append(msgs, i.Messages()...)
 	}
 

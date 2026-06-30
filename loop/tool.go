@@ -28,6 +28,9 @@ func NewToolSuccess(text string) *ToolResponse {
 }
 
 func NewToolError(err error) *ToolResponse {
+	if err == nil {
+		err = ErrToolErrorMissing
+	}
 	return &ToolResponse{
 		Status: "error",
 		Err:    &err,
@@ -49,6 +52,7 @@ func (r *ToolResponse) ErrorValue() error {
 }
 
 // Tool defines a function that a model may request during a loop run.
+// Implementations must be safe for concurrent use.
 type Tool interface {
 	// Name returns the function name exposed to the model.
 	Name() string
@@ -68,7 +72,10 @@ func CallTool(ctx context.Context, req *ai.ToolCall, tools []Tool) *ToolResponse
 		return NewToolError(err)
 	}
 
-	for _, tool := range tools {
+	for index, tool := range tools {
+		if tool == nil {
+			return NewToolError(fmt.Errorf("%w: tool at index %d is nil", ai.ErrInvalidToolDefinition, index))
+		}
 		if tool.Name() == req.Name {
 			res := tool.Function(ctx, req)
 			if res == nil {
@@ -149,8 +156,8 @@ func (r *ToolResponse) String() string {
 	if r.Text != nil {
 		return *r.Text
 	}
-	if r.Err != nil {
-		return (*r.Err).Error()
+	if err := r.ErrorValue(); err != nil {
+		return err.Error()
 	}
 	return ""
 }
