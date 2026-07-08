@@ -1,255 +1,395 @@
-# Graph Report - .  (2026-06-01)
+# Graph Report - .  (2026-07-06)
 
 ## Corpus Check
-- 63 files · ~112,554 words
+- 95 files · ~256,069 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 835 nodes · 1532 edges · 54 communities (42 shown, 12 thin omitted)
-- Extraction: 89% EXTRACTED · 11% INFERRED · 0% AMBIGUOUS · INFERRED: 176 edges (avg confidence: 0.8)
+- 1522 nodes · 2946 edges · 95 communities (82 shown, 13 thin omitted)
+- Extraction: 89% EXTRACTED · 11% INFERRED · 0% AMBIGUOUS · INFERRED: 312 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Community Hubs (Navigation)
-- [[_COMMUNITY_Prompt Builder Internals|Prompt Builder Internals]]
-- [[_COMMUNITY_Agent Tests And Summaries|Agent Tests And Summaries]]
-- [[_COMMUNITY_GAI Package Architecture|GAI Package Architecture]]
-- [[_COMMUNITY_Content Serialization|Content Serialization]]
-- [[_COMMUNITY_Agent Loop Definition|Agent Loop Definition]]
-- [[_COMMUNITY_Echo Tool Tests|Echo Tool Tests]]
-- [[_COMMUNITY_History Session Tests|History Session Tests]]
-- [[_COMMUNITY_AI Core Types|AI Core Types]]
-- [[_COMMUNITY_Prompt Build Concepts|Prompt Build Concepts]]
-- [[_COMMUNITY_Provider Request Types|Provider Request Types]]
-- [[_COMMUNITY_Loop Tool Pipeline|Loop Tool Pipeline]]
-- [[_COMMUNITY_Loop Execution|Loop Execution]]
-- [[_COMMUNITY_Streaming Tool Detection|Streaming Tool Detection]]
-- [[_COMMUNITY_History Source|History Source]]
+- [[_COMMUNITY_textRunInput()|textRunInput()]]
+- [[_COMMUNITY_workflow go|workflow go]]
+- [[_COMMUNITY_loop test go|loop test go]]
+- [[_COMMUNITY_StartOperationSpan()|StartOperationSpan()]]
+- [[_COMMUNITY_historyObserver|historyObserver]]
+- [[_COMMUNITY_model go|model go]]
+- [[_COMMUNITY_search go|search go]]
+- [[_COMMUNITY_Prompt Builder|Prompt Builder]]
+- [[_COMMUNITY_session manager test go|session manager test go]]
+- [[_COMMUNITY_searchObserver|searchObserver]]
+- [[_COMMUNITY_summary go|summary go]]
+- [[_COMMUNITY_renderer go|renderer go]]
+- [[_COMMUNITY_Context|Context]]
+- [[_COMMUNITY_HistorySource|HistorySource]]
+- [[_COMMUNITY_source go|source go]]
+- [[_COMMUNITY_Builder|Builder]]
+- [[_COMMUNITY_Run()|Run()]]
+- [[_COMMUNITY_loopRunState|loopRunState]]
+- [[_COMMUNITY_capability go|capability go]]
+- [[_COMMUNITY_RAG()|RAG()]]
+- [[_COMMUNITY_agent go|agent go]]
+- [[_COMMUNITY_content go|content go]]
+- [[_COMMUNITY_source test go|source test go]]
+- [[_COMMUNITY_model go|model go]]
+- [[_COMMUNITY_prompt part go|prompt part go]]
+- [[_COMMUNITY_NewNamedPart()|NewNamedPart()]]
+- [[_COMMUNITY_part go|part go]]
+- [[_COMMUNITY_NewTextPart()|NewTextPart()]]
+- [[_COMMUNITY_renderObserver|renderObserver]]
+- [[_COMMUNITY_message go|message go]]
+- [[_COMMUNITY_MockModel|MockModel]]
+- [[_COMMUNITY_MockSessionStore|MockSessionStore]]
+- [[_COMMUNITY_ModelRepository|ModelRepository]]
+- [[_COMMUNITY_NewTextContent()|NewTextContent()]]
+- [[_COMMUNITY_iteration go|iteration go]]
+- [[_COMMUNITY_DetectToolCallsInStream()|DetectToolCallsInStream()]]
+- [[_COMMUNITY_Context|Context]]
+- [[_COMMUNITY_message test go|message test go]]
+- [[_COMMUNITY_Context|Context]]
+- [[_COMMUNITY_T|T]]
+- [[_COMMUNITY_renderer test go|renderer test go]]
+- [[_COMMUNITY_scriptedWorkflowModel|scriptedWorkflowModel]]
+- [[_COMMUNITY_buildChatCompletionRequest()|buildChatCompletionRequest()]]
+- [[_COMMUNITY_response test go|response test go]]
+- [[_COMMUNITY_Provider|Provider]]
+- [[_COMMUNITY_GenerateStream()|GenerateStream()]]
+- [[_COMMUNITY_Provider|Provider]]
+- [[_COMMUNITY_CountTokens()|CountTokens()]]
+- [[_COMMUNITY_Token|Token]]
+- [[_COMMUNITY_NewContentFromType()|NewContentFromType()]]
+- [[_COMMUNITY_MockProvider|MockProvider]]
+- [[_COMMUNITY_AIRequest|AIRequest]]
+- [[_COMMUNITY_LoadPromptFromFile()|LoadPromptFromFile()]]
+- [[_COMMUNITY_historyStore|historyStore]]
+- [[_COMMUNITY_Agent Framework Thumbnail|Agent Framework Thumbnail]]
+- [[_COMMUNITY_Prompt|Prompt]]
+- [[_COMMUNITY_toolSignatureTestTool|toolSignatureTestTool]]
+- [[_COMMUNITY_provider test go|provider test go]]
+- [[_COMMUNITY_provider test go|provider test go]]
+- [[_COMMUNITY_Neon Sci Fi Workspace|Neon Sci Fi Workspace]]
+- [[_COMMUNITY_rendererDebugSink|rendererDebugSink]]
+- [[_COMMUNITY_History Source Tests|History Source Tests]]
+- [[_COMMUNITY_CombinedPrompt|CombinedPrompt]]
+- [[_COMMUNITY_TestAIRequestStoresPromptString()|TestAIRequestStoresPromptString()]]
+- [[_COMMUNITY_TestToolCallStringNilReceiver()|TestToolCallStringNilReceiver()]]
+- [[_COMMUNITY_TestPartTokensRecountsNegativeCachedValue()|TestPartTokensRecountsNegativeCachedValue()]]
+- [[_COMMUNITY_store go|store go]]
+- [[_COMMUNITY_summarize go|summarize go]]
 - [[_COMMUNITY_RAG Source|RAG Source]]
-- [[_COMMUNITY_Mock Model|Mock Model]]
-- [[_COMMUNITY_Recording Model Tests|Recording Model Tests]]
-- [[_COMMUNITY_Mock Session Store|Mock Session Store]]
-- [[_COMMUNITY_Model Repository|Model Repository]]
-- [[_COMMUNITY_Mistral Provider|Mistral Provider]]
-- [[_COMMUNITY_Mistral Model Tests|Mistral Model Tests]]
-- [[_COMMUNITY_Gemini Provider|Gemini Provider]]
-- [[_COMMUNITY_XML Renderer|XML Renderer]]
-- [[_COMMUNITY_Debug Sink|Debug Sink]]
-- [[_COMMUNITY_Conversation Views|Conversation Views]]
-- [[_COMMUNITY_AI Response Tokens|AI Response Tokens]]
-- [[_COMMUNITY_Mock Provider|Mock Provider]]
-- [[_COMMUNITY_Thumbnail Interface|Thumbnail Interface]]
-- [[_COMMUNITY_Prompt Composition|Prompt Composition]]
-- [[_COMMUNITY_Gemini Provider Tests|Gemini Provider Tests]]
-- [[_COMMUNITY_Mistral Provider Tests|Mistral Provider Tests]]
-- [[_COMMUNITY_Thumbnail Visual Style|Thumbnail Visual Style]]
-- [[_COMMUNITY_Request Tests|Request Tests]]
-- [[_COMMUNITY_AI Request|AI Request]]
-- [[_COMMUNITY_Store Interfaces|Store Interfaces]]
-- [[_COMMUNITY_Summarizer|Summarizer]]
-- [[_COMMUNITY_RAG Budgeting Tests|RAG Budgeting Tests]]
-- [[_COMMUNITY_Project Workflow|Project Workflow]]
-- [[_COMMUNITY_Summary Request|Summary Request]]
-- [[_COMMUNITY_Model Interface|Model Interface]]
-- [[_COMMUNITY_Provider Interface|Provider Interface]]
-- [[_COMMUNITY_Tokenizer Interface|Tokenizer Interface]]
-- [[_COMMUNITY_Conversation Interface|Conversation Interface]]
-- [[_COMMUNITY_Go CI Workflow|Go CI Workflow]]
-- [[_COMMUNITY_Context Conversation Interface|Context Conversation Interface]]
+- [[_COMMUNITY_RAG Store Interface|RAG Store Interface]]
+- [[_COMMUNITY_Go 1 26 x Project|Go 1 26 x Project]]
+- [[_COMMUNITY_Summarizer Interface|Summarizer Interface]]
+- [[_COMMUNITY_XML Renderer Group Rendering Test|XML Renderer Group Rendering Test]]
+- [[_COMMUNITY_Summary System Prompt Text|Summary System Prompt Text]]
+- [[_COMMUNITY_LGPL v2 1 License|LGPL v2 1 License]]
 
 ## God Nodes (most connected - your core abstractions)
-1. `Builder` - 32 edges
-2. `Part` - 28 edges
-3. `Required()` - 26 edges
-4. `NewPromptBuilder()` - 26 edges
-5. `T` - 25 edges
-6. `Section` - 23 edges
-7. `Model` - 21 edges
-8. `NewPart()` - 18 edges
-9. `Model` - 17 edges
-10. `MockSessionStore` - 15 edges
+1. `NewTextContent()` - 38 edges
+2. `historyObserver` - 31 edges
+3. `Builder` - 25 edges
+4. `StartOperationSpan()` - 24 edges
+5. `EndSpan()` - 23 edges
+6. `promptBuilderObserver` - 21 edges
+7. `Context` - 20 edges
+8. `textRunInput()` - 18 edges
+9. `consumeWorkflow()` - 18 edges
+10. `NewEchoTool()` - 17 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `ModelRepository` --semantically_similar_to--> `ModelRepository`  [INFERRED] [semantically similar]
-  ai/model_repository.go → README.md
-- `DetectToolCallsInStream` --conceptually_related_to--> `loop Package`  [INFERRED]
-  ai/tool_call.go → README.md
-- `Prompt` --conceptually_related_to--> `PromptBuilder`  [INFERRED]
-  ai/prompt.go → README.md
-- `Summarizer` --conceptually_related_to--> `PromptBuilder`  [INFERRED]
-  agent/summary/summary.go → README.md
-- `Gemini Function Call Mapper` --semantically_similar_to--> `Tool Call Content`  [INFERRED] [semantically similar]
-  ai/gemini/model.go → context/content.go
+- `TestAgentNewRunCreatesLoop()` --calls--> `NewEchoTool()`  [INFERRED]
+  agent/agent_test.go → loop/echo_tool.go
+- `TestAgentToolsAutomaticallyAddPromptContract()` --calls--> `NewEchoTool()`  [INFERRED]
+  agent/agent_test.go → loop/echo_tool.go
+- `TestAgentToolDefinitionOptionsCustomizeAutomaticPromptContract()` --calls--> `NewEchoTool()`  [INFERRED]
+  agent/agent_test.go → loop/echo_tool.go
+- `TestAgentToolDefinitionOptionsCustomizeAutomaticPromptContract()` --calls--> `WithUsageProtocol()`  [INFERRED]
+  agent/agent_test.go → context/tooldefinitions/source.go
+- `TestAgentDoesNotDuplicateExistingToolDefinitions()` --calls--> `NewEchoTool()`  [INFERRED]
+  agent/agent_test.go → loop/echo_tool.go
 
 ## Import Cycles
 - None detected.
 
 ## Hyperedges (group relationships)
-- **Core AI Contracts** — ai_Provider, ai_Model, ai_Tokenizer, ai_AIRequest, ai_AIResponse, ai_Prompt [EXTRACTED 1.00]
-- **Summary Agent Pipeline** — summary_system_prompt, summary_Definition, summary_Summarizer, summary_Summarize, agent_NewLoop, ai_Token [EXTRACTED 1.00]
-- **Tool Call Stream Detection** — ai_DetectToolCallsInStream, ai_parseToolCall, ai_GenerateToolCallID, ai_ToolCall, ai_Token [EXTRACTED 1.00]
-- **AI Provider Model Pattern** — gemini_provider, gemini_model, gemini_known_models, mistral_provider, mistral_model, mistral_known_models [INFERRED 0.85]
-- **Streaming Tool Call Mapping** — gemini_generate_stream, gemini_map_function_call, mistral_generate_stream, mistral_tool_call_accumulator, content_tool_call_content [INFERRED 0.82]
-- **Token Budgeted Prompt Sources** — prompt_builder, prompt_budget, source_budget, history_source, rag_source, builder_budget_fitting, builder_optional_summarization [INFERRED 0.86]
-- **Prompt Rendering And Loop Execution** — renderer_renderPrompt, loop_Loop, loop_IncrementalPromptSession [INFERRED 0.75]
-- **Tool Call Lifecycle** — iteration_AppendToken, loop_ToolExecutionPipeline, tool_CallTool, echo_tool_EchoTool [EXTRACTED 0.95]
-- **Test Mocks Support Loop And History** — model_MockModel, model_MockTokenizer, session_store_MockSessionStore, loop_test_LoopScenarios, session_manager_test_HistorySource [EXTRACTED 0.90]
 - **Thumbnail Branding Composition** — GAI_thumbnail_gai_title_typography, GAI_thumbnail_agent_framework_banner, GAI_thumbnail_go_mascot_agent [EXTRACTED 1.00]
 - **Automation Agent Visual Theme** — GAI_thumbnail_go_mascot_agent, GAI_thumbnail_dashboard_tablet, GAI_thumbnail_robotic_arms, GAI_thumbnail_neon_sci_fi_workspace [INFERRED 0.85]
 - **Neon Symmetric Layout System** — GAI_thumbnail_symmetric_layout, GAI_thumbnail_blue_purple_glow_palette, GAI_thumbnail_robotic_arms [INFERRED 0.80]
+- **GAI Core Architecture** — README_ai_package, README_context_package, README_loop_package, README_agent_package [EXTRACTED 1.00]
+- **Agent Workflow Pipeline** — README_agent_definition, README_workflow, README_loop_execution, README_stream_middleware, README_workflow_result [EXTRACTED 1.00]
+- **Repository Automation And Quality** — coderabbit_code_review_configuration, coderabbit_gitleaks, coderabbit_semgrep, dependabot_version_updates, dependabot_gomod_ecosystem [INFERRED 0.78]
 
-## Communities (54 total, 12 thin omitted)
+## Communities (95 total, 13 thin omitted)
 
-### Community 0 - "Prompt Builder Internals"
+### Community 0 - "textRunInput()"
 Cohesion: 0.06
-Nodes (56): builderEntry, builderEntry, builderPromptSession, builderView, BuildTrace, BuildTraceEntry, entryAdmissionOptions, EntryKind (+48 more)
+Nodes (58): Context, ContextSource, Conversation, Part, PromptInput, RunInput, T, Tokenizer (+50 more)
 
-### Community 1 - "Agent Tests And Summaries"
-Cohesion: 0.09
-Nodes (56): T, TestNewLoopCreatesReusableAgentLoop(), BuildTrace, emptyConversation, EntryOption, fakeSummarizer, Builder, loadPromptFromFile() (+48 more)
-
-### Community 2 - "GAI Package Architecture"
-Cohesion: 0.05
-Nodes (54): GAI Framework, agent Package, ai Package, context Package, DebugSink, loop Package, ModelRepository, PromptBuilder (+46 more)
-
-### Community 3 - "Content Serialization"
-Cohesion: 0.06
-Nodes (29): Content, NewContentFromType(), NewTextContent(), NewToolCallContent(), NewToolResultContent(), NewToolResultErrContent(), T, TestContentMarshalRoundTrip() (+21 more)
-
-### Community 4 - "Agent Loop Definition"
-Cohesion: 0.06
-Nodes (36): Model, Tool, ToolResPreProcessor, NewLoop(), Definition, PromptBuilderFactory, RunInput, Context (+28 more)
-
-### Community 5 - "Echo Tool Tests"
-Cohesion: 0.08
-Nodes (25): Int32, countingPromptBuilder, ToolCall, ToolResponse, NewEchoTool(), echoArgs, EchoTool, AIRequest (+17 more)
-
-### Community 6 - "History Session Tests"
-Cohesion: 0.13
-Nodes (30): fakeConversation, Source, History(), rejectingEmptyTokenizer, assertHistoryContainsAll(), assertHistoryContainsNone(), assertHistoryStoreQueries(), Context (+22 more)
-
-### Community 7 - "AI Core Types"
-Cohesion: 0.09
-Nodes (27): AIRequest, AIResponse, Client, Context, DebugSink, Mutex, Part, Provider (+19 more)
-
-### Community 8 - "Prompt Build Concepts"
-Cohesion: 0.08
-Nodes (37): Build Trace, Builder Entry Admission, Builder Budget Fitting, Builder Optional Summarization, Content Interface, Content Factory From Type, Content Tests, Text Content (+29 more)
-
-### Community 9 - "Provider Request Types"
-Cohesion: 0.09
-Nodes (24): AIRequest, AIResponse, Builder, Context, DebugSink, Provider, RawMessage, Token (+16 more)
-
-### Community 10 - "Loop Tool Pipeline"
+### Community 1 - "workflow go"
 Cohesion: 0.07
-Nodes (34): Agentic Loop Package, Echo Tool, Loop Error Sentinels, Append Token To Iteration, Iteration, Iteration Message Conversion, Iteration Part, Completed Tool Call Deduplication (+26 more)
+Nodes (61): AgentMiddleware, AgentMiddlewareConfig, AgentResult, capturedStream, ErrorPolicy, forwardErrors(), forwardTokens(), Agent (+53 more)
 
-### Community 11 - "Loop Execution"
+### Community 2 - "loop test go"
+Cohesion: 0.06
+Nodes (45): EventType, countingPromptBuilder, ToolParameters, NewEchoTool(), echoArgs, EchoTool, failingToolResponseProcessor, collectLoopEvents() (+37 more)
+
+### Community 3 - "StartOperationSpan()"
+Cohesion: 0.07
+Nodes (37): appendRenderNodeText(), clippedPrompt(), Builder, Context, DebugSink, Part, RenderNode, Span (+29 more)
+
+### Community 4 - "historyObserver"
+Cohesion: 0.07
+Nodes (23): Context, DebugSink, Part, Span, Summary, Turn, Builder, Context (+15 more)
+
+### Community 5 - "model go"
+Cohesion: 0.07
+Nodes (44): AIRequest, AIResponse, Client, Context, DebugSink, Mutex, Part, Provider (+36 more)
+
+### Community 6 - "search go"
+Cohesion: 0.08
+Nodes (37): APIError, captureDebugSink, Option, decodeAPIError(), NewSearchTool(), NewSearchToolFromEnv(), attributeMap(), TestNewSearchToolValidatesConfiguration() (+29 more)
+
+### Community 7 - "Prompt Builder"
+Cohesion: 0.06
+Nodes (46): Agent Definition, AgentMiddleware, agent Package, Agent Style Applications, ai Package, AIRequest, AIResponse, context Package (+38 more)
+
+### Community 8 - "session manager test go"
+Cohesion: 0.10
+Nodes (34): fakeConversation, Source, History(), rejectingEmptyTokenizer, assertHistoryContainsAll(), assertHistoryContainsNone(), assertHistoryStoreQueries(), Context (+26 more)
+
+### Community 9 - "searchObserver"
+Cohesion: 0.08
+Nodes (28): T, TestCloneWorkflowResultOwnsMutableExecutionData(), newSearchObserver(), searchObserver, Context, ToolCall, ToolResponse, CallTool() (+20 more)
+
+### Community 10 - "summary go"
+Cohesion: 0.08
+Nodes (29): Context, Model, Summarizer, Tokenizer, Tool, AIRequest, AIResponse, Context (+21 more)
+
+### Community 11 - "renderer go"
+Cohesion: 0.14
+Nodes (32): formatSimpleInstructionLabel(), formatSimpleLine(), Builder, Context, DebugSink, Part, indent(), isSimpleTextInstruction() (+24 more)
+
+### Community 12 - "Context"
+Cohesion: 0.11
+Nodes (25): middlewareObserver, agentResultFields(), errorPolicyName(), Agent, AgentResult, capturedStream, Context, DebugSink (+17 more)
+
+### Community 13 - "HistorySource"
 Cohesion: 0.09
-Nodes (24): IterationInformation, iterationToolCall, Loop, Context, Iteration, Message, Model, PromptBuilder (+16 more)
+Nodes (29): countMessageContentTokens(), Context, Conversation, DebugSink, HistorySource, HistoryStore, Message, Model (+21 more)
 
-### Community 12 - "Streaming Tool Detection"
+### Community 14 - "source go"
+Cohesion: 0.10
+Nodes (23): Context, DebugSink, Span, Context, DebugSink, Part, Renderer, RenderNode (+15 more)
+
+### Community 15 - "Builder"
+Cohesion: 0.13
+Nodes (16): ContextSource, Definition, Context, Builder, Conversation, DebugSink, Part, PromptInput (+8 more)
+
+### Community 16 - "Run()"
+Cohesion: 0.13
+Nodes (27): AttemptErrorEvent(), AttemptStartEvent(), DoneEvent(), ErrorEvent(), Context, Iteration, Token, IterationDoneEvent() (+19 more)
+
+### Community 17 - "loopRunState"
+Cohesion: 0.08
+Nodes (16): iterationObserver, iterationObserver, Context, Iteration, Loop, Span, Token, newLoopRunState() (+8 more)
+
+### Community 18 - "capability go"
+Cohesion: 0.12
+Nodes (23): additionalPropertiesValue(), RawMessage, isSupportedToolParameterType(), NewToolDefinition(), T, TestNewToolDefinitionRejectsInvalidSchema(), TestNewToolDefinitionValidatesSchema(), TestResponseFormatValidation() (+15 more)
+
+### Community 19 - "RAG()"
+Cohesion: 0.11
+Nodes (19): Document, fakeRAGStore, Context, DebugSink, Part, PromptView, Source, SourceBudget (+11 more)
+
+### Community 20 - "agent go"
 Cohesion: 0.14
-Nodes (18): expectedWrapToken, collectTokens(), T, Token, normalizeExpectedTokens(), normalizeJSON(), normalizeTokens(), TestDetectToolCallsInStream() (+10 more)
+Nodes (19): Context, DebugSink, Loop, Model, PromptBuilder, PromptInput, Tokenizer, Tool (+11 more)
 
-### Community 13 - "History Source"
+### Community 21 - "content go"
+Cohesion: 0.12
+Nodes (8): Context, RenderNode, NewToolCallContent(), NewToolResultErrContent(), TextContent, ToolCallContent, ToolResultContent, ToolResultErrContent
+
+### Community 22 - "source test go"
+Cohesion: 0.17
+Nodes (16): Context, DebugEvent, Mutex, T, ToolCall, ToolParameters, ToolResponse, captureSink (+8 more)
+
+### Community 23 - "model go"
 Cohesion: 0.14
-Nodes (18): Content, countMessageContentTokens(), Context, DebugSink, Message, Part, PromptView, SourceBudget (+10 more)
+Nodes (18): RawMessage, ResponseFormat, Tokenizer, ToolDefinition, chatResponseJSONSchema, chatToolFunctionRequest, chatCompletionResponse, chatCompletionStreamResponse (+10 more)
 
-### Community 14 - "RAG Source"
+### Community 24 - "prompt part go"
+Cohesion: 0.17
+Nodes (11): MessagePart, Part, Content, Context, RenderNode, Role, Tokenizer, NewSystemPart() (+3 more)
+
+### Community 25 - "NewNamedPart()"
 Cohesion: 0.15
-Nodes (15): Document, fakeRAGStore, DebugSink, Source, RAG(), Context, T, TestRAGSourceBudgetsDocumentsInsideGroup() (+7 more)
+Nodes (14): NamedPart, Content, Context, Part, RenderNode, TextPart, Tokenizer, NewJSONPart() (+6 more)
 
-### Community 15 - "Mock Model"
+### Community 26 - "part go"
+Cohesion: 0.19
+Nodes (10): Context, Message, RenderNode, Role, Tokenizer, Content, MapMessageToContent(), roleRenderType() (+2 more)
+
+### Community 27 - "NewTextPart()"
+Cohesion: 0.19
+Nodes (13): emptyConversation, messageConversation, Message, Part, T, TestBuildPromptOrdersInputContextBeforeUserAndConversation(), TestBuildPromptRendersStructuredConversationContent(), TestNewPromptBuilderFromDefinition() (+5 more)
+
+### Community 28 - "renderObserver"
+Cohesion: 0.29
+Nodes (10): addRendererPreview(), Context, DebugSink, Part, RenderNode, newRenderObserver(), rendererNodeStructure(), rendererSourceName() (+2 more)
+
+### Community 29 - "message go"
+Cohesion: 0.21
+Nodes (11): combinedMessageContent(), Content, Context, TurnTokenStore, DebugSink, Message, Tokenizer, IsValidRole() (+3 more)
+
+### Community 30 - "MockModel"
 Cohesion: 0.18
 Nodes (8): MockModel, MockModelResponse, MockTokenizer, AIRequest, AIResponse, Context, Token, Tokenizer
 
-### Community 16 - "Recording Model Tests"
-Cohesion: 0.19
-Nodes (7): AIRequest, AIResponse, Context, Token, Tokenizer, recordingModel, toolCallModel
-
-### Community 17 - "Mock Session Store"
+### Community 31 - "MockSessionStore"
 Cohesion: 0.28
 Nodes (10): AddMessageCall, AddMessagesCall, CreateSessionCall, GetMessagesCall, GetSessionCall, MockSessionStore, UpdateMessageTokensCall, Context (+2 more)
 
-### Community 18 - "Model Repository"
+### Community 32 - "ModelRepository"
 Cohesion: 0.23
-Nodes (8): Context, DebugSink, Model, Provider, NewModelRepository(), T, TestModelRepository(), ModelRepository
+Nodes (9): Context, DebugSink, Model, Provider, NewModelRepository(), T, TestModelRepository(), TestModelRepositoryRejectsNilProvider() (+1 more)
 
-### Community 19 - "Mistral Provider"
+### Community 33 - "NewTextContent()"
+Cohesion: 0.29
+Nodes (15): NewTextContent(), NewToolResultContent(), T, TestHistoryContentImplementsContent(), TestHistoryPartRenderEmpty(), TestHistoryPartRendersSimpleContent(), TestHistoryPartRendersStructuredContent(), TestHistoryPartRendersSummary() (+7 more)
+
+### Community 34 - "iteration go"
+Cohesion: 0.19
+Nodes (10): IterationPart, AIResponse, Iteration, Message, Token, ToolCall, ToolResponse, IterationInformation (+2 more)
+
+### Community 35 - "DetectToolCallsInStream()"
+Cohesion: 0.20
+Nodes (12): DetectToolCallsInStream(), GenerateToolCallID(), Context, DebugSink, RawMessage, Token, isWS(), joinTokenData() (+4 more)
+
+### Community 36 - "Context"
+Cohesion: 0.16
+Nodes (7): debugEventSink, debugTestTokenizer, failingPart, Context, DebugEvent, RenderNode, Tokenizer
+
+### Community 37 - "message test go"
 Cohesion: 0.22
-Nodes (9): Client, DebugSink, Model, Mistral Invalid API Key Error, Mistral Known Models, Provider, isKnownModel(), New() (+1 more)
+Nodes (13): Context, turnTokenStore, T, TestMessageTokensHandlesNilContent(), TestMessageTokensRecountsNegativeCachedValue(), TestTurnTokenizeCountsCombinedMessagesWithoutUpdatingMessages(), TestTurnTokenizeEmitsDebugEventWhenSavingTokensFails(), TestTurnTokenizeHandlesNilMessageContent() (+5 more)
 
-### Community 20 - "Mistral Model Tests"
-Cohesion: 0.30
-Nodes (11): T, TestModelGenerate(), TestModelGenerateNoChoices(), TestModelGenerateStream(), TestModelGenerateStreamDetectsTextEncodedToolCall(), TestModelGenerateStreamToolCall(), TestModelGenerateStreamToolCallDeltas(), TestModelTokenizerCountTokens() (+3 more)
+### Community 38 - "Context"
+Cohesion: 0.19
+Nodes (7): failingRenderPart, historyPartAdapter, Context, Message, RenderNode, Tokenizer, renderTestPart
 
-### Community 21 - "Gemini Provider"
+### Community 39 - "T"
 Cohesion: 0.26
-Nodes (8): DebugSink, Model, Gemini Invalid API Key Error, Gemini Known Models, Provider, isKnownModel(), New(), Gemini Provider Tests
+Nodes (13): T, TestModelGenerate(), TestModelGenerateMapsMultipleResponseToolCalls(), TestModelGenerateMapsRequestCapabilities(), TestModelGenerateNoChoices(), TestModelGenerateStream(), TestModelGenerateStreamDetectsTextEncodedToolCall(), TestModelGenerateStreamToolCall() (+5 more)
 
-### Community 22 - "XML Renderer"
-Cohesion: 0.38
-Nodes (9): Renderer, Builder, Part, Prompt, Section, renderPrompt(), writeEscaped(), writeXMLPart() (+1 more)
+### Community 40 - "renderer test go"
+Cohesion: 0.37
+Nodes (12): NewMessagePart(), T, TestRendererDebugStructureOmitsContentForNonSensitiveSink(), TestRenderersEmitDetailedTruncatedDebugEvents(), TestRenderersNotifyRenderResultCallback(), TestRenderersNotifyRenderResultCallbackForEmptyPrompt(), TestRenderToolSignatures(), TestSimpleRendererPreservesGenericNodeStructure() (+4 more)
 
-### Community 23 - "Debug Sink"
+### Community 41 - "scriptedWorkflowModel"
+Cohesion: 0.22
+Nodes (7): AIRequest, AIResponse, Context, Mutex, Token, Tokenizer, scriptedWorkflowModel
+
+### Community 42 - "buildChatCompletionRequest()"
+Cohesion: 0.20
+Nodes (10): AIRequest, AIResponse, ToolChoice, chatMessageRequest, chatResponseFormat, chatToolRequest, chatCompletionRequest, buildChatCompletionRequest() (+2 more)
+
+### Community 43 - "response test go"
+Cohesion: 0.31
+Nodes (10): expectedWrapToken, collectTokens(), T, Token, normalizeExpectedTokens(), normalizeJSON(), normalizeTokens(), TestAIResponseAppendTokenSeparatesThoughtsAndToolCalls() (+2 more)
+
+### Community 44 - "Provider"
 Cohesion: 0.27
-Nodes (5): Context, DebugEvent, DebugSink, DebugSinkFunc, SensitiveDebugSinkFunc
+Nodes (6): Client, DebugSink, Model, Provider, isKnownModel(), New()
 
-### Community 24 - "Conversation Views"
+### Community 45 - "GenerateStream()"
+Cohesion: 0.29
+Nodes (6): Builder, Token, ToolCall, mistralToolCallAccumulator, mistralToolCallState, mistralToolCallState
+
+### Community 46 - "Provider"
+Cohesion: 0.31
+Nodes (5): Provider, isKnownModel(), New(), DebugSink, Model
+
+### Community 47 - "CountTokens()"
+Cohesion: 0.31
+Nodes (5): Context, DebugSink, Provider, intPtr(), Tokenizer
+
+### Community 48 - "Token"
 Cohesion: 0.36
-Nodes (4): Conversation, Section, testPromptView, EntryView
+Nodes (5): AIResponse, RawMessage, ToolCall, Token, TokenType
 
-### Community 25 - "AI Response Tokens"
-Cohesion: 0.38
-Nodes (4): AIResponse, ToolCall, Token, TokenType
+### Community 49 - "NewContentFromType()"
+Cohesion: 0.57
+Nodes (6): NewContentFromType(), T, TestContentMarshalRoundTrip(), TestNewContentFromType(), TestNewContentFromTypeRejectsInvalidJSON(), TestNewContentFromTypeRejectsUnknownType()
 
-### Community 27 - "Thumbnail Interface"
+### Community 51 - "AIRequest"
+Cohesion: 0.33
+Nodes (5): AIRequest, ReasoningConfig, ResponseFormat, ToolChoice, ToolDefinition
+
+### Community 52 - "LoadPromptFromFile()"
+Cohesion: 0.33
+Nodes (4): Context, Builder, Part, LoadPromptFromFile()
+
+### Community 53 - "historyStore"
+Cohesion: 0.60
+Nodes (3): Context, historyStore, HistoryState
+
+### Community 54 - "Agent Framework Thumbnail"
 Cohesion: 0.60
 Nodes (5): Agent Framework Banner, Dashboard Tablet Interface, GAI Agent Framework Thumbnail, GAI Title Typography, Go Mascot Agent
 
-### Community 28 - "Prompt Composition"
+### Community 55 - "Prompt"
 Cohesion: 0.60
 Nodes (3): Prompt, Context, DebugSink
 
-### Community 29 - "Gemini Provider Tests"
+### Community 57 - "provider test go"
+Cohesion: 0.60
+Nodes (4): TestProviderModelAndListModels(), TestProviderModelValidation(), TestProviderValidate(), T
+
+### Community 58 - "provider test go"
 Cohesion: 0.60
 Nodes (4): T, TestProviderModelAndListModels(), TestProviderModelValidation(), TestProviderValidate()
 
-### Community 30 - "Mistral Provider Tests"
-Cohesion: 0.60
-Nodes (4): T, TestProviderModelAndListModels(), TestProviderModelValidation(), TestProviderValidate()
-
-### Community 31 - "Thumbnail Visual Style"
+### Community 59 - "Neon Sci Fi Workspace"
 Cohesion: 0.50
 Nodes (4): Blue Purple Glow Palette, Neon Sci Fi Workspace, Mirrored Robotic Arms, Symmetric Centered Layout
 
-### Community 32 - "Request Tests"
+### Community 61 - "History Source Tests"
 Cohesion: 0.67
-Nodes (3): T, TestAIRequestCombinedPrompt(), TestAIRequestCombinedPromptSkipsEmptySections()
+Nodes (4): History Budget Helper, History Source Tests, Mock Session Store, Session Store Interface
 
-### Community 36 - "RAG Budgeting Tests"
+### Community 62 - "CombinedPrompt"
+Cohesion: 0.67
+Nodes (3): CombinedPrompt, CombinedPromptWithDebug, Prompt
+
+### Community 68 - "RAG Source"
+Cohesion: 0.67
+Nodes (3): RAG Document, RAG Overflow Summarization, RAG Source
+
+### Community 69 - "RAG Store Interface"
 Cohesion: 0.67
 Nodes (3): RAG Source Document Budgeting Tests, Fake RAG Store, RAG Store Interface
 
 ## Knowledge Gaps
-- **153 isolated node(s):** `Model`, `Tool`, `ToolResPreProcessor`, `Loop`, `T` (+148 more)
+- **234 isolated node(s):** `Context`, `DebugSink`, `Source`, `PromptView`, `SourceBudget` (+229 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **12 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **13 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `TestLoopAppendsIterationMessagesToIncrementalPrompt()` connect `Agent Tests And Summaries` to `Echo Tool Tests`?**
-  _High betweenness centrality (0.199) - this node is a cross-community bridge._
-- **Why does `NewPromptBuilder()` connect `Agent Tests And Summaries` to `Prompt Builder Internals`, `Echo Tool Tests`?**
-  _High betweenness centrality (0.146) - this node is a cross-community bridge._
-- **Why does `DetectToolCallsInStream()` connect `Streaming Tool Detection` to `Provider Request Types`, `Echo Tool Tests`?**
-  _High betweenness centrality (0.132) - this node is a cross-community bridge._
-- **Are the 24 inferred relationships involving `Required()` (e.g. with `TestNewLoopCreatesReusableAgentLoop()` and `.SystemPrompt()`) actually correct?**
-  _`Required()` has 24 INFERRED edges - model-reasoned connections that need verification._
-- **Are the 24 inferred relationships involving `NewPromptBuilder()` (e.g. with `TestNewLoopCreatesReusableAgentLoop()` and `TestPromptBuilderBudgetsRequiredSourceBeforeEarlierOptionalContext()`) actually correct?**
-  _`NewPromptBuilder()` has 24 INFERRED edges - model-reasoned connections that need verification._
-- **What connects `Model`, `Tool`, `ToolResPreProcessor` to the rest of the system?**
-  _153 weakly-connected nodes found - possible documentation gaps or missing edges._
-- **Should `Prompt Builder Internals` be split into smaller, more focused modules?**
-  _Cohesion score 0.06060606060606061 - nodes in this community are weakly interconnected._
+- **Why does `StartOperationSpan()` connect `StartOperationSpan()` to `DetectToolCallsInStream()`, `historyObserver`, `model go`, `searchObserver`, `buildChatCompletionRequest()`, `Context`, `GenerateStream()`, `source go`, `CountTokens()`, `loopRunState`?**
+  _High betweenness centrality (0.286) - this node is a cross-community bridge._
+- **Why does `NewTextContent()` connect `NewTextContent()` to `textRunInput()`, `TestPartTokensRecountsNegativeCachedValue()`, `loop test go`, `iteration go`, `historyObserver`, `message test go`, `renderer test go`, `searchObserver`, `summary go`, `content go`, `NewNamedPart()`, `NewTextPart()`?**
+  _High betweenness centrality (0.267) - this node is a cross-community bridge._
+- **Why does `newHistoryBuildObserver()` connect `historyObserver` to `StartOperationSpan()`, `HistorySource`?**
+  _High betweenness centrality (0.084) - this node is a cross-community bridge._
+- **Are the 36 inferred relationships involving `NewTextContent()` (e.g. with `textRunInput()` and `TestAgentWorkflowEmitsLifecycleEventsAndSpans()`) actually correct?**
+  _`NewTextContent()` has 36 INFERRED edges - model-reasoned connections that need verification._
+- **Are the 21 inferred relationships involving `StartOperationSpan()` (e.g. with `newRunCreationObserver()` and `newWorkflowObserver()`) actually correct?**
+  _`StartOperationSpan()` has 21 INFERRED edges - model-reasoned connections that need verification._
+- **Are the 20 inferred relationships involving `EndSpan()` (e.g. with `.Finish()` and `.Finished()`) actually correct?**
+  _`EndSpan()` has 20 INFERRED edges - model-reasoned connections that need verification._
+- **What connects `Context`, `DebugSink`, `Source` to the rest of the system?**
+  _234 weakly-connected nodes found - possible documentation gaps or missing edges._
