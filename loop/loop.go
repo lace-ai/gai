@@ -123,7 +123,7 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 			var cancel context.CancelFunc
 
 			for attempt := 1; ; attempt++ {
-				attemptIteration := Iteration{Count: iteration.Count}
+				attemptIteration := Iteration{Count: iteration.Count, UserMessage: userMessage}
 				toolCalls = nil
 
 				iterCtx, iterState = runState.startIteration(ctx, iteration.Count, attempt)
@@ -200,7 +200,6 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 				}
 
 				if !retrying {
-					attemptIteration.UserMessage = userMessage
 					iteration = attemptIteration
 					break
 				}

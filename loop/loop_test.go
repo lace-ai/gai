@@ -546,8 +546,8 @@ func TestLoopRetriesDoNotConsumeIterations(t *testing.T) {
 		if event.AttemptID != i+1 {
 			t.Fatalf("retry event %d expected attempt %d, got %d", i, i+1, event.AttemptID)
 		}
-		if event.Iteration != nil && event.Iteration.UserMessage != nil {
-			t.Fatalf("retry event %d should not retain user message: %#v", i, event.Iteration.UserMessage)
+		if event.Iteration == nil || event.Iteration.UserMessage == nil {
+			t.Fatalf("retry event %d should retain user message: %#v", i, event.Iteration)
 		}
 	}
 	finalEvent := iterations[0]
@@ -588,6 +588,9 @@ func TestLoopStreamErrorsIncludeAttemptMetadata(t *testing.T) {
 	}
 	if errorEvents[0].IterationCount != 1 || errorEvents[0].AttemptID != 1 || errorEvents[0].RetryCount != 0 {
 		t.Fatalf("expected attempt metadata on error event, got %#v", errorEvents[0])
+	}
+	if errorEvents[0].Iteration == nil || errorEvents[0].Iteration.UserMessage == nil {
+		t.Fatalf("expected failed attempt snapshot to retain user message, got %#v", errorEvents[0].Iteration)
 	}
 }
 
