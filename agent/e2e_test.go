@@ -218,6 +218,46 @@ func TestAgentWorkflowMarksTerminalFailedAttemptDiscardable(t *testing.T) {
 	}
 }
 
+func TestAgentWorkflowReportsCancellationWithoutError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	assistant := agent.New(agent.Definition{
+		Name:  "canceled",
+		Model: &scriptedWorkflowModel{},
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return gaictx.New(gaictx.Definition{Renderer: &gaictx.SimpleRenderer{}}), nil
+		},
+	})
+
+	workflow, err := assistant.NewRun(context.Background(), textRunInput("stop"))
+	if err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	tokens, statuses, errs := workflow.Run(ctx)
+	for range tokens {
+	}
+	var gotStatuses []loop.IterationInformation
+	for status := range statuses {
+		gotStatuses = append(gotStatuses, status)
+	}
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("cancellation should not reach error stream: %v", err)
+		}
+	}
+	if len(gotStatuses) != 1 {
+		t.Fatalf("expected one cancellation status, got %#v", gotStatuses)
+	}
+	status := gotStatuses[0]
+	if !status.Canceled || !errors.Is(status.CancellationErr, context.Canceled) || !status.DiscardIteration {
+		t.Fatalf("unexpected cancellation status: %#v", status)
+	}
+	result := workflow.Result()
+	if !result.Complete || !result.Canceled || !result.Primary.Canceled || !errors.Is(result.CancellationErr, context.Canceled) {
+		t.Fatalf("unexpected canceled workflow result: %#v", result)
+	}
+}
+
 func TestAgentWorkflowEndToEndWithAppendMiddleware(t *testing.T) {
 	main := agent.New(agent.Definition{
 		Name:  "main",

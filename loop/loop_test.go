@@ -32,6 +32,10 @@ type scriptedStreamModel struct {
 	requests  []ai.AIRequest
 }
 
+type cancelAfterTokenModel struct {
+	cancel context.CancelFunc
+}
+
 type countingPromptBuilder struct {
 	count atomic.Int32
 }
@@ -188,6 +192,32 @@ func (m *scriptedStreamModel) Requests() []ai.AIRequest {
 	requests := make([]ai.AIRequest, len(m.requests))
 	copy(requests, m.requests)
 	return requests
+}
+
+func (m *cancelAfterTokenModel) Name() string {
+	return "cancel-after-token-model"
+}
+
+func (m *cancelAfterTokenModel) Generate(context.Context, ai.AIRequest) (*ai.AIResponse, error) {
+	return &ai.AIResponse{}, nil
+}
+
+func (m *cancelAfterTokenModel) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.Token {
+	out := make(chan ai.Token, 1)
+	go func() {
+		defer close(out)
+		out <- ai.Token{Type: ai.TokenTypeText, Data: []byte("partial")}
+		m.cancel()
+	}()
+	return out
+}
+
+func (m *cancelAfterTokenModel) Close() error {
+	return nil
+}
+
+func (m *cancelAfterTokenModel) Tokenizer() ai.Tokenizer {
+	return &mocks.MockTokenizer{}
 }
 
 func collectLoopEvents(t *testing.T, l *loop.Loop, ctx context.Context) []loop.Event {
@@ -502,6 +532,9 @@ func TestLoopWrapsToolPreprocessErrors(t *testing.T) {
 	if errorEvents[0].IterationCount != 1 || errorEvents[0].AttemptID != 1 {
 		t.Fatalf("expected attempt metadata on error event, got %#v", errorEvents[0])
 	}
+	if errorEvents[0].Iteration == nil || errorEvents[0].Iteration.UserMessage == nil {
+		t.Fatalf("expected failed tool-processing snapshot, got %#v", errorEvents[0].Iteration)
+	}
 	if len(l.Iterations) != 0 {
 		t.Fatalf("expected preprocess failure to skip persisted iteration, got %d", len(l.Iterations))
 	}
@@ -591,6 +624,9 @@ func TestLoopStreamErrorsIncludeAttemptMetadata(t *testing.T) {
 	}
 	if errorEvents[0].Iteration == nil || errorEvents[0].Iteration.UserMessage == nil {
 		t.Fatalf("expected failed attempt snapshot to retain user message, got %#v", errorEvents[0].Iteration)
+	}
+	if strings.Count(errorEvents[0].Err.Error(), loop.ErrMaxRetries.Error()) != 1 {
+		t.Fatalf("expected terminal error once, got %q", errorEvents[0].Err)
 	}
 }
 
@@ -697,15 +733,50 @@ func TestLoopDoesNotRetryCanceledStream(t *testing.T) {
 	l.RetryCount = 3
 
 	events := collectLoopEvents(t, l, context.Background())
-	err := loopError(events)
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("expected context.Canceled, got %v", err)
+	if err := loopError(events); err != nil {
+		t.Fatalf("cancellation should not be an error event, got %v", err)
+	}
+	canceled := loopEventsOfType(events, loop.EventCanceled)
+	if len(canceled) != 1 || !errors.Is(canceled[0].Err, context.Canceled) {
+		t.Fatalf("expected one context.Canceled event, got %#v", canceled)
 	}
 	if got := len(model.Requests()); got != 1 {
 		t.Fatalf("expected no retry after cancellation, got %d model requests", got)
 	}
 	if retries := loopEventsOfType(events, loop.EventRetry); len(retries) != 0 {
 		t.Fatalf("expected no retry events after cancellation, got %#v", retries)
+	}
+}
+
+func TestLoopCancelsWhenStreamClosesAfterContextCancellation(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	model := &cancelAfterTokenModel{cancel: cancel}
+	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
+	l.MaxLoopIterations = 1
+
+	events := collectLoopEvents(t, l, ctx)
+	if err := loopError(events); err != nil {
+		t.Fatalf("cancellation should not be an error event, got %v", err)
+	}
+	if done := loopEventsOfType(events, loop.EventDone); len(done) != 0 {
+		t.Fatalf("canceled stream should not finish successfully, got %#v", done)
+	}
+	canceled := loopEventsOfType(events, loop.EventCanceled)
+	if len(canceled) != 1 {
+		t.Fatalf("expected one cancellation event, got %#v", events)
+	}
+	event := canceled[0]
+	if !errors.Is(event.Err, context.Canceled) || event.Iteration == nil {
+		t.Fatalf("expected canceled partial attempt, got %#v", event)
+	}
+	if event.Iteration.UserMessage == nil || len(event.Iteration.Parts) != 1 {
+		t.Fatalf("expected canceled snapshot with user message and partial token, got %#v", event.Iteration)
+	}
+	if len(l.Iterations) != 0 {
+		t.Fatalf("expected canceled partial attempt not to persist, got %#v", l.Iterations)
 	}
 }
 

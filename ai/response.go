@@ -1,6 +1,9 @@
 package ai
 
-import "encoding/json"
+import (
+	"context"
+	"encoding/json"
+)
 
 // AIResponse is the accumulated result of a non-streaming generation request.
 type AIResponse struct {
@@ -58,6 +61,17 @@ type Token struct {
 // String returns the token's raw Data as a string.
 func (t Token) String() string {
 	return string(t.Data)
+}
+
+// SendToken forwards token unless ctx is canceled. It returns false when the
+// receiver can no longer be reached because ctx ended.
+func SendToken(ctx context.Context, out chan<- Token, token Token) bool {
+	select {
+	case out <- token:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 // AppendToken incorporates a streamed token into the response text and output

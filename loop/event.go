@@ -22,6 +22,8 @@ const (
 	EventDone EventType = "done"
 	// EventError reports terminal loop failure.
 	EventError EventType = "error"
+	// EventCanceled reports terminal cancellation without treating it as a failure.
+	EventCanceled EventType = "canceled"
 )
 
 // Event is one item from the loop's ordered execution stream.
@@ -87,11 +89,27 @@ func ErrorEvent(err error) Event {
 	return Event{Type: EventError, Err: err}
 }
 
+// CanceledEvent reports terminal cancellation that occurred outside a specific
+// model generation attempt.
+func CanceledEvent(err error) Event {
+	return Event{Type: EventCanceled, Err: err}
+}
+
 // AttemptErrorEvent reports a terminal error that occurred inside a specific
 // model generation attempt.
 func AttemptErrorEvent(iterationCount, attemptID, retryCount int, attemptIteration *Iteration, err error) Event {
+	return attemptTerminalEvent(EventError, iterationCount, attemptID, retryCount, attemptIteration, err)
+}
+
+// AttemptCanceledEvent reports terminal cancellation that occurred inside a
+// specific model generation attempt.
+func AttemptCanceledEvent(iterationCount, attemptID, retryCount int, attemptIteration *Iteration, err error) Event {
+	return attemptTerminalEvent(EventCanceled, iterationCount, attemptID, retryCount, attemptIteration, err)
+}
+
+func attemptTerminalEvent(eventType EventType, iterationCount, attemptID, retryCount int, attemptIteration *Iteration, err error) Event {
 	event := Event{
-		Type:           EventError,
+		Type:           eventType,
 		IterationCount: iterationCount,
 		AttemptID:      attemptID,
 		RetryCount:     retryCount,

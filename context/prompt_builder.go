@@ -178,6 +178,9 @@ func (b *Builder) BuildContext(ctx context.Context) (contextParts []Part, err er
 		stats.ContextPartCount = len(contextParts)
 		obs.FinishContext(err, stats)
 	}()
+	if err = ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	if b.TokenBudget > 0 {
 		stats.SystemTokens = b.SystemInstructionsTokens(ctx)
@@ -189,6 +192,9 @@ func (b *Builder) BuildContext(ctx context.Context) (contextParts []Part, err er
 	obs.BuildStarted(ctx, stats)
 
 	for _, source := range b.ContextSources {
+		if err = ctx.Err(); err != nil {
+			return nil, err
+		}
 		if source == nil {
 			obs.SourceSkipped(ctx, "<nil>")
 			continue
@@ -199,6 +205,9 @@ func (b *Builder) BuildContext(ctx context.Context) (contextParts []Part, err er
 		part, err := source.Function(ctx, stats.RemainingTokens)
 		if err != nil {
 			obs.SourceFailed(ctx, source.Name(), stats.RemainingTokens, err)
+			return nil, err
+		}
+		if err = ctx.Err(); err != nil {
 			return nil, err
 		}
 		if part != nil {
@@ -218,6 +227,9 @@ func (b *Builder) BuildContext(ctx context.Context) (contextParts []Part, err er
 		}
 	}
 	for _, part := range b.input.Context {
+		if err = ctx.Err(); err != nil {
+			return nil, err
+		}
 		if part == nil {
 			continue
 		}
@@ -229,6 +241,9 @@ func (b *Builder) BuildContext(ctx context.Context) (contextParts []Part, err er
 		if ok && b.TokenBudget > 0 {
 			stats.RemainingTokens -= tokens
 		}
+	}
+	if err = ctx.Err(); err != nil {
+		return nil, err
 	}
 	b.ContextParts = contextParts
 	obs.BuildFinished(ctx, stats)
@@ -246,6 +261,9 @@ func (b *Builder) BuildPrompt(ctx context.Context, conv Conversation) (prompt st
 		stats.PromptChars = len(prompt)
 		obs.FinishRender(err, stats)
 	}()
+	if err = ctx.Err(); err != nil {
+		return "", err
+	}
 
 	var parts []Part
 	parts = append(parts, NewSystemPart(b.SystemInstructions))
@@ -265,6 +283,9 @@ func (b *Builder) BuildPrompt(ctx context.Context, conv Conversation) (prompt st
 	stats.PartCount = len(parts)
 	renderCtx, finishRendererRender := obs.StartRendererRender(ctx, stats.PartCount)
 	prompt, err = b.Renderer.Render(renderCtx, parts)
+	if err == nil {
+		err = ctx.Err()
+	}
 	stats.PromptChars = len(prompt)
 	finishRendererRender(err, stats.PromptChars)
 	if err != nil {

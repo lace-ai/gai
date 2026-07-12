@@ -100,16 +100,32 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 		ctx, runState := newLoopRunState(ctx, l)
 		defer runState.finish()
 		defer close(events)
+		if err := ctx.Err(); err != nil {
+			sendLoopCanceled(ctx, events, runState, err)
+			return
+		}
 
 		toolDefinitions, err := ToolDefinitions(l.Tools)
 		if err != nil {
+			if cancelErr := cancellationError(ctx, err); cancelErr != nil {
+				sendLoopCanceled(ctx, events, runState, cancelErr)
+				return
+			}
 			sendLoopError(ctx, events, runState, err)
 			return
 		}
 
 		_, err = l.PromptBuilder.BuildContext(ctx)
 		if err != nil {
+			if cancelErr := cancellationError(ctx, err); cancelErr != nil {
+				sendLoopCanceled(ctx, events, runState, cancelErr)
+				return
+			}
 			sendLoopError(ctx, events, runState, fmt.Errorf("%w: %w", ErrBuildPrompt, err))
+			return
+		}
+		if err := ctx.Err(); err != nil {
+			sendLoopCanceled(ctx, events, runState, err)
 			return
 		}
 
@@ -129,17 +145,36 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 				iterCtx, iterState = runState.startIteration(ctx, iteration.Count, attempt)
 				iterCtx, cancel = context.WithCancel(iterCtx)
 				attemptID := iterState.attemptID()
-				if err := sendEvent(ctx, events, AttemptStartEvent(iteration.Count, attemptID, runState.retryCount)); err != nil {
-					sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, nil, err)
+				if err := iterCtx.Err(); err != nil {
+					sendAttemptCanceled(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, err)
 					cancel()
-					iterState.finish(err)
+					iterState.markCanceled(err)
+					iterState.finish(nil)
+					return
+				}
+				if err := sendEvent(ctx, events, AttemptStartEvent(iteration.Count, attemptID, runState.retryCount)); err != nil {
+					if cancelErr := cancellationError(iterCtx, err); cancelErr != nil {
+						sendAttemptCanceled(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, cancelErr)
+						iterState.markCanceled(cancelErr)
+					} else {
+						sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, err)
+					}
+					cancel()
+					iterState.finish(nil)
 					return
 				}
 
 				prompt, err := l.PromptBuilder.BuildPrompt(iterCtx, l)
 				if err != nil {
+					if cancelErr := cancellationError(iterCtx, err); cancelErr != nil {
+						sendAttemptCanceled(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, cancelErr)
+						cancel()
+						iterState.markCanceled(cancelErr)
+						iterState.finish(nil)
+						return
+					}
 					iterationErr = fmt.Errorf("%w: %w", ErrBuildPrompt, err)
-					sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, nil, iterationErr)
+					sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, iterationErr)
 					cancel()
 					iterState.finish(iterationErr)
 					return
@@ -156,11 +191,11 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 				retrying := false
 				for t := range tokens {
 					if t.Err != nil {
-						if errors.Is(t.Err, context.Canceled) || errors.Is(t.Err, context.DeadlineExceeded) {
-							iterationErr = t.Err
-							sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, iterationErr)
+						if cancelErr := cancellationError(iterCtx, t.Err); cancelErr != nil {
+							sendAttemptCanceled(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, cancelErr)
 							cancel()
-							iterState.finish(iterationErr)
+							iterState.markCanceled(cancelErr)
+							iterState.finish(nil)
 							return
 						}
 
@@ -192,24 +227,42 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 					runState.recordToken(t)
 					iterState.recordToken(t)
 					if err := sendEvent(ctx, events, TokenEvent(iteration.Count, attemptID, runState.retryCount, t)); err != nil {
-						sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, nil, err)
+						if cancelErr := cancellationError(iterCtx, err); cancelErr != nil {
+							sendAttemptCanceled(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, cancelErr)
+							iterState.markCanceled(cancelErr)
+						} else {
+							sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, err)
+						}
 						cancel()
-						iterState.finish(err)
+						iterState.finish(nil)
 						return
 					}
 				}
 
+				if err := iterCtx.Err(); err != nil {
+					sendAttemptCanceled(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, err)
+					cancel()
+					iterState.markCanceled(err)
+					iterState.finish(nil)
+					return
+				}
 				if !retrying {
 					iteration = attemptIteration
 					break
 				}
 
 				runState.retry()
+				iterState.recordIteration(attemptIteration)
 				iterState.markRetrying(runState.retryCount)
 				if err := sendEvent(ctx, events, RetryEvent(iteration.Count, attemptID, runState.retryCount, attemptIteration)); err != nil {
-					sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, nil, err)
+					if cancelErr := cancellationError(iterCtx, err); cancelErr != nil {
+						sendAttemptCanceled(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, cancelErr)
+						iterState.markCanceled(cancelErr)
+					} else {
+						sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, err)
+					}
 					cancel()
-					iterState.finish(err)
+					iterState.finish(nil)
 					return
 				}
 				cancel()
@@ -217,37 +270,64 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 			}
 
 			if err := l.executeToolCalls(iterCtx, &iteration, toolCalls); err != nil {
+				if cancelErr := cancellationError(iterCtx, err); cancelErr != nil {
+					sendAttemptCanceled(ctx, events, runState, iteration.Count, iterState.attemptID(), runState.retryCount, &iteration, cancelErr)
+					cancel()
+					iterState.markCanceled(cancelErr)
+					iterState.finish(nil)
+					return
+				}
 				iterationErr = err
-				sendAttemptError(ctx, events, runState, iteration.Count, iterState.attemptID(), runState.retryCount, nil, iterationErr)
+				sendAttemptError(ctx, events, runState, iteration.Count, iterState.attemptID(), runState.retryCount, &iteration, iterationErr)
 				cancel()
 				iterState.finish(iterationErr)
+				return
+			}
+			if err := iterCtx.Err(); err != nil {
+				sendAttemptCanceled(ctx, events, runState, iteration.Count, iterState.attemptID(), runState.retryCount, &iteration, err)
+				cancel()
+				iterState.markCanceled(err)
+				iterState.finish(nil)
 				return
 			}
 
 			iterState.recordToolResponses(iteration)
 
-			l.Iterations = append(l.Iterations, iteration)
 			attemptID := iterState.attemptID()
 			retryCount := runState.retryCount
 
 			if err := sendEvent(ctx, events, IterationDoneEvent(iteration, attemptID, retryCount)); err != nil {
-				sendAttemptError(ctx, events, runState, iteration.Count, attemptID, retryCount, nil, err)
+				if cancelErr := cancellationError(iterCtx, err); cancelErr != nil {
+					sendAttemptCanceled(ctx, events, runState, iteration.Count, attemptID, retryCount, &iteration, cancelErr)
+					iterState.markCanceled(cancelErr)
+				} else {
+					sendAttemptError(ctx, events, runState, iteration.Count, attemptID, retryCount, &iteration, err)
+				}
 				cancel()
-				iterState.finish(err)
+				iterState.finish(nil)
 				return
 			}
+			l.Iterations = append(l.Iterations, iteration)
 			runState.resetRetries()
 			if len(toolCalls) == 0 {
 				cancel()
 				iterState.markFinal()
 				iterState.finish(nil)
-				_ = sendEvent(ctx, events, DoneEvent())
+				if err := sendEvent(ctx, events, DoneEvent()); err != nil {
+					if cancelErr := cancellationError(ctx, err); cancelErr != nil {
+						sendLoopCanceled(ctx, events, runState, cancelErr)
+					}
+				}
 				return
 			}
 			cancel()
 			iterState.finish(iterationErr)
 		}
 
+		if err := ctx.Err(); err != nil {
+			sendLoopCanceled(ctx, events, runState, err)
+			return
+		}
 		sendLoopError(ctx, events, runState, fmt.Errorf("%w: limit=%d", ErrMaxIterations, l.MaxLoopIterations))
 	}()
 
@@ -307,11 +387,44 @@ func sendLoopError(ctx context.Context, events chan<- Event, state *loopRunState
 
 func sendAttemptError(ctx context.Context, events chan<- Event, state *loopRunState, iterationCount, attemptID, retryCount int, attemptIteration *Iteration, err error) {
 	if state != nil {
-		if failErr := state.fail(err); failErr != nil {
-			err = errors.Join(err, failErr)
-		}
+		state.fail(err)
 	}
 	_ = sendEvent(ctx, events, AttemptErrorEvent(iterationCount, attemptID, retryCount, attemptIteration, err))
+}
+
+func sendLoopCanceled(ctx context.Context, events chan<- Event, state *loopRunState, err error) {
+	if state != nil {
+		state.cancel(err)
+	}
+	sendTerminalEvent(ctx, events, CanceledEvent(err))
+}
+
+func sendAttemptCanceled(ctx context.Context, events chan<- Event, state *loopRunState, iterationCount, attemptID, retryCount int, attemptIteration *Iteration, err error) {
+	if state != nil {
+		state.cancel(err)
+	}
+	sendTerminalEvent(ctx, events, AttemptCanceledEvent(iterationCount, attemptID, retryCount, attemptIteration, err))
+}
+
+func sendTerminalEvent(ctx context.Context, events chan<- Event, event Event) {
+	if ctx.Err() == nil {
+		_ = sendEvent(ctx, events, event)
+		return
+	}
+	select {
+	case events <- event:
+	default:
+	}
+}
+
+func cancellationError(ctx context.Context, err error) error {
+	if ctx != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	return nil
 }
 
 // Messages returns the completed iterations as ordered conversation messages.

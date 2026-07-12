@@ -14,6 +14,7 @@ const loopTracerName = "github.com/lace-ai/gai/loop"
 type loopRunState struct {
 	obs        *loopObserver
 	err        error
+	cancelErr  error
 	retryCount int
 	stats      loopRunStats
 }
@@ -33,6 +34,7 @@ type loopIterationState struct {
 type loopIterationStats struct {
 	Retrying       bool
 	Final          bool
+	Canceled       bool
 	AttemptID      int
 	PartCount      int
 	RetryCount     int
@@ -118,31 +120,42 @@ func (s *loopRunState) resetRetries() {
 	s.retryCount = 0
 }
 
-func (s *loopRunState) fail(err error) error {
-	if s == nil {
-		return err
+func (s *loopRunState) fail(err error) {
+	if s != nil {
+		s.err = err
 	}
-	s.err = err
-	return err
+}
+
+func (s *loopRunState) cancel(err error) {
+	if s != nil {
+		s.cancelErr = err
+	}
 }
 
 func (s *loopRunState) finish() {
 	if s == nil || s.obs == nil {
 		return
 	}
-	s.obs.finish(s.err, s.stats)
+	s.obs.finish(s.err, s.cancelErr, s.stats)
 }
 
-func (o *loopObserver) finish(err error, stats loopRunStats) {
+func (o *loopObserver) finish(err, cancelErr error, stats loopRunStats) {
 	if o == nil || o.span == nil {
 		return
 	}
-	o.span.SetAttributes(
+	attrs := []attribute.KeyValue{
 		attribute.Int("loop.iteration_count", stats.IterationCount),
 		attribute.Int("loop.token_count", stats.TokenCount),
 		attribute.Int("loop.tool_call_count", stats.ToolCallCount),
 		attribute.Bool("loop.incremental_prompt", stats.IncrementalPrompt),
-	)
+	}
+	if cancelErr != nil {
+		attrs = append(attrs,
+			attribute.Bool("loop.canceled", true),
+			attribute.String("loop.cancel_reason", cancelErr.Error()),
+		)
+	}
+	o.span.SetAttributes(attrs...)
 	gai.EndSpan(o.span, err)
 }
 
@@ -172,6 +185,12 @@ func (s *loopIterationState) recordToolResponses(iteration Iteration) {
 	}
 }
 
+func (s *loopIterationState) recordIteration(iteration Iteration) {
+	if s != nil {
+		s.stats.PartCount = len(iteration.Parts)
+	}
+}
+
 func (s *loopIterationState) markRetrying(retryCount int) {
 	if s == nil {
 		return
@@ -185,6 +204,12 @@ func (s *loopIterationState) markFinal() {
 		return
 	}
 	s.stats.Final = true
+}
+
+func (s *loopIterationState) markCanceled(err error) {
+	if s != nil {
+		s.stats.Canceled = true
+	}
 }
 
 func (s *loopIterationState) attemptID() int {
@@ -217,6 +242,9 @@ func (o *iterationObserver) finish(err error, stats loopIterationStats) {
 	}
 	if stats.Final {
 		attrs = append(attrs, attribute.Bool("loop.final_iteration", true))
+	}
+	if stats.Canceled {
+		attrs = append(attrs, attribute.Bool("loop.canceled", true))
 	}
 	o.span.SetAttributes(attrs...)
 	gai.EndSpan(o.span, err)

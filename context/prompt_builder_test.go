@@ -329,3 +329,21 @@ func TestPromptBuilderKeepsTokenErrorEvents(t *testing.T) {
 		t.Fatalf("expected token count failure event, got %v", names)
 	}
 }
+
+func TestPromptBuilderReturnsCancellationBeforeBuilding(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	builder := New(Definition{
+		ContextSources: []ContextSource{&testContextSource{name: "source", text: "context"}},
+		PromptInput:    PromptInput{User: NewTextContent("question")},
+	})
+
+	if _, err := builder.BuildContext(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("BuildContext error = %v, want context.Canceled", err)
+	}
+	if _, err := builder.BuildPrompt(ctx, emptyConversation{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("BuildPrompt error = %v, want context.Canceled", err)
+	}
+}

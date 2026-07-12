@@ -35,6 +35,12 @@ type IterationInformation struct {
 	// DiscardIteration reports that any streamed tokens from this attempt should
 	// be discarded by callers that maintain visible token state.
 	DiscardIteration bool
+	// Canceled reports that the loop ended because its context was canceled or
+	// its deadline expired.
+	Canceled bool
+	// CancellationErr contains context.Canceled or context.DeadlineExceeded when
+	// Canceled is true.
+	CancellationErr error
 }
 
 // Iteration records one model generation and its tool interactions.
