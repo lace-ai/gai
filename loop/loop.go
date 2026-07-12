@@ -407,14 +407,11 @@ func sendAttemptCanceled(ctx context.Context, events chan<- Event, state *loopRu
 }
 
 func sendTerminalEvent(ctx context.Context, events chan<- Event, event Event) {
-	if ctx.Err() == nil {
-		_ = sendEvent(ctx, events, event)
+	if event.Type == EventCanceled {
+		events <- event
 		return
 	}
-	select {
-	case events <- event:
-	default:
-	}
+	_ = sendEvent(ctx, events, event)
 }
 
 func cancellationError(ctx context.Context, err error) error {
