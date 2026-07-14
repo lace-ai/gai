@@ -246,8 +246,8 @@ func TestAgentWorkflowDiscardsRetriedAttemptTokens(t *testing.T) {
 	if len(consumed.errs) != 0 {
 		t.Fatalf("unexpected workflow errors: %v", consumed.errs)
 	}
-	if got := tokensText(consumed.tokens); got != "partialfinal" {
-		t.Fatalf("unexpected raw stream text: %q", got)
+	if got := tokensText(consumed.tokens); got != "final" {
+		t.Fatalf("stream included discarded retry text: %q", got)
 	}
 	result := workflow.Result()
 	if got := result.Primary.Text; got != "final" {

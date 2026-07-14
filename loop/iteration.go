@@ -23,8 +23,6 @@ type IterationInformation struct {
 	Iteration Iteration
 	// IterationCount is the one-based current iteration number.
 	IterationCount int
-	// TokenCount is the number of stream tokens produced by this attempt.
-	TokenCount int
 	// PartCount is the number of parts accumulated in the iteration.
 	PartCount int
 	// RetryCount is the number of consecutive generation retries.

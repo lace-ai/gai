@@ -191,18 +191,19 @@ func loopEventsToStream(ctx context.Context, events <-chan loop.Event) Stream {
 		defer close(statuses)
 		defer close(errs)
 
+		var attemptTokens []ai.Token
 		for event := range events {
 			switch event.Type {
 			case loop.EventToken:
 				if event.Token != nil {
-					send(ctx, tokens, *event.Token)
+					attemptTokens = append(attemptTokens, *event.Token)
 				}
 			case loop.EventRetry:
+				attemptTokens = nil
 				status := loop.IterationInformation{
 					IterationCount:   event.IterationCount,
 					AttemptID:        event.AttemptID,
 					RetryCount:       event.RetryCount,
-					TokenCount:       event.TokenCount,
 					PartCount:        event.PartCount,
 					Retrying:         true,
 					DiscardIteration: true,
@@ -212,11 +213,12 @@ func loopEventsToStream(ctx context.Context, events <-chan loop.Event) Stream {
 				}
 				send(ctx, statuses, status)
 			case loop.EventIterationDone:
+				forwardTokens(ctx, tokens, attemptTokens)
+				attemptTokens = nil
 				status := loop.IterationInformation{
 					IterationCount: event.IterationCount,
 					AttemptID:      event.AttemptID,
 					RetryCount:     event.RetryCount,
-					TokenCount:     event.TokenCount,
 					PartCount:      event.PartCount,
 				}
 				if event.Iteration != nil {
@@ -224,13 +226,14 @@ func loopEventsToStream(ctx context.Context, events <-chan loop.Event) Stream {
 				}
 				send(ctx, statuses, status)
 			case loop.EventError:
+				forwardTokens(ctx, tokens, attemptTokens)
+				attemptTokens = nil
 				if event.Iteration != nil {
 					status := loop.IterationInformation{
 						Iteration:        *event.Iteration,
 						IterationCount:   event.IterationCount,
 						AttemptID:        event.AttemptID,
 						RetryCount:       event.RetryCount,
-						TokenCount:       event.TokenCount,
 						PartCount:        event.PartCount,
 						DiscardIteration: true,
 					}
@@ -240,11 +243,12 @@ func loopEventsToStream(ctx context.Context, events <-chan loop.Event) Stream {
 					send(ctx, errs, event.Err)
 				}
 			case loop.EventCanceled:
+				forwardTokens(ctx, tokens, attemptTokens)
+				attemptTokens = nil
 				status := loop.IterationInformation{
 					IterationCount:   event.IterationCount,
 					AttemptID:        event.AttemptID,
 					RetryCount:       event.RetryCount,
-					TokenCount:       event.TokenCount,
 					PartCount:        event.PartCount,
 					DiscardIteration: true,
 					Canceled:         true,
@@ -386,24 +390,7 @@ func drainStream(ctx context.Context, upstream Stream, relay streamRelay) captur
 		}
 	}()
 	wg.Wait()
-	captured.Tokens = discardAttemptTokens(captured.Tokens, captured.Statuses)
 	return captured
-}
-
-func discardAttemptTokens(tokens []ai.Token, statuses []loop.IterationInformation) []ai.Token {
-	kept := make([]ai.Token, 0, len(tokens))
-	offset := 0
-	for _, status := range statuses {
-		end := offset + status.TokenCount
-		if end > len(tokens) {
-			end = len(tokens)
-		}
-		if !status.DiscardIteration {
-			kept = append(kept, tokens[offset:end]...)
-		}
-		offset = end
-	}
-	return append(kept, tokens[offset:]...)
 }
 
 func captureStream(ctx context.Context, upstream Stream, completed func(capturedStream)) Stream {
