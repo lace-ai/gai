@@ -33,7 +33,9 @@ type Event struct {
 	IterationCount int
 	AttemptID      int
 	RetryCount     int
-	PartCount      int
+	// TokenCount is the number of stream tokens produced by this attempt.
+	TokenCount int
+	PartCount  int
 
 	Token     *ai.Token
 	Iteration *Iteration
@@ -59,23 +61,25 @@ func TokenEvent(iteration, attempt, retry int, token ai.Token) Event {
 	}
 }
 
-func RetryEvent(iteration, attempt, retry int, attemptIteration Iteration) Event {
+func RetryEvent(iteration, attempt, retry, tokenCount int, attemptIteration Iteration) Event {
 	return Event{
 		Type:           EventRetry,
 		IterationCount: iteration,
 		AttemptID:      attempt,
 		RetryCount:     retry,
+		TokenCount:     tokenCount,
 		PartCount:      len(attemptIteration.Parts),
 		Iteration:      &attemptIteration,
 	}
 }
 
-func IterationDoneEvent(iteration Iteration, attempt, retry int) Event {
+func IterationDoneEvent(iteration Iteration, attempt, retry, tokenCount int) Event {
 	return Event{
 		Type:           EventIterationDone,
 		IterationCount: iteration.Count,
 		AttemptID:      attempt,
 		RetryCount:     retry,
+		TokenCount:     tokenCount,
 		PartCount:      len(iteration.Parts),
 		Iteration:      &iteration,
 	}
@@ -97,22 +101,23 @@ func CanceledEvent(err error) Event {
 
 // AttemptErrorEvent reports a terminal error that occurred inside a specific
 // model generation attempt.
-func AttemptErrorEvent(iterationCount, attemptID, retryCount int, attemptIteration *Iteration, err error) Event {
-	return attemptTerminalEvent(EventError, iterationCount, attemptID, retryCount, attemptIteration, err)
+func AttemptErrorEvent(iterationCount, attemptID, retryCount, tokenCount int, attemptIteration *Iteration, err error) Event {
+	return attemptTerminalEvent(EventError, iterationCount, attemptID, retryCount, tokenCount, attemptIteration, err)
 }
 
 // AttemptCanceledEvent reports terminal cancellation that occurred inside a
 // specific model generation attempt.
-func AttemptCanceledEvent(iterationCount, attemptID, retryCount int, attemptIteration *Iteration, err error) Event {
-	return attemptTerminalEvent(EventCanceled, iterationCount, attemptID, retryCount, attemptIteration, err)
+func AttemptCanceledEvent(iterationCount, attemptID, retryCount, tokenCount int, attemptIteration *Iteration, err error) Event {
+	return attemptTerminalEvent(EventCanceled, iterationCount, attemptID, retryCount, tokenCount, attemptIteration, err)
 }
 
-func attemptTerminalEvent(eventType EventType, iterationCount, attemptID, retryCount int, attemptIteration *Iteration, err error) Event {
+func attemptTerminalEvent(eventType EventType, iterationCount, attemptID, retryCount, tokenCount int, attemptIteration *Iteration, err error) Event {
 	event := Event{
 		Type:           eventType,
 		IterationCount: iterationCount,
 		AttemptID:      attemptID,
 		RetryCount:     retryCount,
+		TokenCount:     tokenCount,
 		Err:            err,
 	}
 	if attemptIteration != nil {
