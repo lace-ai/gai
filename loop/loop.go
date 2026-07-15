@@ -85,8 +85,10 @@ type pendingToolCall struct {
 // Run starts asynchronous model and tool execution.
 //
 // The returned channel carries every token, retry, iteration, and terminal
-// event in the exact order it occurred. Callers must consume the channel until
-// it closes or cancel ctx.
+// event in the exact order it occurred. Tokens are forwarded in real time;
+// when an attempt is retried, consumers that keep visible token state must
+// discard that attempt's tokens on its RetryEvent. Callers must consume the
+// channel until it closes or cancel ctx.
 func (l *Loop) Run(ctx context.Context) <-chan Event {
 	events := make(chan Event, 32)
 
@@ -406,12 +408,11 @@ func sendAttemptCanceled(ctx context.Context, events chan<- Event, state *loopRu
 	sendTerminalEvent(ctx, events, AttemptCanceledEvent(iterationCount, attemptID, retryCount, attemptIteration, err))
 }
 
-func sendTerminalEvent(ctx context.Context, events chan<- Event, event Event) {
-	if event.Type == EventCanceled {
-		events <- event
-		return
+func sendTerminalEvent(_ context.Context, events chan<- Event, event Event) {
+	select {
+	case events <- event:
+	default:
 	}
-	_ = sendEvent(ctx, events, event)
 }
 
 func cancellationError(ctx context.Context, err error) error {

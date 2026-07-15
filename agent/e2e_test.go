@@ -218,6 +218,49 @@ func TestAgentWorkflowMarksTerminalFailedAttemptDiscardable(t *testing.T) {
 	}
 }
 
+func TestAgentWorkflowStreamsRetriedAttemptTokens(t *testing.T) {
+	model := &scriptedWorkflowModel{
+		scripts: [][]ai.Token{
+			{
+				{Type: ai.TokenTypeText, Text: "partial"},
+				{Err: errors.New("retriable stream error")},
+			},
+			{{Type: ai.TokenTypeText, Text: "final"}},
+		},
+	}
+	assistant := agent.New(agent.Definition{
+		Name:  "retry-discard",
+		Model: model,
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return gaictx.New(gaictx.Definition{Renderer: &gaictx.SimpleRenderer{}}), nil
+		},
+		Limits: agent.Limits{MaxLoopIterations: 1},
+	})
+
+	workflow, err := assistant.NewRun(context.Background(), textRunInput("retry"))
+	if err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	workflow.Loop.RetryCount = 1
+	consumed := consumeWorkflow(t, workflow)
+	if len(consumed.errs) != 0 {
+		t.Fatalf("unexpected workflow errors: %v", consumed.errs)
+	}
+	if got := tokensText(consumed.tokens); got != "partialfinal" {
+		t.Fatalf("unexpected real-time stream text: %q", got)
+	}
+	if len(consumed.statuses) != 2 || !consumed.statuses[0].Retrying || !consumed.statuses[0].DiscardIteration {
+		t.Fatalf("expected a discardable retry status, got %#v", consumed.statuses)
+	}
+	result := workflow.Result()
+	if got := result.Primary.Text; got != "partialfinal" {
+		t.Fatalf("unexpected primary result text: %q", got)
+	}
+	if got := result.Text; got != "partialfinal" {
+		t.Fatalf("unexpected workflow result text: %q", got)
+	}
+}
+
 func TestAgentWorkflowReportsCancellationWithoutError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
