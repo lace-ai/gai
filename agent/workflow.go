@@ -20,6 +20,8 @@ var (
 
 // Stream is the streaming output transformed by middleware. Implementations
 // must consume or forward all three channels and close every returned channel.
+// Tokens are forwarded in real time; a later retry status can mark an already
+// forwarded attempt discardable.
 type Stream struct {
 	// Tokens contains model text, thoughts, and tool-call tokens.
 	Tokens <-chan ai.Token
@@ -32,7 +34,9 @@ type Stream struct {
 
 // AgentResult is the captured result of one agent execution. Text contains only
 // the concatenated text-token content, Reasoning contains thought-token content,
-// and Tokens retains the complete token stream.
+// and Tokens retains the complete token stream. Because tokens are captured in
+// real time, a retried attempt's partial output remains present; use the ordered
+// loop Event stream when exact per-attempt rollback is required.
 type AgentResult struct {
 	Tokens     []ai.Token
 	Text       string
@@ -40,6 +44,10 @@ type AgentResult struct {
 	Messages   []gaictx.Message
 	Iterations []loop.Iteration
 	Errors     []error
+	// Canceled reports that the agent stopped because its context ended.
+	Canceled bool
+	// CancellationErr contains context.Canceled or context.DeadlineExceeded.
+	CancellationErr error
 }
 
 // StageResult is the named result produced by agent middleware. Output records
@@ -52,7 +60,8 @@ type StageResult struct {
 
 // WorkflowResult is a snapshot of the complete workflow state. Primary never
 // changes, while Tokens, Text, and Reasoning represent the output after the
-// latest stage.
+// latest stage. These fields retain real-time partial output from retried
+// attempts; buffering to omit it would sacrifice real-time streaming.
 type WorkflowResult struct {
 	Input     RunInput
 	Primary   AgentResult
@@ -61,7 +70,11 @@ type WorkflowResult struct {
 	Reasoning string
 	Stages    []StageResult
 	Errors    []error
-	Complete  bool
+	// Canceled reports that the workflow stopped because its context ended.
+	Canceled bool
+	// CancellationErr contains context.Canceled or context.DeadlineExceeded.
+	CancellationErr error
+	Complete        bool
 }
 
 // MiddlewareContext gives middleware access to the accumulated workflow result.
@@ -164,14 +177,89 @@ func (w *Workflow) Run(ctx context.Context) (<-chan ai.Token, <-chan loop.Iterat
 
 	ctx, obs := newWorkflowObserver(ctx, w)
 	obs.Started(ctx)
-	tokens, statuses, errs := w.Loop.Loop(ctx)
-	stream := w.capturePrimary(ctx, Stream{Tokens: tokens, Statuses: statuses, Errors: errs}, obs)
+	stream := w.capturePrimary(ctx, loopEventsToStream(ctx, w.Loop.Run(ctx)), obs)
 	run := &MiddlewareContext{workflow: w}
 	for _, middleware := range w.middleware {
 		stream = middleware.Process(ctx, run, stream)
 	}
 	stream = w.captureFinal(ctx, stream, obs)
 	return stream.Tokens, stream.Statuses, stream.Errors
+}
+
+func loopEventsToStream(ctx context.Context, events <-chan loop.Event) Stream {
+	tokens := make(chan ai.Token, 16)
+	statuses := make(chan loop.IterationInformation, 16)
+	errs := make(chan error, 1)
+
+	go func() {
+		defer close(tokens)
+		defer close(statuses)
+		defer close(errs)
+
+		for event := range events {
+			switch event.Type {
+			case loop.EventToken:
+				if event.Token != nil {
+					send(ctx, tokens, *event.Token)
+				}
+			case loop.EventRetry:
+				status := loop.IterationInformation{
+					IterationCount:   event.IterationCount,
+					AttemptID:        event.AttemptID,
+					RetryCount:       event.RetryCount,
+					PartCount:        event.PartCount,
+					Retrying:         true,
+					DiscardIteration: true,
+				}
+				if event.Iteration != nil {
+					status.Iteration = *event.Iteration
+				}
+				send(ctx, statuses, status)
+			case loop.EventIterationDone:
+				status := loop.IterationInformation{
+					IterationCount: event.IterationCount,
+					AttemptID:      event.AttemptID,
+					RetryCount:     event.RetryCount,
+					PartCount:      event.PartCount,
+				}
+				if event.Iteration != nil {
+					status.Iteration = *event.Iteration
+				}
+				send(ctx, statuses, status)
+			case loop.EventError:
+				if event.Iteration != nil {
+					status := loop.IterationInformation{
+						Iteration:        *event.Iteration,
+						IterationCount:   event.IterationCount,
+						AttemptID:        event.AttemptID,
+						RetryCount:       event.RetryCount,
+						PartCount:        event.PartCount,
+						DiscardIteration: true,
+					}
+					send(ctx, statuses, status)
+				}
+				if event.Err != nil {
+					send(ctx, errs, event.Err)
+				}
+			case loop.EventCanceled:
+				status := loop.IterationInformation{
+					IterationCount:   event.IterationCount,
+					AttemptID:        event.AttemptID,
+					RetryCount:       event.RetryCount,
+					PartCount:        event.PartCount,
+					DiscardIteration: true,
+					Canceled:         true,
+					CancellationErr:  event.Err,
+				}
+				if event.Iteration != nil {
+					status.Iteration = *event.Iteration
+				}
+				sendTerminalStatus(statuses, status)
+			}
+		}
+	}()
+
+	return Stream{Tokens: tokens, Statuses: statuses, Errors: errs}
 }
 
 // Result returns a concurrency-safe snapshot. Complete is true after all three
@@ -186,33 +274,43 @@ func (w *Workflow) Result() WorkflowResult {
 }
 
 func (w *Workflow) capturePrimary(ctx context.Context, upstream Stream, obs *workflowObserver) Stream {
-	return captureStream(ctx, upstream, func(tokens []ai.Token, errs []error) {
+	return captureStream(ctx, upstream, func(captured capturedStream) {
+		canceled, cancellationErr := captured.cancellation()
 		result := AgentResult{
-			Tokens:     cloneTokens(tokens),
-			Text:       tokenText(tokens),
-			Reasoning:  tokenReasoning(tokens),
-			Messages:   cloneMessages(w.Loop.Messages()),
-			Iterations: cloneIterations(w.Loop.Iterations),
-			Errors:     append([]error(nil), errs...),
+			Tokens:          cloneTokens(captured.Tokens),
+			Text:            tokenText(captured.Tokens),
+			Reasoning:       tokenReasoning(captured.Tokens),
+			Messages:        cloneMessages(w.Loop.Messages()),
+			Iterations:      cloneIterations(w.Loop.Iterations),
+			Errors:          append([]error(nil), captured.Errors...),
+			Canceled:        canceled,
+			CancellationErr: cancellationErr,
 		}
 		w.mu.Lock()
 		w.result.Primary = result
-		w.result.Tokens = cloneTokens(tokens)
+		w.result.Tokens = cloneTokens(captured.Tokens)
 		w.result.Text = result.Text
 		w.result.Reasoning = result.Reasoning
-		w.result.Errors = append([]error(nil), errs...)
+		w.result.Errors = append([]error(nil), captured.Errors...)
+		w.result.Canceled = canceled
+		w.result.CancellationErr = cancellationErr
 		w.mu.Unlock()
 		obs.PrimaryFinished(ctx, result)
 	})
 }
 
 func (w *Workflow) captureFinal(ctx context.Context, upstream Stream, obs *workflowObserver) Stream {
-	return captureStream(ctx, upstream, func(tokens []ai.Token, errs []error) {
+	return captureStream(ctx, upstream, func(captured capturedStream) {
+		canceled, cancellationErr := captured.cancellation()
 		w.mu.Lock()
-		w.result.Tokens = cloneTokens(tokens)
-		w.result.Text = tokenText(tokens)
-		w.result.Reasoning = tokenReasoning(tokens)
-		w.result.Errors = append([]error(nil), errs...)
+		w.result.Tokens = cloneTokens(captured.Tokens)
+		w.result.Text = tokenText(captured.Tokens)
+		w.result.Reasoning = tokenReasoning(captured.Tokens)
+		w.result.Errors = append([]error(nil), captured.Errors...)
+		if canceled {
+			w.result.Canceled = true
+			w.result.CancellationErr = cancellationErr
+		}
 		w.result.Complete = true
 		result := cloneWorkflowResult(w.result)
 		w.mu.Unlock()
@@ -236,8 +334,18 @@ type streamRelay struct {
 }
 
 type capturedStream struct {
-	Tokens []ai.Token
-	Errors []error
+	Tokens   []ai.Token
+	Statuses []loop.IterationInformation
+	Errors   []error
+}
+
+func (s capturedStream) cancellation() (bool, error) {
+	for _, status := range s.Statuses {
+		if status.Canceled {
+			return true, status.CancellationErr
+		}
+	}
+	return false, nil
 }
 
 func drainStream(ctx context.Context, upstream Stream, relay streamRelay) capturedStream {
@@ -256,8 +364,13 @@ func drainStream(ctx context.Context, upstream Stream, relay streamRelay) captur
 	go func() {
 		defer wg.Done()
 		for status := range upstream.Statuses {
+			captured.Statuses = append(captured.Statuses, status)
 			if relay.Statuses != nil {
-				send(ctx, relay.Statuses, status)
+				if status.Canceled {
+					sendTerminalStatus(relay.Statuses, status)
+				} else {
+					send(ctx, relay.Statuses, status)
+				}
 			}
 		}
 	}()
@@ -277,7 +390,7 @@ func drainStream(ctx context.Context, upstream Stream, relay streamRelay) captur
 	return captured
 }
 
-func captureStream(ctx context.Context, upstream Stream, completed func([]ai.Token, []error)) Stream {
+func captureStream(ctx context.Context, upstream Stream, completed func(capturedStream)) Stream {
 	tokens := make(chan ai.Token, 16)
 	statuses := make(chan loop.IterationInformation, 16)
 	errs := make(chan error, 1)
@@ -288,7 +401,7 @@ func captureStream(ctx context.Context, upstream Stream, completed func([]ai.Tok
 			Statuses: statuses,
 			Errors:   errs,
 		})
-		completed(captured.Tokens, captured.Errors)
+		completed(captured)
 		close(tokens)
 		close(statuses)
 		close(errs)
@@ -312,6 +425,13 @@ func send[T any](ctx context.Context, ch chan<- T, value T) {
 	select {
 	case ch <- value:
 	case <-ctx.Done():
+	}
+}
+
+func sendTerminalStatus(ch chan<- loop.IterationInformation, status loop.IterationInformation) {
+	select {
+	case ch <- status:
+	default:
 	}
 }
 

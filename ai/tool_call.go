@@ -165,7 +165,9 @@ func DetectToolCallsInStream(ctx context.Context, in <-chan Token, debug gai.Deb
 		flushPending := func() {
 			for _, t := range pending {
 				outputTokenCount++
-				out <- t
+				if !SendToken(ctx, out, t) {
+					return
+				}
 			}
 			resetTracking()
 			pending = nil
@@ -230,10 +232,12 @@ func DetectToolCallsInStream(ctx context.Context, in <-chan Token, debug gai.Deb
 						Fields: fields,
 					})
 				}
-				out <- Token{
+				if !SendToken(ctx, out, Token{
 					Type:     TokenTypeToolCall,
 					Data:     payload,
 					ToolCall: tc,
+				}) {
+					return false
 				}
 				outputTokenCount++
 				detectedToolCallCount++
@@ -259,7 +263,17 @@ func DetectToolCallsInStream(ctx context.Context, in <-chan Token, debug gai.Deb
 			return true
 		}
 
-		for t := range in {
+		for {
+			var t Token
+			var ok bool
+			select {
+			case <-ctx.Done():
+				return
+			case t, ok = <-in:
+				if !ok {
+					goto streamDone
+				}
+			}
 			inputTokenCount++
 			// non-text tokens: passthrough.
 			if t.Type != TokenTypeText {
@@ -376,6 +390,8 @@ func DetectToolCallsInStream(ctx context.Context, in <-chan Token, debug gai.Deb
 				}
 			}
 		}
+
+	streamDone:
 
 		if debug != nil {
 			fields := map[string]any{}

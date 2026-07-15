@@ -2,6 +2,7 @@ package agent_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -162,6 +163,141 @@ func TestAgentWorkflowEndToEndWithToolCall(t *testing.T) {
 	}
 	if !strings.Contains(requests[1].Prompt, "tool res: tool says hi") {
 		t.Fatalf("second prompt did not include tool result:\n%s", requests[1].Prompt)
+	}
+}
+
+func TestAgentWorkflowMarksTerminalFailedAttemptDiscardable(t *testing.T) {
+	model := &scriptedWorkflowModel{
+		scripts: [][]ai.Token{
+			{
+				{Type: ai.TokenTypeText, Text: "partial"},
+				{Err: errors.New("fatal stream error")},
+			},
+		},
+	}
+	assistant := agent.New(agent.Definition{
+		Name:  "terminal-failure",
+		Model: model,
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return gaictx.New(gaictx.Definition{
+				Renderer: &gaictx.SimpleRenderer{},
+			}), nil
+		},
+		Limits: agent.Limits{
+			MaxLoopIterations: 1,
+		},
+	})
+
+	workflow, err := assistant.NewRun(context.Background(), textRunInput("fail"))
+	if err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	workflow.Loop.RetryCount = 0
+	consumed := consumeWorkflow(t, workflow)
+	if len(consumed.errs) != 1 {
+		t.Fatalf("expected one workflow error, got %d", len(consumed.errs))
+	}
+	if !errors.Is(consumed.errs[0], loop.ErrMaxRetries) {
+		t.Fatalf("error = %v, want ErrMaxRetries", consumed.errs[0])
+	}
+	if got := tokensText(consumed.tokens); got != "partial" {
+		t.Fatalf("expected partial token to stream before failure, got %q", got)
+	}
+	if len(consumed.statuses) != 1 {
+		t.Fatalf("expected one discard status, got %#v", consumed.statuses)
+	}
+	status := consumed.statuses[0]
+	if !status.DiscardIteration || status.Retrying {
+		t.Fatalf("expected terminal failed attempt to be discardable without retrying, got %#v", status)
+	}
+	if status.IterationCount != 1 || status.AttemptID != 1 || status.PartCount != 1 {
+		t.Fatalf("expected failed attempt metadata, got %#v", status)
+	}
+	if got := status.Iteration.Parts[0].Response.Text; got != "partial" {
+		t.Fatalf("expected discard status to carry partial attempt text, got %q", got)
+	}
+}
+
+func TestAgentWorkflowStreamsRetriedAttemptTokens(t *testing.T) {
+	model := &scriptedWorkflowModel{
+		scripts: [][]ai.Token{
+			{
+				{Type: ai.TokenTypeText, Text: "partial"},
+				{Err: errors.New("retriable stream error")},
+			},
+			{{Type: ai.TokenTypeText, Text: "final"}},
+		},
+	}
+	assistant := agent.New(agent.Definition{
+		Name:  "retry-discard",
+		Model: model,
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return gaictx.New(gaictx.Definition{Renderer: &gaictx.SimpleRenderer{}}), nil
+		},
+		Limits: agent.Limits{MaxLoopIterations: 1},
+	})
+
+	workflow, err := assistant.NewRun(context.Background(), textRunInput("retry"))
+	if err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	workflow.Loop.RetryCount = 1
+	consumed := consumeWorkflow(t, workflow)
+	if len(consumed.errs) != 0 {
+		t.Fatalf("unexpected workflow errors: %v", consumed.errs)
+	}
+	if got := tokensText(consumed.tokens); got != "partialfinal" {
+		t.Fatalf("unexpected real-time stream text: %q", got)
+	}
+	if len(consumed.statuses) != 2 || !consumed.statuses[0].Retrying || !consumed.statuses[0].DiscardIteration {
+		t.Fatalf("expected a discardable retry status, got %#v", consumed.statuses)
+	}
+	result := workflow.Result()
+	if got := result.Primary.Text; got != "partialfinal" {
+		t.Fatalf("unexpected primary result text: %q", got)
+	}
+	if got := result.Text; got != "partialfinal" {
+		t.Fatalf("unexpected workflow result text: %q", got)
+	}
+}
+
+func TestAgentWorkflowReportsCancellationWithoutError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	assistant := agent.New(agent.Definition{
+		Name:  "canceled",
+		Model: &scriptedWorkflowModel{},
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return gaictx.New(gaictx.Definition{Renderer: &gaictx.SimpleRenderer{}}), nil
+		},
+	})
+
+	workflow, err := assistant.NewRun(context.Background(), textRunInput("stop"))
+	if err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	tokens, statuses, errs := workflow.Run(ctx)
+	for range tokens {
+	}
+	var gotStatuses []loop.IterationInformation
+	for status := range statuses {
+		gotStatuses = append(gotStatuses, status)
+	}
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("cancellation should not reach error stream: %v", err)
+		}
+	}
+	if len(gotStatuses) != 1 {
+		t.Fatalf("expected one cancellation status, got %#v", gotStatuses)
+	}
+	status := gotStatuses[0]
+	if !status.Canceled || !errors.Is(status.CancellationErr, context.Canceled) || !status.DiscardIteration {
+		t.Fatalf("unexpected cancellation status: %#v", status)
+	}
+	result := workflow.Result()
+	if !result.Complete || !result.Canceled || !result.Primary.Canceled || !errors.Is(result.CancellationErr, context.Canceled) {
+		t.Fatalf("unexpected canceled workflow result: %#v", result)
 	}
 }
 

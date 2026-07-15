@@ -92,14 +92,14 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 					Err: err,
 				})
 			}
-			out <- ai.Token{Err: err, Type: ai.TokenTypeErr, Text: err.Error()}
+			ai.SendToken(ctx, out, ai.Token{Err: err, Type: ai.TokenTypeErr, Text: err.Error()})
 			return
 		}
 
 		config, err := buildGenerateContentConfig(req)
 		if err != nil {
 			streamErr = err
-			out <- ai.Token{Err: err, Type: ai.TokenTypeErr, Text: err.Error()}
+			ai.SendToken(ctx, out, ai.Token{Err: err, Type: ai.TokenTypeErr, Text: err.Error()})
 			return
 		}
 
@@ -118,7 +118,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 						Err: err,
 					})
 				}
-				out <- ai.Token{Err: streamErr, Type: ai.TokenTypeErr, Text: streamErr.Error()}
+				ai.SendToken(ctx, out, ai.Token{Err: streamErr, Type: ai.TokenTypeErr, Text: streamErr.Error()})
 				return
 			}
 
@@ -140,7 +140,9 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 					default:
 						textTokenCount++
 					}
-					out <- token
+					if !ai.SendToken(ctx, out, token) {
+						return
+					}
 				case part.FunctionCall != nil:
 					rawPart, err := json.Marshal(part)
 					if err != nil {
@@ -160,7 +162,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 								Err:    err,
 							})
 						}
-						out <- ai.Token{Err: encodeErr, Type: ai.TokenTypeErr, Text: encodeErr.Error()}
+						ai.SendToken(ctx, out, ai.Token{Err: encodeErr, Type: ai.TokenTypeErr, Text: encodeErr.Error()})
 						return
 					}
 					toolCall, err := mapFunctionCall(part.FunctionCall)
@@ -182,7 +184,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 								Err:    err,
 							})
 						}
-						out <- ai.Token{Err: mapErr, Type: ai.TokenTypeErr, Text: mapErr.Error()}
+						ai.SendToken(ctx, out, ai.Token{Err: mapErr, Type: ai.TokenTypeErr, Text: mapErr.Error()})
 						return
 					}
 					if m.debug != nil {
@@ -197,10 +199,12 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 							Fields: fields,
 						})
 					}
-					out <- ai.Token{
+					if !ai.SendToken(ctx, out, ai.Token{
 						Type:     ai.TokenTypeToolCall,
 						Data:     rawPart,
 						ToolCall: toolCall,
+					}) {
+						return
 					}
 					toolCallCount++
 				}
