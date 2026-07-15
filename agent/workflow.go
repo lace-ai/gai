@@ -20,6 +20,8 @@ var (
 
 // Stream is the streaming output transformed by middleware. Implementations
 // must consume or forward all three channels and close every returned channel.
+// Tokens are forwarded in real time; a later retry status can mark an already
+// forwarded attempt discardable.
 type Stream struct {
 	// Tokens contains model text, thoughts, and tool-call tokens.
 	Tokens <-chan ai.Token
@@ -32,7 +34,9 @@ type Stream struct {
 
 // AgentResult is the captured result of one agent execution. Text contains only
 // the concatenated text-token content, Reasoning contains thought-token content,
-// and Tokens retains the complete token stream.
+// and Tokens retains the complete token stream. Because tokens are captured in
+// real time, a retried attempt's partial output remains present; use the ordered
+// loop Event stream when exact per-attempt rollback is required.
 type AgentResult struct {
 	Tokens     []ai.Token
 	Text       string
@@ -56,7 +60,8 @@ type StageResult struct {
 
 // WorkflowResult is a snapshot of the complete workflow state. Primary never
 // changes, while Tokens, Text, and Reasoning represent the output after the
-// latest stage.
+// latest stage. These fields retain real-time partial output from retried
+// attempts; buffering to omit it would sacrifice real-time streaming.
 type WorkflowResult struct {
 	Input     RunInput
 	Primary   AgentResult

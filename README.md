@@ -501,6 +501,16 @@ in declaration order. Callers must consume the token, status, and error channels
 After they close, `Workflow.Result()` contains the immutable primary result, the
 final visible output, accumulated errors, and named middleware stages.
 
+#### Retry streaming trade-off
+
+Workflow tokens are forwarded immediately. If a model attempt fails and is
+retried, its earlier tokens remain in the token stream and workflow result; the
+retry status sets `DiscardIteration` so consumers that maintain visible state can
+retract that attempt. This preserves real-time streaming. Applications requiring
+only accepted-attempt output must consume the ordered `loop.Event` stream and
+correlate tokens with its retry events, or choose buffering and accept delayed
+output.
+
 An ordinary agent can become middleware with `NewAgentMiddleware`. By default it
 receives the current visible text as named `upstream_output` context, plus the
 original run ID and metadata. Set
