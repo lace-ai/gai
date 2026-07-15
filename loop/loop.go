@@ -84,6 +84,18 @@ type iterationToolCall struct {
 	toolCall ai.ToolCall
 }
 
+// renderedPromptRequest creates the compatibility request used by the loop.
+// Conversation state remains in Prompt until a provider-native message path is
+// introduced deliberately; this boundary keeps that future change separate
+// from the current rendered-prompt behavior.
+func renderedPromptRequest(prompt string, maxTokens int, tools []ai.ToolDefinition) ai.AIRequest {
+	return ai.AIRequest{
+		Prompt:    prompt,
+		MaxTokens: maxTokens,
+		Tools:     tools,
+	}
+}
+
 // Loop starts asynchronous model and tool execution.
 //
 // The returned channels carry generated tokens, iteration snapshots, and
@@ -168,11 +180,7 @@ func (a *Loop) Loop(ctx context.Context) (<-chan ai.Token, <-chan IterationInfor
 				return
 			}
 
-			request := ai.AIRequest{
-				Prompt:    prompt,
-				MaxTokens: a.MaxTokens,
-				Tools:     toolDefinitions,
-			}
+			request := renderedPromptRequest(prompt, a.MaxTokens, toolDefinitions)
 			input := a.PromptBuilder.Input()
 			if input.User != nil {
 				iteration.UserMessage = &gaictx.Message{Role: gaictx.RoleUser, Content: input.User}
