@@ -32,8 +32,10 @@ type IterationInformation struct {
 	Retrying bool
 	// AttemptID is the one-based model generation attempt for IterationCount.
 	AttemptID int
-	// DiscardIteration reports that any streamed tokens from this attempt should
-	// be discarded by callers that maintain visible token state.
+	// DiscardIteration reports that a real-time streamed attempt was superseded.
+	// Consumers that keep visible token state must remove that attempt's tokens;
+	// preserving real-time delivery takes precedence over delaying tokens until
+	// a retry outcome is known.
 	DiscardIteration bool
 	// Canceled reports that the loop ended because its context was canceled or
 	// its deadline expired.

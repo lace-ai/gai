@@ -218,7 +218,7 @@ func TestAgentWorkflowMarksTerminalFailedAttemptDiscardable(t *testing.T) {
 	}
 }
 
-func TestAgentWorkflowDiscardsRetriedAttemptTokens(t *testing.T) {
+func TestAgentWorkflowStreamsRetriedAttemptTokens(t *testing.T) {
 	model := &scriptedWorkflowModel{
 		scripts: [][]ai.Token{
 			{
@@ -246,15 +246,18 @@ func TestAgentWorkflowDiscardsRetriedAttemptTokens(t *testing.T) {
 	if len(consumed.errs) != 0 {
 		t.Fatalf("unexpected workflow errors: %v", consumed.errs)
 	}
-	if got := tokensText(consumed.tokens); got != "final" {
-		t.Fatalf("stream included discarded retry text: %q", got)
+	if got := tokensText(consumed.tokens); got != "partialfinal" {
+		t.Fatalf("unexpected real-time stream text: %q", got)
+	}
+	if len(consumed.statuses) != 2 || !consumed.statuses[0].Retrying || !consumed.statuses[0].DiscardIteration {
+		t.Fatalf("expected a discardable retry status, got %#v", consumed.statuses)
 	}
 	result := workflow.Result()
-	if got := result.Primary.Text; got != "final" {
-		t.Fatalf("primary result included discarded retry text: %q", got)
+	if got := result.Primary.Text; got != "partialfinal" {
+		t.Fatalf("unexpected primary result text: %q", got)
 	}
-	if got := result.Text; got != "final" {
-		t.Fatalf("workflow result included discarded retry text: %q", got)
+	if got := result.Text; got != "partialfinal" {
+		t.Fatalf("unexpected workflow result text: %q", got)
 	}
 }
 

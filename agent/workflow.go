@@ -191,15 +191,13 @@ func loopEventsToStream(ctx context.Context, events <-chan loop.Event) Stream {
 		defer close(statuses)
 		defer close(errs)
 
-		var attemptTokens []ai.Token
 		for event := range events {
 			switch event.Type {
 			case loop.EventToken:
 				if event.Token != nil {
-					attemptTokens = append(attemptTokens, *event.Token)
+					send(ctx, tokens, *event.Token)
 				}
 			case loop.EventRetry:
-				attemptTokens = nil
 				status := loop.IterationInformation{
 					IterationCount:   event.IterationCount,
 					AttemptID:        event.AttemptID,
@@ -213,8 +211,6 @@ func loopEventsToStream(ctx context.Context, events <-chan loop.Event) Stream {
 				}
 				send(ctx, statuses, status)
 			case loop.EventIterationDone:
-				forwardTokens(ctx, tokens, attemptTokens)
-				attemptTokens = nil
 				status := loop.IterationInformation{
 					IterationCount: event.IterationCount,
 					AttemptID:      event.AttemptID,
@@ -226,8 +222,6 @@ func loopEventsToStream(ctx context.Context, events <-chan loop.Event) Stream {
 				}
 				send(ctx, statuses, status)
 			case loop.EventError:
-				forwardTokens(ctx, tokens, attemptTokens)
-				attemptTokens = nil
 				if event.Iteration != nil {
 					status := loop.IterationInformation{
 						Iteration:        *event.Iteration,
@@ -243,8 +237,6 @@ func loopEventsToStream(ctx context.Context, events <-chan loop.Event) Stream {
 					send(ctx, errs, event.Err)
 				}
 			case loop.EventCanceled:
-				forwardTokens(ctx, tokens, attemptTokens)
-				attemptTokens = nil
 				status := loop.IterationInformation{
 					IterationCount:   event.IterationCount,
 					AttemptID:        event.AttemptID,
