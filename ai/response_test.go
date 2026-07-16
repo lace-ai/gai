@@ -1,11 +1,21 @@
 package ai_test
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
 	"github.com/lace-ai/gai/ai"
 )
+
+func TestSendTokenStopsWhenContextCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if ai.SendToken(ctx, make(chan ai.Token), ai.Token{Type: ai.TokenTypeText, Text: "ignored"}) {
+		t.Fatal("expected canceled send to return false")
+	}
+}
 
 func TestAIResponseAppendTokenSeparatesThoughtsAndToolCalls(t *testing.T) {
 	var response ai.AIResponse

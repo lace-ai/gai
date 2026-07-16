@@ -114,6 +114,11 @@ func (m *AgentMiddleware) Process(ctx context.Context, run *MiddlewareContext, u
 		obs.Started(stageCtx)
 		result := m.upstreamResult(run, upstreamResult)
 
+		if result.Canceled {
+			m.restoreReplacement(stageCtx, tokens, upstreamResult.Tokens)
+			obs.Skipped(stageCtx, "upstream_canceled")
+			return
+		}
 		if !m.shouldRun(result) {
 			m.restoreReplacement(stageCtx, tokens, upstreamResult.Tokens)
 			reason := "predicate"

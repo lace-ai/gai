@@ -1,316 +1,476 @@
 {
-  "/home/samuel/dev/app/lace/infra/gai/agent/agent.go": {
-    "mtime": 1780292649.2468898,
-    "ast_hash": "8c53428ac0af7c31b6e0bc73512cedaf",
-    "semantic_hash": "8c53428ac0af7c31b6e0bc73512cedaf"
+  "/home/samuel/dev/app/lace/gai/agent/agent.go": {
+    "mtime": 1782595568.8217938,
+    "ast_hash": "24e407095e34a85399066e4163fd7d99",
+    "semantic_hash": "24e407095e34a85399066e4163fd7d99"
   },
-  "/home/samuel/dev/app/lace/infra/gai/agent/agent_test.go": {
-    "mtime": 1780292649.2472765,
-    "ast_hash": "d2b9581ff861fed22a118ffcdbce73f3",
-    "semantic_hash": "d2b9581ff861fed22a118ffcdbce73f3"
+  "/home/samuel/dev/app/lace/gai/agent/agent_test.go": {
+    "mtime": 1782329635.6023095,
+    "ast_hash": "89e2d28fcf5fe5ac9f1f6581fb0d3abf",
+    "semantic_hash": "89e2d28fcf5fe5ac9f1f6581fb0d3abf"
   },
-  "/home/samuel/dev/app/lace/infra/gai/agent/summary/summary.go": {
-    "mtime": 1780292649.2472765,
-    "ast_hash": "76ae1e283b04d99056e140518678f24d",
-    "semantic_hash": "76ae1e283b04d99056e140518678f24d"
+  "/home/samuel/dev/app/lace/gai/agent/e2e_test.go": {
+    "mtime": 1782684370.349945,
+    "ast_hash": "1a0650f037a6b0d793ddef96b1b8efaa",
+    "semantic_hash": "1a0650f037a6b0d793ddef96b1b8efaa"
   },
-  "/home/samuel/dev/app/lace/infra/gai/agent/summary/summary_test.go": {
-    "mtime": 1780292649.247539,
-    "ast_hash": "f8f1ac594567ea3cf7143b463b404a4a",
-    "semantic_hash": "f8f1ac594567ea3cf7143b463b404a4a"
+  "/home/samuel/dev/app/lace/gai/agent/middleware.go": {
+    "mtime": 1782469498.8229911,
+    "ast_hash": "80a892bf7803f2163ff96eb0d917981a",
+    "semantic_hash": "80a892bf7803f2163ff96eb0d917981a"
   },
-  "/home/samuel/dev/app/lace/infra/gai/ai/doc.go": {
-    "mtime": 1776674061.8562002,
-    "ast_hash": "e05f9bfac558f7c1f7b40863ebcb6c7b",
-    "semantic_hash": "e05f9bfac558f7c1f7b40863ebcb6c7b"
+  "/home/samuel/dev/app/lace/gai/agent/obs.go": {
+    "mtime": 1782469498.823991,
+    "ast_hash": "740fd35f8bef0bb1dbe6db6f8712ebae",
+    "semantic_hash": "740fd35f8bef0bb1dbe6db6f8712ebae"
   },
-  "/home/samuel/dev/app/lace/infra/gai/ai/errors.go": {
-    "mtime": 1779084368.4824336,
-    "ast_hash": "ad2bd3880f683e872172e4794dc8d1ff",
-    "semantic_hash": "ad2bd3880f683e872172e4794dc8d1ff"
+  "/home/samuel/dev/app/lace/gai/agent/obs_test.go": {
+    "mtime": 1782237109.2351143,
+    "ast_hash": "ecacfe0ea1a48b52eab012b3923f8fcb",
+    "semantic_hash": "ecacfe0ea1a48b52eab012b3923f8fcb"
   },
-  "/home/samuel/dev/app/lace/infra/gai/ai/gemini/errors.go": {
-    "mtime": 1778502680.082402,
+  "/home/samuel/dev/app/lace/gai/agent/summary/summary.go": {
+    "mtime": 1782469498.824991,
+    "ast_hash": "f879f04ed831214943c20d648a32b372",
+    "semantic_hash": "f879f04ed831214943c20d648a32b372"
+  },
+  "/home/samuel/dev/app/lace/gai/agent/summary/summary_test.go": {
+    "mtime": 1782469498.824991,
+    "ast_hash": "3760ecda5974ce69002504ad7c54cce8",
+    "semantic_hash": "3760ecda5974ce69002504ad7c54cce8"
+  },
+  "/home/samuel/dev/app/lace/gai/agent/workflow.go": {
+    "mtime": 1782684324.9253438,
+    "ast_hash": "7568e991960a096a20ea6c2e6be11f6a",
+    "semantic_hash": "7568e991960a096a20ea6c2e6be11f6a"
+  },
+  "/home/samuel/dev/app/lace/gai/agent/workflow_clone_test.go": {
+    "mtime": 1782237109.2361145,
+    "ast_hash": "ee0353e789fb502fdb483ba49630ab44",
+    "semantic_hash": "ee0353e789fb502fdb483ba49630ab44"
+  },
+  "/home/samuel/dev/app/lace/gai/agent/workflow_test.go": {
+    "mtime": 1782469498.826991,
+    "ast_hash": "dc68b34d200ce2ead77b9f62ed400883",
+    "semantic_hash": "dc68b34d200ce2ead77b9f62ed400883"
+  },
+  "/home/samuel/dev/app/lace/gai/ai/capability.go": {
+    "mtime": 1782469498.827991,
+    "ast_hash": "a1f922bb86eb4eef869106e39e961ad9",
+    "semantic_hash": "a1f922bb86eb4eef869106e39e961ad9"
+  },
+  "/home/samuel/dev/app/lace/gai/ai/capability_test.go": {
+    "mtime": 1782469498.827991,
+    "ast_hash": "6662642c2c18780bf11a2e7cd7bf3126",
+    "semantic_hash": "6662642c2c18780bf11a2e7cd7bf3126"
+  },
+  "/home/samuel/dev/app/lace/gai/ai/doc.go": {
+    "mtime": 1782237103.8671603,
+    "ast_hash": "06eb7474f1a66425faf17a8d8ed12e94",
+    "semantic_hash": "06eb7474f1a66425faf17a8d8ed12e94"
+  },
+  "/home/samuel/dev/app/lace/gai/ai/errors.go": {
+    "mtime": 1782469498.827991,
+    "ast_hash": "dc8e953aeb9f44d0c1e9c2f98c5526cb",
+    "semantic_hash": "dc8e953aeb9f44d0c1e9c2f98c5526cb"
+  },
+  "/home/samuel/dev/app/lace/gai/ai/gemini/errors.go": {
+    "mtime": 1781020001.398833,
     "ast_hash": "0bef50c4aed785623c2ba4a4211363d3",
     "semantic_hash": "0bef50c4aed785623c2ba4a4211363d3"
   },
-  "/home/samuel/dev/app/lace/infra/gai/ai/gemini/model.go": {
-    "mtime": 1780292649.2485583,
-    "ast_hash": "3db45534fa4b93b735f2ac007518444a",
-    "semantic_hash": "3db45534fa4b93b735f2ac007518444a"
+  "/home/samuel/dev/app/lace/gai/ai/gemini/model.go": {
+    "mtime": 1782469498.828991,
+    "ast_hash": "48b1adeedef0c12eaf3a3c66050b555e",
+    "semantic_hash": "48b1adeedef0c12eaf3a3c66050b555e"
   },
-  "/home/samuel/dev/app/lace/infra/gai/ai/gemini/model_test.go": {
-    "mtime": 1780292649.2497365,
-    "ast_hash": "43938a24f7145df78a631506a3d2f115",
-    "semantic_hash": "43938a24f7145df78a631506a3d2f115"
+  "/home/samuel/dev/app/lace/gai/ai/gemini/model_test.go": {
+    "mtime": 1782469498.8299909,
+    "ast_hash": "d19685b1d5a19844289465d94452c1dd",
+    "semantic_hash": "d19685b1d5a19844289465d94452c1dd"
   },
-  "/home/samuel/dev/app/lace/infra/gai/ai/gemini/models.go": {
-    "mtime": 1778502680.0843747,
+  "/home/samuel/dev/app/lace/gai/ai/gemini/models.go": {
+    "mtime": 1781020001.3989158,
     "ast_hash": "b4b76593413c22d5e6d72f4d74e0b469",
     "semantic_hash": "b4b76593413c22d5e6d72f4d74e0b469"
   },
-  "/home/samuel/dev/app/lace/infra/gai/ai/gemini/provider.go": {
-    "mtime": 1778502680.0844457,
+  "/home/samuel/dev/app/lace/gai/ai/gemini/provider.go": {
+    "mtime": 1781020001.398955,
     "ast_hash": "109a6a6ef1173873472f761cee48226d",
     "semantic_hash": "109a6a6ef1173873472f761cee48226d"
   },
-  "/home/samuel/dev/app/lace/infra/gai/ai/gemini/provider_test.go": {
-    "mtime": 1778502680.0844946,
+  "/home/samuel/dev/app/lace/gai/ai/gemini/provider_test.go": {
+    "mtime": 1781020001.398955,
     "ast_hash": "e4a78d2f526774f64dc1be72fb6b5ae4",
     "semantic_hash": "e4a78d2f526774f64dc1be72fb6b5ae4"
   },
-  "/home/samuel/dev/app/lace/infra/gai/ai/mistral/errors.go": {
-    "mtime": 1778502680.0845625,
+  "/home/samuel/dev/app/lace/gai/ai/mistral/errors.go": {
+    "mtime": 1781020001.398955,
     "ast_hash": "1189f6b024f189b694bd041ebfbe9bdc",
     "semantic_hash": "1189f6b024f189b694bd041ebfbe9bdc"
   },
-  "/home/samuel/dev/app/lace/infra/gai/ai/mistral/model.go": {
-    "mtime": 1780292649.2509952,
-    "ast_hash": "057900299015d005d2167f6c8618ab87",
-    "semantic_hash": "057900299015d005d2167f6c8618ab87"
+  "/home/samuel/dev/app/lace/gai/ai/mistral/model.go": {
+    "mtime": 1782469498.830991,
+    "ast_hash": "3b6e63dc870b77f07234cdea985e4ba8",
+    "semantic_hash": "3b6e63dc870b77f07234cdea985e4ba8"
   },
-  "/home/samuel/dev/app/lace/infra/gai/ai/mistral/model_test.go": {
-    "mtime": 1780292649.2515583,
-    "ast_hash": "a6df93d48c7179341817786f2073ff5e",
-    "semantic_hash": "a6df93d48c7179341817786f2073ff5e"
+  "/home/samuel/dev/app/lace/gai/ai/mistral/model_test.go": {
+    "mtime": 1782469498.831991,
+    "ast_hash": "9f39f9db9c228e988aface1cc1b5d26a",
+    "semantic_hash": "9f39f9db9c228e988aface1cc1b5d26a"
   },
-  "/home/samuel/dev/app/lace/infra/gai/ai/mistral/models.go": {
-    "mtime": 1778502680.0847633,
+  "/home/samuel/dev/app/lace/gai/ai/mistral/models.go": {
+    "mtime": 1781020001.3993483,
     "ast_hash": "28f7ae794cf67f35d0a490c121ac9a1b",
     "semantic_hash": "28f7ae794cf67f35d0a490c121ac9a1b"
   },
-  "/home/samuel/dev/app/lace/infra/gai/ai/mistral/provider.go": {
-    "mtime": 1778502680.0847964,
+  "/home/samuel/dev/app/lace/gai/ai/mistral/provider.go": {
+    "mtime": 1781020001.3993483,
     "ast_hash": "80e4bbc4939fa83b2b2a6dc704b19e3c",
     "semantic_hash": "80e4bbc4939fa83b2b2a6dc704b19e3c"
   },
-  "/home/samuel/dev/app/lace/infra/gai/ai/mistral/provider_test.go": {
-    "mtime": 1778502680.0848281,
+  "/home/samuel/dev/app/lace/gai/ai/mistral/provider_test.go": {
+    "mtime": 1781020001.3993483,
     "ast_hash": "d3f572bd56c8c6b65b3eaf1cb28a1912",
     "semantic_hash": "d3f572bd56c8c6b65b3eaf1cb28a1912"
   },
-  "/home/samuel/dev/app/lace/infra/gai/ai/model.go": {
-    "mtime": 1779084368.4834895,
-    "ast_hash": "e3a70123f0c242c2fa2738104dc375f5",
-    "semantic_hash": "e3a70123f0c242c2fa2738104dc375f5"
+  "/home/samuel/dev/app/lace/gai/ai/model.go": {
+    "mtime": 1782237103.8681602,
+    "ast_hash": "7fbaf343baf89b0ea57011999ea3c69d",
+    "semantic_hash": "7fbaf343baf89b0ea57011999ea3c69d"
   },
-  "/home/samuel/dev/app/lace/infra/gai/ai/model_repository.go": {
-    "mtime": 1777648884.115885,
-    "ast_hash": "2895b2490f0c3e9dcada580991958ea2",
-    "semantic_hash": "2895b2490f0c3e9dcada580991958ea2"
+  "/home/samuel/dev/app/lace/gai/ai/model_repository.go": {
+    "mtime": 1782237187.854442,
+    "ast_hash": "edf340834fbcb0f98625ab12203f638d",
+    "semantic_hash": "edf340834fbcb0f98625ab12203f638d"
   },
-  "/home/samuel/dev/app/lace/infra/gai/ai/model_repository_test.go": {
-    "mtime": 1777648884.1161485,
-    "ast_hash": "26a4edaf914c3c31c3580965393cdf43",
-    "semantic_hash": "26a4edaf914c3c31c3580965393cdf43"
+  "/home/samuel/dev/app/lace/gai/ai/model_repository_test.go": {
+    "mtime": 1782237187.854442,
+    "ast_hash": "61c049b5b69c43a4f57f3453cd9fb047",
+    "semantic_hash": "61c049b5b69c43a4f57f3453cd9fb047"
   },
-  "/home/samuel/dev/app/lace/infra/gai/ai/prompt.go": {
-    "mtime": 1777648884.1163867,
-    "ast_hash": "11e31b81dd31e1dfb2ae3d60aecf91c0",
-    "semantic_hash": "11e31b81dd31e1dfb2ae3d60aecf91c0"
+  "/home/samuel/dev/app/lace/gai/ai/provider.go": {
+    "mtime": 1782237103.8681602,
+    "ast_hash": "bb05f8db54e76298165458fc5cd7ad41",
+    "semantic_hash": "bb05f8db54e76298165458fc5cd7ad41"
   },
-  "/home/samuel/dev/app/lace/infra/gai/ai/provider.go": {
-    "mtime": 1776674061.8572004,
-    "ast_hash": "00ab1528e4bdbe67e510e3a76bf4ce1d",
-    "semantic_hash": "00ab1528e4bdbe67e510e3a76bf4ce1d"
+  "/home/samuel/dev/app/lace/gai/ai/request.go": {
+    "mtime": 1782469498.831991,
+    "ast_hash": "30435f53be7601a4b71db81d63ba332e",
+    "semantic_hash": "30435f53be7601a4b71db81d63ba332e"
   },
-  "/home/samuel/dev/app/lace/infra/gai/ai/request.go": {
-    "mtime": 1776698429.4521244,
-    "ast_hash": "eafafc498c06760985cd7d896d6387a1",
-    "semantic_hash": "eafafc498c06760985cd7d896d6387a1"
+  "/home/samuel/dev/app/lace/gai/ai/request_test.go": {
+    "mtime": 1781894978.1211026,
+    "ast_hash": "b7cd5e282435bbdcf8f29325039e3c64",
+    "semantic_hash": "b7cd5e282435bbdcf8f29325039e3c64"
   },
-  "/home/samuel/dev/app/lace/infra/gai/ai/request_test.go": {
-    "mtime": 1777648884.1165855,
-    "ast_hash": "21b81e8c767f5e8e1eed9f383c14d707",
-    "semantic_hash": "21b81e8c767f5e8e1eed9f383c14d707"
+  "/home/samuel/dev/app/lace/gai/ai/response.go": {
+    "mtime": 1782469498.832991,
+    "ast_hash": "2f3785dd3b64f8e518aec3772b26dcb4",
+    "semantic_hash": "2f3785dd3b64f8e518aec3772b26dcb4"
   },
-  "/home/samuel/dev/app/lace/infra/gai/ai/response.go": {
-    "mtime": 1777648884.1167357,
-    "ast_hash": "db7ac2ae6c31795092a784ca8a1beb8f",
-    "semantic_hash": "db7ac2ae6c31795092a784ca8a1beb8f"
+  "/home/samuel/dev/app/lace/gai/ai/response_test.go": {
+    "mtime": 1782469498.8339908,
+    "ast_hash": "fe826688c7c82c5017cf584d7d3a7046",
+    "semantic_hash": "fe826688c7c82c5017cf584d7d3a7046"
   },
-  "/home/samuel/dev/app/lace/infra/gai/ai/response_test.go": {
-    "mtime": 1777648884.1169317,
-    "ast_hash": "1cccf7176e714c617810a4779e974f39",
-    "semantic_hash": "1cccf7176e714c617810a4779e974f39"
+  "/home/samuel/dev/app/lace/gai/ai/tokenizer.go": {
+    "mtime": 1782237103.8691604,
+    "ast_hash": "a25b5c7445200bf3fbe9670b2669c05f",
+    "semantic_hash": "a25b5c7445200bf3fbe9670b2669c05f"
   },
-  "/home/samuel/dev/app/lace/infra/gai/ai/tokenizer.go": {
-    "mtime": 1780292649.2528262,
-    "ast_hash": "d15b00d14568d4cfe23932b95f75f2c5",
-    "semantic_hash": "d15b00d14568d4cfe23932b95f75f2c5"
+  "/home/samuel/dev/app/lace/gai/ai/tool_call.go": {
+    "mtime": 1782237187.8554418,
+    "ast_hash": "ecf95ad1a7c377fddd83881481df407e",
+    "semantic_hash": "ecf95ad1a7c377fddd83881481df407e"
   },
-  "/home/samuel/dev/app/lace/infra/gai/ai/tool_call.go": {
-    "mtime": 1777648884.1171222,
-    "ast_hash": "e35ad055b7e85b1d6347c1fe2132247b",
-    "semantic_hash": "e35ad055b7e85b1d6347c1fe2132247b"
+  "/home/samuel/dev/app/lace/gai/ai/tool_call_test.go": {
+    "mtime": 1782237187.8554418,
+    "ast_hash": "0bef8cc02233f0df24d16027c744c281",
+    "semantic_hash": "0bef8cc02233f0df24d16027c744c281"
   },
-  "/home/samuel/dev/app/lace/infra/gai/context/content.go": {
-    "mtime": 1780292649.2536998,
-    "ast_hash": "a9b38a3a61717f1d9f6bab54757c7ef0",
-    "semantic_hash": "a9b38a3a61717f1d9f6bab54757c7ef0"
+  "/home/samuel/dev/app/lace/gai/ai/trace.go": {
+    "mtime": 1781020001.399955,
+    "ast_hash": "44127900d701ea73d2371f7aa12631fc",
+    "semantic_hash": "44127900d701ea73d2371f7aa12631fc"
   },
-  "/home/samuel/dev/app/lace/infra/gai/context/content_test.go": {
-    "mtime": 1780292649.2540305,
-    "ast_hash": "2654be96132dcd15d22a981095dd337d",
-    "semantic_hash": "2654be96132dcd15d22a981095dd337d"
+  "/home/samuel/dev/app/lace/gai/context/content.go": {
+    "mtime": 1782237103.8701603,
+    "ast_hash": "575b580883d038fb8d1048e2595427a9",
+    "semantic_hash": "575b580883d038fb8d1048e2595427a9"
   },
-  "/home/samuel/dev/app/lace/infra/gai/context/conversation.go": {
-    "mtime": 1776674061.8598418,
-    "ast_hash": "d4cc2146fd794021a935c47e56dd5bd1",
-    "semantic_hash": "d4cc2146fd794021a935c47e56dd5bd1"
+  "/home/samuel/dev/app/lace/gai/context/content_test.go": {
+    "mtime": 1781020001.400618,
+    "ast_hash": "304b7bab96f1c0ff66c5e2c4e3173d3b",
+    "semantic_hash": "304b7bab96f1c0ff66c5e2c4e3173d3b"
   },
-  "/home/samuel/dev/app/lace/infra/gai/context/errors.go": {
-    "mtime": 1780292649.2540305,
-    "ast_hash": "ce3725cc9b8667be44626d0b13b0c411",
-    "semantic_hash": "ce3725cc9b8667be44626d0b13b0c411"
+  "/home/samuel/dev/app/lace/gai/context/conversation.go": {
+    "mtime": 1782237103.8701603,
+    "ast_hash": "cb333f5c49548cf56e8f748509782981",
+    "semantic_hash": "cb333f5c49548cf56e8f748509782981"
   },
-  "/home/samuel/dev/app/lace/infra/gai/context/helper.go": {
-    "mtime": 1779084368.4837422,
-    "ast_hash": "8a2eb079b6e4f6d9c825e2f89e2f4e77",
-    "semantic_hash": "8a2eb079b6e4f6d9c825e2f89e2f4e77"
+  "/home/samuel/dev/app/lace/gai/context/doc.go": {
+    "mtime": 1782237103.8701603,
+    "ast_hash": "420bda4daf5a48c51ebe0df207717736",
+    "semantic_hash": "420bda4daf5a48c51ebe0df207717736"
   },
-  "/home/samuel/dev/app/lace/infra/gai/context/history_source.go": {
-    "mtime": 1780292649.2540305,
-    "ast_hash": "37f3b79a02a2c049ee52066ae3656b4c",
-    "semantic_hash": "37f3b79a02a2c049ee52066ae3656b4c"
+  "/home/samuel/dev/app/lace/gai/context/errors.go": {
+    "mtime": 1782237109.2371144,
+    "ast_hash": "acb66318e8f3c4fd69e3c50ae8ae0c22",
+    "semantic_hash": "acb66318e8f3c4fd69e3c50ae8ae0c22"
   },
-  "/home/samuel/dev/app/lace/infra/gai/context/message.go": {
-    "mtime": 1780292649.2546864,
-    "ast_hash": "a1b48b6cbf146767f5efcb7a360de3a1",
-    "semantic_hash": "a1b48b6cbf146767f5efcb7a360de3a1"
+  "/home/samuel/dev/app/lace/gai/context/helper.go": {
+    "mtime": 1782237103.8701603,
+    "ast_hash": "d0a66a93f2b1be443b6fb3a2422884e7",
+    "semantic_hash": "d0a66a93f2b1be443b6fb3a2422884e7"
   },
-  "/home/samuel/dev/app/lace/infra/gai/context/prompt_builder.go": {
-    "mtime": 1780292649.2552004,
-    "ast_hash": "dbf4b12cf98add3b31fe92eb4e13bfe7",
-    "semantic_hash": "dbf4b12cf98add3b31fe92eb4e13bfe7"
+  "/home/samuel/dev/app/lace/gai/context/history/doc.go": {
+    "mtime": 1782237103.8711603,
+    "ast_hash": "02b4564db47b2e1479f322df05d5697b",
+    "semantic_hash": "02b4564db47b2e1479f322df05d5697b"
   },
-  "/home/samuel/dev/app/lace/infra/gai/context/prompt_builder_test.go": {
-    "mtime": 1780292649.2554753,
-    "ast_hash": "9116b4c1aa164fbd2d44963b870f0d24",
-    "semantic_hash": "9116b4c1aa164fbd2d44963b870f0d24"
+  "/home/samuel/dev/app/lace/gai/context/history/errors.go": {
+    "mtime": 1781894978.1221027,
+    "ast_hash": "03dcac14a375c8a32f7dddf04c030269",
+    "semantic_hash": "03dcac14a375c8a32f7dddf04c030269"
   },
-  "/home/samuel/dev/app/lace/infra/gai/context/rag_source.go": {
-    "mtime": 1780292649.255682,
-    "ast_hash": "32df7b7b8352037be785689c8ac2b75c",
-    "semantic_hash": "32df7b7b8352037be785689c8ac2b75c"
+  "/home/samuel/dev/app/lace/gai/context/history/obs.go": {
+    "mtime": 1781894978.1231027,
+    "ast_hash": "1d2947cf25c1102cb82ad6a546bda7f4",
+    "semantic_hash": "1d2947cf25c1102cb82ad6a546bda7f4"
   },
-  "/home/samuel/dev/app/lace/infra/gai/context/rag_source_test.go": {
-    "mtime": 1780292649.255682,
-    "ast_hash": "46278d5033e001a1a544a0e60d64bb58",
-    "semantic_hash": "46278d5033e001a1a544a0e60d64bb58"
+  "/home/samuel/dev/app/lace/gai/context/history/part.go": {
+    "mtime": 1782237109.2371144,
+    "ast_hash": "c9e99ec35cfb5e111a1034ccf3870b80",
+    "semantic_hash": "c9e99ec35cfb5e111a1034ccf3870b80"
   },
-  "/home/samuel/dev/app/lace/infra/gai/context/renderer.go": {
-    "mtime": 1780292649.255944,
-    "ast_hash": "99688e9ab7d28a8f368ee82a1779a6b7",
-    "semantic_hash": "99688e9ab7d28a8f368ee82a1779a6b7"
+  "/home/samuel/dev/app/lace/gai/context/history/part_test.go": {
+    "mtime": 1781894978.1231027,
+    "ast_hash": "3af74828deee42d555eaa292e1476eb1",
+    "semantic_hash": "3af74828deee42d555eaa292e1476eb1"
   },
-  "/home/samuel/dev/app/lace/infra/gai/context/session_manager.go": {
-    "mtime": 1779084368.484337,
-    "ast_hash": "bb0d9e15be9f6fa15eebc2f44c014259",
-    "semantic_hash": "bb0d9e15be9f6fa15eebc2f44c014259"
+  "/home/samuel/dev/app/lace/gai/context/history/source.go": {
+    "mtime": 1781894978.1231027,
+    "ast_hash": "f32d241f7510abc1c1173e13f0b3f16e",
+    "semantic_hash": "f32d241f7510abc1c1173e13f0b3f16e"
   },
-  "/home/samuel/dev/app/lace/infra/gai/context/session_manager_test.go": {
-    "mtime": 1780292649.2561848,
-    "ast_hash": "2799089768215102bffbe755ffbd55d8",
-    "semantic_hash": "2799089768215102bffbe755ffbd55d8"
+  "/home/samuel/dev/app/lace/gai/context/history/source_internal_test.go": {
+    "mtime": 1781894978.1231027,
+    "ast_hash": "852f29218cbbb6d374554eb567ec5f1f",
+    "semantic_hash": "852f29218cbbb6d374554eb567ec5f1f"
   },
-  "/home/samuel/dev/app/lace/infra/gai/context/store.go": {
-    "mtime": 1780292649.2561848,
-    "ast_hash": "742b2c77822cefe50b15a23aa5351421",
-    "semantic_hash": "742b2c77822cefe50b15a23aa5351421"
+  "/home/samuel/dev/app/lace/gai/context/history/source_test.go": {
+    "mtime": 1782237187.8354418,
+    "ast_hash": "b172eef7e61c6e47207ba321df42eb52",
+    "semantic_hash": "b172eef7e61c6e47207ba321df42eb52"
   },
-  "/home/samuel/dev/app/lace/infra/gai/context/summarize.go": {
-    "mtime": 1780292649.2561848,
-    "ast_hash": "7da49ff12fcaa3d3c0c68bfc78a7e4f1",
-    "semantic_hash": "7da49ff12fcaa3d3c0c68bfc78a7e4f1"
+  "/home/samuel/dev/app/lace/gai/context/history/summary.go": {
+    "mtime": 1781894978.1251028,
+    "ast_hash": "52fffd4fde182c0ce29dd3ce533de7a7",
+    "semantic_hash": "52fffd4fde182c0ce29dd3ce533de7a7"
   },
-  "/home/samuel/dev/app/lace/infra/gai/debug.go": {
-    "mtime": 1777648884.119198,
-    "ast_hash": "b68651513f0472f9d4a3c4c39c01646f",
-    "semantic_hash": "b68651513f0472f9d4a3c4c39c01646f"
+  "/home/samuel/dev/app/lace/gai/context/history/summary_test.go": {
+    "mtime": 1781894978.1251028,
+    "ast_hash": "28a709f846458cb86f1ef11bbc6fa52d",
+    "semantic_hash": "28a709f846458cb86f1ef11bbc6fa52d"
   },
-  "/home/samuel/dev/app/lace/infra/gai/loop/doc.go": {
-    "mtime": 1776674061.8802009,
-    "ast_hash": "8ba4567c9b52fe8f39906b15a317eb0e",
-    "semantic_hash": "8ba4567c9b52fe8f39906b15a317eb0e"
+  "/home/samuel/dev/app/lace/gai/context/message.go": {
+    "mtime": 1782237103.8721604,
+    "ast_hash": "8b9fbdd6bbdb1fcfd7ba478ac218a209",
+    "semantic_hash": "8b9fbdd6bbdb1fcfd7ba478ac218a209"
   },
-  "/home/samuel/dev/app/lace/infra/gai/loop/echo_tool.go": {
-    "mtime": 1777648884.119593,
-    "ast_hash": "21022dfbf6166871b4ced516e80ef963",
-    "semantic_hash": "21022dfbf6166871b4ced516e80ef963"
+  "/home/samuel/dev/app/lace/gai/context/message_test.go": {
+    "mtime": 1781894978.1261027,
+    "ast_hash": "75515c4e3665909d757e06a2bad349ba",
+    "semantic_hash": "75515c4e3665909d757e06a2bad349ba"
   },
-  "/home/samuel/dev/app/lace/infra/gai/loop/errors.go": {
-    "mtime": 1779084368.487463,
-    "ast_hash": "81e1a54ccf3b29e4dba708cf27be8381",
-    "semantic_hash": "81e1a54ccf3b29e4dba708cf27be8381"
+  "/home/samuel/dev/app/lace/gai/context/prompt_builder.go": {
+    "mtime": 1782329635.6023095,
+    "ast_hash": "a80f4628b648cb3db0c2fd8881a1c0c8",
+    "semantic_hash": "a80f4628b648cb3db0c2fd8881a1c0c8"
   },
-  "/home/samuel/dev/app/lace/infra/gai/loop/iteration.go": {
-    "mtime": 1780292649.2565978,
-    "ast_hash": "7866f0ac8e6ba617b4ae14ae3938a737",
-    "semantic_hash": "7866f0ac8e6ba617b4ae14ae3938a737"
+  "/home/samuel/dev/app/lace/gai/context/prompt_builder_observer.go": {
+    "mtime": 1782237109.2381144,
+    "ast_hash": "6d0a184a691b469293724853541ebca5",
+    "semantic_hash": "6d0a184a691b469293724853541ebca5"
   },
-  "/home/samuel/dev/app/lace/infra/gai/loop/loop.go": {
-    "mtime": 1780292649.2567766,
-    "ast_hash": "01ef9e0f5a3086bd9b2083e1285b6e5b",
-    "semantic_hash": "01ef9e0f5a3086bd9b2083e1285b6e5b"
+  "/home/samuel/dev/app/lace/gai/context/prompt_builder_test.go": {
+    "mtime": 1782237109.2391145,
+    "ast_hash": "320073e84d5848adcc52e5b31455e6a7",
+    "semantic_hash": "320073e84d5848adcc52e5b31455e6a7"
   },
-  "/home/samuel/dev/app/lace/infra/gai/loop/loop_test.go": {
-    "mtime": 1780292649.2569962,
-    "ast_hash": "1348dfbbca1d2ea4d2955f1d9972f033",
-    "semantic_hash": "1348dfbbca1d2ea4d2955f1d9972f033"
+  "/home/samuel/dev/app/lace/gai/context/prompt_input.go": {
+    "mtime": 1782237109.2391145,
+    "ast_hash": "7f6479c6b339e50c15346f8e8c3d6ab8",
+    "semantic_hash": "7f6479c6b339e50c15346f8e8c3d6ab8"
   },
-  "/home/samuel/dev/app/lace/infra/gai/loop/tool.go": {
-    "mtime": 1779084368.4878726,
-    "ast_hash": "e40392660bf8ca722144c80844bbf108",
-    "semantic_hash": "e40392660bf8ca722144c80844bbf108"
+  "/home/samuel/dev/app/lace/gai/context/prompt_input_test.go": {
+    "mtime": 1782237109.2391145,
+    "ast_hash": "1565f87c0836a7c69022e159985b6961",
+    "semantic_hash": "1565f87c0836a7c69022e159985b6961"
   },
-  "/home/samuel/dev/app/lace/infra/gai/loop/tool_test.go": {
-    "mtime": 1777648884.1207645,
-    "ast_hash": "5cb4324f3d58e16fcf76add436fce434",
-    "semantic_hash": "5cb4324f3d58e16fcf76add436fce434"
+  "/home/samuel/dev/app/lace/gai/context/prompt_part.go": {
+    "mtime": 1782237103.8731604,
+    "ast_hash": "4793e4e7fe398c4e5e946d43c5af0b82",
+    "semantic_hash": "4793e4e7fe398c4e5e946d43c5af0b82"
   },
-  "/home/samuel/dev/app/lace/infra/gai/testutil/mocks/model.go": {
-    "mtime": 1780292649.2572048,
-    "ast_hash": "f3e8c17cd11ff3803248ead373e2b9ff",
-    "semantic_hash": "f3e8c17cd11ff3803248ead373e2b9ff"
+  "/home/samuel/dev/app/lace/gai/context/render_obs.go": {
+    "mtime": 1781947550.8694956,
+    "ast_hash": "1d93236fa64d6e9e3862df454ab49b51",
+    "semantic_hash": "1d93236fa64d6e9e3862df454ab49b51"
   },
-  "/home/samuel/dev/app/lace/infra/gai/testutil/mocks/provider.go": {
-    "mtime": 1777648884.1207645,
+  "/home/samuel/dev/app/lace/gai/context/renderer.go": {
+    "mtime": 1782469498.835991,
+    "ast_hash": "2dc7212878f7780854be9eae1d3d931f",
+    "semantic_hash": "2dc7212878f7780854be9eae1d3d931f"
+  },
+  "/home/samuel/dev/app/lace/gai/context/renderer_test.go": {
+    "mtime": 1782469498.835991,
+    "ast_hash": "775d9788057b053b986b286fc9ee1dfb",
+    "semantic_hash": "775d9788057b053b986b286fc9ee1dfb"
+  },
+  "/home/samuel/dev/app/lace/gai/context/tooldefinitions/doc.go": {
+    "mtime": 1782237103.8751602,
+    "ast_hash": "286a35aa87b6e398b19735008d14d566",
+    "semantic_hash": "286a35aa87b6e398b19735008d14d566"
+  },
+  "/home/samuel/dev/app/lace/gai/context/tooldefinitions/obs.go": {
+    "mtime": 1781984002.6514149,
+    "ast_hash": "482ab5ef1f3c3f7ab2e348036a3fabfd",
+    "semantic_hash": "482ab5ef1f3c3f7ab2e348036a3fabfd"
+  },
+  "/home/samuel/dev/app/lace/gai/context/tooldefinitions/source.go": {
+    "mtime": 1782469498.8369908,
+    "ast_hash": "6eb1e72c9064eeb32f1f24cc7057a88f",
+    "semantic_hash": "6eb1e72c9064eeb32f1f24cc7057a88f"
+  },
+  "/home/samuel/dev/app/lace/gai/context/tooldefinitions/source_test.go": {
+    "mtime": 1782469498.8379908,
+    "ast_hash": "4b5c5b247c8f4030f0af613686ed9752",
+    "semantic_hash": "4b5c5b247c8f4030f0af613686ed9752"
+  },
+  "/home/samuel/dev/app/lace/gai/debug.go": {
+    "mtime": 1781894978.1281025,
+    "ast_hash": "5d55be8df4e463d2e45b58365272c900",
+    "semantic_hash": "5d55be8df4e463d2e45b58365272c900"
+  },
+  "/home/samuel/dev/app/lace/gai/loop/doc.go": {
+    "mtime": 1782576353.2023232,
+    "ast_hash": "334290769d2c01ad424a3b5a69f20a12",
+    "semantic_hash": "334290769d2c01ad424a3b5a69f20a12"
+  },
+  "/home/samuel/dev/app/lace/gai/loop/echo_tool.go": {
+    "mtime": 1782469498.8379908,
+    "ast_hash": "62cf25fb86ad4fb844d3aff12357153c",
+    "semantic_hash": "62cf25fb86ad4fb844d3aff12357153c"
+  },
+  "/home/samuel/dev/app/lace/gai/loop/errors.go": {
+    "mtime": 1782595494.9842417,
+    "ast_hash": "6c842825de857461236e729220b8d9e0",
+    "semantic_hash": "6c842825de857461236e729220b8d9e0"
+  },
+  "/home/samuel/dev/app/lace/gai/loop/event.go": {
+    "mtime": 1782684324.4494045,
+    "ast_hash": "09516b7502a101a106173b62c6a726ef",
+    "semantic_hash": "09516b7502a101a106173b62c6a726ef"
+  },
+  "/home/samuel/dev/app/lace/gai/loop/iteration.go": {
+    "mtime": 1782574893.4350867,
+    "ast_hash": "1d6e6565aeea9c382dbf425bd675b7df",
+    "semantic_hash": "1d6e6565aeea9c382dbf425bd675b7df"
+  },
+  "/home/samuel/dev/app/lace/gai/loop/loop.go": {
+    "mtime": 1782843391.5375717,
+    "ast_hash": "46d0b0ff54304c0b9e1ab867a66ce1bf",
+    "semantic_hash": "46d0b0ff54304c0b9e1ab867a66ce1bf"
+  },
+  "/home/samuel/dev/app/lace/gai/loop/loop_obs.go": {
+    "mtime": 1782576225.6626668,
+    "ast_hash": "c76dfda00b99681a67c550893dc9dfef",
+    "semantic_hash": "c76dfda00b99681a67c550893dc9dfef"
+  },
+  "/home/samuel/dev/app/lace/gai/loop/loop_test.go": {
+    "mtime": 1782684370.0699544,
+    "ast_hash": "164d8cf8d05f8362ed1f58a9ed1b193c",
+    "semantic_hash": "164d8cf8d05f8362ed1f58a9ed1b193c"
+  },
+  "/home/samuel/dev/app/lace/gai/loop/tool.go": {
+    "mtime": 1782595574.6778405,
+    "ast_hash": "39a06562fb087742ce6dae4f2b1148bb",
+    "semantic_hash": "39a06562fb087742ce6dae4f2b1148bb"
+  },
+  "/home/samuel/dev/app/lace/gai/loop/tool_test.go": {
+    "mtime": 1782594795.6141794,
+    "ast_hash": "91f6a0f19a98c69c3fae22b13a855ae0",
+    "semantic_hash": "91f6a0f19a98c69c3fae22b13a855ae0"
+  },
+  "/home/samuel/dev/app/lace/gai/loop/tools/exa/obs.go": {
+    "mtime": 1782237109.2401145,
+    "ast_hash": "562a0e716b8bdbbae878acd3937f7c41",
+    "semantic_hash": "562a0e716b8bdbbae878acd3937f7c41"
+  },
+  "/home/samuel/dev/app/lace/gai/loop/tools/exa/search.go": {
+    "mtime": 1782469498.8409908,
+    "ast_hash": "e792dc5a8e3fd2c6e164db886cf50d97",
+    "semantic_hash": "e792dc5a8e3fd2c6e164db886cf50d97"
+  },
+  "/home/samuel/dev/app/lace/gai/loop/tools/exa/search_test.go": {
+    "mtime": 1782469498.8409908,
+    "ast_hash": "c21f34ae1ce948d4ea3a533aac8ed0f0",
+    "semantic_hash": "c21f34ae1ce948d4ea3a533aac8ed0f0"
+  },
+  "/home/samuel/dev/app/lace/gai/testutil/mocks/model.go": {
+    "mtime": 1782469498.8409908,
+    "ast_hash": "e614e21e032f5086def21ce06e5e2e01",
+    "semantic_hash": "e614e21e032f5086def21ce06e5e2e01"
+  },
+  "/home/samuel/dev/app/lace/gai/testutil/mocks/provider.go": {
+    "mtime": 1781020001.4599497,
     "ast_hash": "470e7e2f035106396d36be7ef8a063d5",
     "semantic_hash": "470e7e2f035106396d36be7ef8a063d5"
   },
-  "/home/samuel/dev/app/lace/infra/gai/testutil/mocks/session_store.go": {
-    "mtime": 1780292649.2573485,
-    "ast_hash": "f6d55ac09ad22ef2ae1129fdd12278cb",
-    "semantic_hash": "f6d55ac09ad22ef2ae1129fdd12278cb"
-  },
-  "/home/samuel/dev/app/lace/infra/gai/testutil/mocks/tool.go": {
-    "mtime": 1776674061.881848,
+  "/home/samuel/dev/app/lace/gai/testutil/mocks/tool.go": {
+    "mtime": 1781020001.4599497,
     "ast_hash": "63b0e185bd83d89e12e985cf46fe5742",
     "semantic_hash": "63b0e185bd83d89e12e985cf46fe5742"
   },
-  "/home/samuel/dev/app/lace/infra/gai/.github/copilot-instructions.md": {
-    "mtime": 1777648884.1138253,
+  "/home/samuel/dev/app/lace/gai/trace.go": {
+    "mtime": 1781020001.4599497,
+    "ast_hash": "bdba4b0ac6de267a77d3fc72a24d7960",
+    "semantic_hash": "bdba4b0ac6de267a77d3fc72a24d7960"
+  },
+  "/home/samuel/dev/app/lace/gai/.coderabbit.yml": {
+    "mtime": 1781944189.6516292,
+    "ast_hash": "4ac2d30fdced011c74c2ca03ada51229",
+    "semantic_hash": "4ac2d30fdced011c74c2ca03ada51229"
+  },
+  "/home/samuel/dev/app/lace/gai/.github/copilot-instructions.md": {
+    "mtime": 1781020001.3969553,
     "ast_hash": "ef1d761377e050db664a773f902f4306",
     "semantic_hash": "ef1d761377e050db664a773f902f4306"
   },
-  "/home/samuel/dev/app/lace/infra/gai/.github/workflows/go.yml": {
-    "mtime": 1776674061.8547924,
+  "/home/samuel/dev/app/lace/gai/.github/dependabot.yml": {
+    "mtime": 1781894978.1161027,
+    "ast_hash": "cd84be25e8aabb42e11df3190cf0ab62",
+    "semantic_hash": "cd84be25e8aabb42e11df3190cf0ab62"
+  },
+  "/home/samuel/dev/app/lace/gai/.github/workflows/go.yml": {
+    "mtime": 1781020001.397947,
     "ast_hash": "36b3ab76c011c8339c3723caf51d1692",
     "semantic_hash": "36b3ab76c011c8339c3723caf51d1692"
   },
-  "/home/samuel/dev/app/lace/infra/gai/README.md": {
-    "mtime": 1780292649.2468898,
-    "ast_hash": "f77b5207c590dcf0ab991fa3c40e3162",
-    "semantic_hash": "f77b5207c590dcf0ab991fa3c40e3162"
+  "/home/samuel/dev/app/lace/gai/README.md": {
+    "mtime": 1782595582.6599045,
+    "ast_hash": "4f926c8364d731bd51f697d47ad5bc15",
+    "semantic_hash": "4f926c8364d731bd51f697d47ad5bc15"
   },
-  "/home/samuel/dev/app/lace/infra/gai/agent/summary/system.md": {
-    "mtime": 1780292649.247539,
+  "/home/samuel/dev/app/lace/gai/agent/summary/system.md": {
+    "mtime": 1781020001.398673,
     "ast_hash": "76f755288c798c96ae77390fb5d3fa09",
     "semantic_hash": "76f755288c798c96ae77390fb5d3fa09"
   },
-  "/home/samuel/dev/app/lace/infra/gai/docs/GAI_thumbnail.png": {
-    "mtime": 1776674061.8792007,
+  "/home/samuel/dev/app/lace/gai/docs/GAI_thumbnail.png": {
+    "mtime": 1781020001.4239533,
     "ast_hash": "4b268f8255f7abc957e393d9ffa668cf",
     "semantic_hash": "4b268f8255f7abc957e393d9ffa668cf"
   }

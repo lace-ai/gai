@@ -18,20 +18,23 @@
 </p>
 <p></p>
 
-GAI is a flexible Go framework for building agent-style applications on top of LLMs.
-It provides a generic interface for providers and models, prompt and context implementations, and a loop for agentic-calling workflows.
+GAI is a Go library for building agent workflows that keep the application
+contract typed while still letting providers expose native LLM capabilities.
+It gives you provider-neutral model requests, structured prompt/context
+assembly, iterative model/tool execution, workflow middleware, and observable
+run results.
 
 ## ✨ Overview
 
-The library is organized around three ideas:
+The library is organized around four layers:
 
-- 🧩 `ai` defines the core provider, model, request, and response abstractions.
-- 🧱 `context` builds rendered prompts from system instructions, runtime context sources, conversation messages, and a user prompt.
-- 🔁 `loop` runs iterative model and tool execution when a model returns a tool call.
+- 🧩 `ai` defines provider, model, tokenizer, request, response, tool-call, structured-output, and reasoning abstractions.
+- 🧱 `context` builds rendered prompts from system instructions, dynamic context sources, structured run input, conversation messages, and token budgets.
+- 🔁 `loop` runs the ordered model/tool iteration stream, including retries, tool responses, and completed iteration state.
+- 🤖 `agent` packages a model, tools, prompt factory, tokenizer, loop limits, debug sink, and stream middleware into reusable workflow definitions.
 
-And:
-
-- 🤖 `agent` packages a model, tools, prompt factory, tokenizer, and loop limits into a reusable definition.
+The intended use is to compose application-specific agents without coupling the
+rest of your code to Gemini, Mistral, or any other provider adapter.
 
 ## 📋 Requirements
 
@@ -48,21 +51,27 @@ go get github.com/lace-ai/gai
 
 ### 🧭 Usage
 
-The shortest path is to create a provider model, define an agent, and start a run. Import GAI's `context` package with an alias so it does not conflict with the standard library package.
+The shortest path is to create a provider model, define an agent, create a
+single-use workflow, and consume all three workflow streams. Import GAI's
+`context` package with an alias so it does not conflict with the standard
+library package.
 
 ```go
 provider := gemini.New(os.Getenv("GEMINI_API_KEY"), nil)
 model, err := provider.Model("gemini-3-flash-preview")
+if err != nil {
+  return err
+}
 
 assistant := agent.New(agent.Definition{
   Name:  "assistant",
   Model: model,
   Prompt: func(ctx context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
-	return gaictx.New(gaictx.Definition{
+    return gaictx.New(gaictx.Definition{
       SystemInstructions: []gaictx.Part{
         gaictx.NewTextPart("You are a concise, helpful assistant."),
       },
-	}), nil
+    }), nil
   },
 })
 
@@ -71,25 +80,45 @@ workflow, err := assistant.NewRun(ctx, agent.RunInput{
     User: gaictx.NewTextContent("What is the capital of France?"),
   },
 })
+if err != nil {
+  return err
+}
 
 tokens, statuses, errs := workflow.Run(ctx)
+statusDone := make(chan struct{})
 go func() {
-    for range statuses {
-    }
+  defer close(statusDone)
+  for range statuses {
+  }
 }()
-for token := range tokens {
-    fmt.Print(token.Text)
-}
-for err := range errs {
-    if err != nil {
-        panic(err)
+
+var runErr error
+errorDone := make(chan struct{})
+go func() {
+  defer close(errorDone)
+  for err := range errs {
+    if err != nil && runErr == nil {
+      runErr = err
     }
+  }
+}()
+
+for token := range tokens {
+  fmt.Print(token.Text)
 }
+<-statusDone
+<-errorDone
+if runErr != nil {
+  return runErr
+}
+
+result := workflow.Result()
+fmt.Printf("\nfinal text: %s\n", result.Text)
 ```
 
-Agents can include stream middleware in their definition. An input mapper can
-project the typed upstream workflow result into the ordinary `RunInput` accepted
-by the nested agent. This memory agent records its own output while passing the
+Agents can also include stream middleware. A middleware stage can be an ordinary
+agent that receives the typed upstream `WorkflowResult` and records, appends, or
+replaces output. This memory agent records its own result while passing the
 assistant response through unchanged.
 
 ```go
@@ -111,21 +140,21 @@ assistant := agent.New(agent.Definition{
       Output:      agent.PreserveOutput,
       ErrorPolicy: agent.RecordError,
       MapInput: func(ctx context.Context, result agent.WorkflowResult) (agent.RunInput, error) {
-		observation, err := buildMemoryObservation(ctx, result)
+        observation, err := buildMemoryObservation(ctx, result)
         if err != nil {
           return agent.RunInput{}, err
         }
-		observationPart, err := gaictx.NewJSONPart("memory_observation", observation)
-		if err != nil {
-		  return agent.RunInput{}, err
-		}
-		return agent.RunInput{
-		  ID: result.Input.ID,
-		  Prompt: gaictx.PromptInput{
-		    Context: []gaictx.Part{observationPart},
-		  },
-		  Meta: result.Input.Meta,
-		}, nil
+        observationPart, err := gaictx.NewJSONPart("memory_observation", observation)
+        if err != nil {
+          return agent.RunInput{}, err
+        }
+        return agent.RunInput{
+          ID: result.Input.ID,
+          Prompt: gaictx.PromptInput{
+            Context: []gaictx.Part{observationPart},
+          },
+          Meta: result.Input.Meta,
+        }, nil
       },
     }),
   },
@@ -137,26 +166,64 @@ workflow, err := assistant.NewRun(ctx, agent.RunInput{
   },
   Meta: map[string]any{"session_id": sessionID},
 })
+if err != nil {
+  return err
+}
 tokens, statuses, errs := workflow.Run(ctx)
 
+statusDone := make(chan struct{})
 go func() {
+  defer close(statusDone)
   for range statuses {
   }
 }()
+
+var runErr error
+errorDone := make(chan struct{})
+go func() {
+  defer close(errorDone)
+  for err := range errs {
+    if err != nil && runErr == nil {
+      runErr = err
+    }
+  }
+}()
+
 for token := range tokens {
   fmt.Print(token.Text)
 }
-for err := range errs {
-  if err != nil {
-    panic(err)
-  }
+<-statusDone
+<-errorDone
+if runErr != nil {
+  return runErr
 }
 
 result := workflow.Result()
 fmt.Printf("memory stage output: %s\n", result.Stages[0].Result.Text)
 ```
 
-For a single non-agent request, call the model directly with `model.Generate(ctx, ai.AIRequest{Prompt: "...", MaxTokens: 100})`.
+For a single non-agent request, call the model directly. Direct requests are
+where you opt into provider-native capabilities such as structured JSON output,
+tool choice, or reasoning hints:
+
+```go
+res, err := model.Generate(ctx, ai.AIRequest{
+  Prompt:    "Return one JSON object describing Paris.",
+  MaxTokens: 100,
+  ResponseFormat: ai.ResponseFormat{
+    Type: ai.ResponseFormatJSONObject,
+  },
+  Reasoning: ai.ReasoningConfig{
+    Enabled:         true,
+    IncludeThoughts: false,
+    Effort:          ai.ReasoningEffortLow,
+  },
+})
+if err != nil {
+  return err
+}
+fmt.Println(res.Text)
+```
 
 ## 🧱 Package Layout
 
@@ -411,7 +478,7 @@ Use `history.New(sessionID, store, summarizerDefinition)` when older turns shoul
 
 The `agent` package turns reusable configuration into independent loop runs:
 
-- `Definition` combines a name, model, tools, prompt factory, limits, optional tokenizer override, optional tool-response preprocessor, and ordered stream middleware.
+- `Definition` combines a name, model, tools, prompt factory, limits, optional tokenizer override, optional tool-response processor, and ordered stream middleware.
 - Agent tools are exposed automatically through a `tool_definitions` source placed before application context sources.
 - `Prompt` builds a `context.PromptBuilder` for one `RunInput`.
 - `RunInput` carries an ID, structured `PromptInput`, per-run output-token override, and metadata. `PromptInput` separates genuine user content from named machine context.
@@ -523,9 +590,14 @@ The `loop` package is for agent-style execution where the model can request tool
 - a model
 - optional tools
 - a structured prompt builder
-- an optional tool-response preprocessor
+- an optional tool-response processor
 
-The loop calls `BuildContext` once before the first iteration, then calls `BuildPrompt` for each iteration so the rendered prompt includes the latest assistant and tool messages. The loop stops when the model returns a normal response or when the maximum iteration count is reached.
+The loop calls `BuildContext` once before the first iteration, then calls
+`BuildPrompt` for each iteration so the rendered prompt includes the latest
+assistant and tool messages. `Loop.Run` returns one ordered `Event` stream with
+attempt starts, tokens, retries, completed iterations, and terminal errors. The
+loop stops when the model returns a normal response or when the maximum
+iteration count is reached.
 
 </details>
 
@@ -595,10 +667,10 @@ fallback compatibility protocol.
 
 </summary>
 
-- `DetectToolCallsInStream` detects tool-call JSON objects in streamed text tokens.
-- `CallTool` runs a tool by name.
-- `DecodeToolArgs` unmarshals tool arguments into a typed struct.
-- `Renderer.RenderToolSignatures` formats tool metadata for prompting and returns schema errors.
+- `ai.DetectToolCallsInStream` detects text-encoded tool-call JSON objects in streamed text tokens.
+- `loop.CallTool` runs a tool by name.
+- `loop.DecodeToolArgs` unmarshals tool arguments into a typed struct.
+- `context.Renderer.RenderToolSignatures` formats tool metadata for prompting and returns schema errors.
 
 </details>
 

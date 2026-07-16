@@ -447,11 +447,20 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			gai.EndSpan(span, streamErr)
 		}()
 		defer close(raw)
+		emit := func(token ai.Token) bool {
+			if ai.SendToken(ctx, raw, token) {
+				return true
+			}
+			streamErr = ctx.Err()
+			return false
+		}
 
 		payload, err := buildChatCompletionRequest(req, m.name, true)
 		if err != nil {
 			streamErr = err
-			raw <- ai.Token{Err: err, Type: ai.TokenTypeErr}
+			if !emit(ai.Token{Err: err, Type: ai.TokenTypeErr}) {
+				return
+			}
 			return
 		}
 
@@ -472,7 +481,9 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 					Err:    err,
 				})
 			}
-			raw <- ai.Token{Err: err, Type: ai.TokenTypeErr}
+			if !emit(ai.Token{Err: err, Type: ai.TokenTypeErr}) {
+				return
+			}
 			return
 		}
 
@@ -494,7 +505,9 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 					Err: err,
 				})
 			}
-			raw <- ai.Token{Err: err, Type: ai.TokenTypeErr}
+			if !emit(ai.Token{Err: err, Type: ai.TokenTypeErr}) {
+				return
+			}
 			return
 		}
 		httpReq.Header.Set("Authorization", "Bearer "+m.client.apiKey)
@@ -514,7 +527,9 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 					Err: err,
 				})
 			}
-			raw <- ai.Token{Err: err, Type: ai.TokenTypeErr}
+			if !emit(ai.Token{Err: err, Type: ai.TokenTypeErr}) {
+				return
+			}
 			return
 		}
 		defer res.Body.Close()
@@ -535,9 +550,11 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 						Err: readErr,
 					})
 				}
-				raw <- ai.Token{
+				if !emit(ai.Token{
 					Err:  fmt.Errorf("mistral chat stream failed (status %d): %w", res.StatusCode, readErr),
 					Type: ai.TokenTypeErr,
+				}) {
+					return
 				}
 				streamErr = readErr
 				return
@@ -556,9 +573,11 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 				})
 			}
 			streamErr = fmt.Errorf("mistral chat stream failed (status %d): %s", res.StatusCode, string(resBody))
-			raw <- ai.Token{
+			if !emit(ai.Token{
 				Err:  streamErr,
 				Type: ai.TokenTypeErr,
+			}) {
+				return
 			}
 			return
 		}
@@ -576,9 +595,11 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			if event == "[DONE]" {
 				for _, tc := range toolCallAccumulator.ready(true) {
 					tcCopy := tc
-					raw <- ai.Token{
+					if !emit(ai.Token{
 						Type:     ai.TokenTypeToolCall,
 						ToolCall: &tcCopy,
+					}) {
+						return ctx.Err()
 					}
 				}
 				return io.EOF
@@ -597,7 +618,9 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 				return err
 			}
 			if text != "" {
-				raw <- ai.Token{Type: ai.TokenTypeText, Text: text, Data: []byte(text)}
+				if !emit(ai.Token{Type: ai.TokenTypeText, Text: text, Data: []byte(text)}) {
+					return ctx.Err()
+				}
 				textTokenCount++
 			}
 
@@ -636,10 +659,12 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 				}
 				for _, tc := range calls {
 					tcCopy := tc
-					raw <- ai.Token{
+					if !emit(ai.Token{
 						Type:     ai.TokenTypeToolCall,
 						Data:     append([]byte(nil), tc.Args...),
 						ToolCall: &tcCopy,
+					}) {
+						return ctx.Err()
 					}
 					toolCallCount++
 				}
@@ -662,7 +687,9 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 					})
 				}
 				streamErr = fmt.Errorf("read stream: %w", err)
-				raw <- ai.Token{Err: streamErr, Type: ai.TokenTypeErr}
+				if !emit(ai.Token{Err: streamErr, Type: ai.TokenTypeErr}) {
+					return
+				}
 				return
 			}
 
@@ -690,7 +717,9 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 						})
 					}
 					streamErr = flushErr
-					raw <- ai.Token{Err: flushErr, Type: ai.TokenTypeErr}
+					if !emit(ai.Token{Err: flushErr, Type: ai.TokenTypeErr}) {
+						return
+					}
 					return
 				}
 			} else if strings.HasPrefix(line, "data:") {
@@ -720,7 +749,9 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 						})
 					}
 					streamErr = flushErr
-					raw <- ai.Token{Err: flushErr, Type: ai.TokenTypeErr}
+					if !emit(ai.Token{Err: flushErr, Type: ai.TokenTypeErr}) {
+						return
+					}
 				}
 				return
 			}
