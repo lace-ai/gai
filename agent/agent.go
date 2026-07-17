@@ -54,6 +54,8 @@ type Definition struct {
 	Prompt Prompt
 	// Limits configures loop execution defaults.
 	Limits Limits
+	// Reasoning configures model reasoning/thinking behavior for every model call.
+	Reasoning ai.ReasoningConfig
 	// Tokenizer overrides Model.Tokenizer when it is non-nil.
 	Tokenizer ai.Tokenizer
 	// ToolResponseProcessor can transform tool responses before they enter the transcript.
@@ -171,6 +173,7 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 		l.MaxTokens = a.def.Limits.MaxTokens
 	}
 	l.ResponseFormat = cloneResponseFormat(input.ResponseFormat)
+	l.Reasoning = a.def.Reasoning
 	return l, nil
 }
 

@@ -41,6 +41,8 @@ type Loop struct {
 	MaxTokens int
 	// ResponseFormat requests the output shape for each model generation.
 	ResponseFormat ai.ResponseFormat
+	// Reasoning configures model reasoning/thinking behavior for each model generation.
+	Reasoning ai.ReasoningConfig
 	// RetryCount is the number of model stream failures retried before stopping.
 	RetryCount int
 	// PromptBuilder constructs the prompt for each iteration.
@@ -192,6 +194,7 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 					MaxTokens:      l.MaxTokens,
 					Tools:          toolDefinitions,
 					ResponseFormat: l.ResponseFormat,
+					Reasoning:      l.Reasoning,
 				}
 
 				tokens := l.Model.GenerateStream(iterCtx, request)
