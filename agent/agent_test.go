@@ -93,6 +93,12 @@ func TestAgentNewRunCreatesLoop(t *testing.T) {
 			RetryCount:        1,
 			MaxTokens:         9,
 		},
+		Reasoning: ai.ReasoningConfig{
+			Enabled:         true,
+			IncludeThoughts: true,
+			BudgetTokens:    128,
+			Effort:          ai.ReasoningEffortHigh,
+		},
 	})
 
 	run, err := assistant.NewRun(context.Background(), textRunInput("input"))
@@ -113,6 +119,9 @@ func TestAgentNewRunCreatesLoop(t *testing.T) {
 	}
 	if run.Loop.MaxTokens != 9 {
 		t.Fatalf("expected max tokens 9, got %d", run.Loop.MaxTokens)
+	}
+	if run.Loop.Reasoning != (ai.ReasoningConfig{Enabled: true, IncludeThoughts: true, BudgetTokens: 128, Effort: ai.ReasoningEffortHigh}) {
+		t.Fatalf("expected configured reasoning, got %+v", run.Loop.Reasoning)
 	}
 	if builder == nil || builder.tokenizer == nil {
 		t.Fatal("expected model tokenizer to be set on prompt builder")
