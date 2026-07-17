@@ -468,12 +468,19 @@ func tokenReasoning(tokens []ai.Token) string {
 func cloneRunInput(input RunInput) RunInput {
 	cloned := input
 	cloned.Prompt = input.Prompt.Clone()
+	cloned.ResponseFormat = cloneResponseFormat(input.ResponseFormat)
 	if input.Meta != nil {
 		cloned.Meta = make(map[string]any, len(input.Meta))
 		for key, value := range input.Meta {
 			cloned.Meta[key] = value
 		}
 	}
+	return cloned
+}
+
+func cloneResponseFormat(format ai.ResponseFormat) ai.ResponseFormat {
+	cloned := format
+	cloned.Schema = append([]byte(nil), format.Schema...)
 	return cloned
 }
 
