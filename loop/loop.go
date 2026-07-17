@@ -39,6 +39,8 @@ type Loop struct {
 	MaxLoopIterations int
 	// MaxTokens limits model output for each generation request.
 	MaxTokens int
+	// ResponseFormat requests the output shape for each model generation.
+	ResponseFormat ai.ResponseFormat
 	// RetryCount is the number of model stream failures retried before stopping.
 	RetryCount int
 	// PromptBuilder constructs the prompt for each iteration.
@@ -60,6 +62,9 @@ func (l *Loop) Validate() error {
 	}
 	if l.PromptBuilder == nil {
 		return ErrPromptNotConfigured
+	}
+	if err := l.ResponseFormat.Validate(); err != nil {
+		return err
 	}
 	return nil
 }
@@ -183,9 +188,10 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 				}
 
 				request := ai.AIRequest{
-					Prompt:    prompt,
-					MaxTokens: l.MaxTokens,
-					Tools:     toolDefinitions,
+					Prompt:         prompt,
+					MaxTokens:      l.MaxTokens,
+					Tools:          toolDefinitions,
+					ResponseFormat: l.ResponseFormat,
 				}
 
 				tokens := l.Model.GenerateStream(iterCtx, request)

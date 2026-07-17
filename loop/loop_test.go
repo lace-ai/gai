@@ -250,6 +250,22 @@ func loopEventsOfType(events []loop.Event, eventType loop.EventType) []loop.Even
 	return filtered
 }
 
+func TestLoopRejectsInvalidResponseFormatWithoutWrapping(t *testing.T) {
+	t.Parallel()
+
+	model := &scriptedStreamModel{}
+	l := loop.New(model, nil, testPromptBuilder(), nil)
+	l.ResponseFormat = ai.ResponseFormat{Type: ai.ResponseFormatJSONSchema}
+
+	err := loopError(collectLoopEvents(t, l, context.Background()))
+	if !errors.Is(err, ai.ErrInvalidResponseFormat) {
+		t.Fatalf("expected invalid response format error, got %v", err)
+	}
+	if len(model.Requests()) != 0 {
+		t.Fatalf("model must not be called for an invalid response format")
+	}
+}
+
 func renderTestMessages(messages []gaictx.Message) string {
 	var builder strings.Builder
 	for i, message := range messages {

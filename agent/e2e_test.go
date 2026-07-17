@@ -103,10 +103,18 @@ func TestAgentWorkflowEndToEndWithToolCall(t *testing.T) {
 		},
 	})
 
-	workflow, err := assistant.NewRun(context.Background(), textRunInput("use echo"))
+	input := textRunInput("use echo")
+	input.ResponseFormat = ai.ResponseFormat{
+		Type:   ai.ResponseFormatJSONSchema,
+		Name:   "answer",
+		Schema: []byte(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}`),
+	}
+	expectedSchema := string(input.ResponseFormat.Schema)
+	workflow, err := assistant.NewRun(context.Background(), input)
 	if err != nil {
 		t.Fatalf("NewRun failed: %v", err)
 	}
+	input.ResponseFormat.Schema[0] = '['
 	consumed := consumeWorkflow(t, workflow)
 	if len(consumed.errs) != 0 {
 		t.Fatalf("unexpected workflow errors: %v", consumed.errs)
@@ -160,6 +168,14 @@ func TestAgentWorkflowEndToEndWithToolCall(t *testing.T) {
 	}
 	if requests[0].MaxTokens != 64 || len(requests[0].Tools) != 1 || requests[0].Tools[0].Name != "echo" {
 		t.Fatalf("first request did not include limits and tools: %+v", requests[0])
+	}
+	for index, request := range requests {
+		if request.ResponseFormat.Type != ai.ResponseFormatJSONSchema || request.ResponseFormat.Name != "answer" || string(request.ResponseFormat.Schema) != expectedSchema {
+			t.Fatalf("request %d did not preserve response format: %+v", index, request.ResponseFormat)
+		}
+		if len(request.Tools) != 1 || request.Tools[0].Name != "echo" {
+			t.Fatalf("request %d did not preserve native tools: %+v", index, request.Tools)
+		}
 	}
 	if !strings.Contains(requests[1].Prompt, "tool res: tool says hi") {
 		t.Fatalf("second prompt did not include tool result:\n%s", requests[1].Prompt)
