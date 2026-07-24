@@ -330,13 +330,12 @@ anthropic.New(apiKey string, debug gai.DebugSink) *anthropic.Provider
 
 The provider uses Anthropic's Messages API. GAI currently sends the rendered
 prompt as one user message; it does not yet map native multi-turn messages.
-JSON Schema response formats opt into Anthropic's structured-outputs beta.
+JSON Schema response formats use Anthropic's GA `output_config.format` API.
 
-Known model names:
+Known model names include current aliases and dated/legacy IDs:
 
-- `claude-opus-4-6`
-- `claude-sonnet-4-6`
-- `claude-haiku-4-5`
+- Current: `claude-fable-5`, `claude-mythos-5`, `claude-opus-4-8`, `claude-sonnet-5`, `claude-opus-4-7`, `claude-opus-4-6`, `claude-sonnet-4-6`, `claude-opus-4-5`, `claude-sonnet-4-5`, `claude-haiku-4-5`, and `claude-opus-4-1`
+- Dated: `claude-opus-4-5-20251101`, `claude-sonnet-4-5-20250929`, `claude-haiku-4-5-20251001`, and `claude-opus-4-1-20250805`
 
 </details>
 

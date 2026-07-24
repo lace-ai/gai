@@ -59,7 +59,7 @@ func TestGenerateSendsAnthropicRequestAndMapsBlocksAndUsage(t *testing.T) {
 func TestGenerateMapsCapabilitiesAndRejectsUnsupportedResponseFormat(t *testing.T) {
 	var got messagesRequest
 	m := testModel(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("anthropic-beta") != structuredOutputBeta {
+		if r.Header.Get("anthropic-beta") != "" {
 			t.Fatalf("anthropic-beta = %q", r.Header.Get("anthropic-beta"))
 		}
 		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
@@ -154,13 +154,13 @@ func TestGenerateStreamMapsInterleavedBlocksAndToolJSON(t *testing.T) {
 			t.Fatal("stream was not requested")
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\"}}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"search\"}}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":2,\"content_block\":{\"type\":\"thinking\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"q\\\":\\\"\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":2,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"why\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"x\\\"}\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":2}\n\n"))
+		_, _ = w.Write([]byte("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\"}}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"search\"}}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":2,\"content_block\":{\"type\":\"thinking\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"q\\\":\\\"\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":2,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"why\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"x\\\"}\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":2}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"))
 	})
 	var tokens []ai.Token
 	for token := range m.GenerateStream(context.Background(), ai.AIRequest{Prompt: "hello"}) {
 		tokens = append(tokens, token)
 	}
-	if len(tokens) != 3 || tokens[0].Type != ai.TokenTypeText || tokens[0].Text != "hi" || tokens[1].Type != ai.TokenTypeThought || tokens[1].Text != "why" || tokens[2].Type != ai.TokenTypeToolCall || tokens[2].ToolCall == nil || string(tokens[2].ToolCall.Args) != `{"q":"x"}` {
+	if len(tokens) != 3 || tokens[0].Type != ai.TokenTypeText || string(tokens[0].Data) != "hi" || tokens[1].Type != ai.TokenTypeThought || tokens[1].Text != "why" || tokens[2].Type != ai.TokenTypeToolCall || tokens[2].ToolCall == nil || string(tokens[2].ToolCall.Args) != `{"q":"x"}` {
 		t.Fatalf("unexpected tokens: %#v", tokens)
 	}
 }
@@ -203,6 +203,28 @@ func TestGenerateStreamErrorAndCancellation(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("stream did not close after cancellation")
+	}
+}
+
+func TestGenerateStreamDetectsTextFallbackToolCall(t *testing.T) {
+	m := testModel(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\"}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"{\\\"type\\\":\\\"function\\\",\"}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"\\\"name\\\":\\\"search\\\",\\\"arguments\\\":{}}\"}}\n\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\ndata: {\"type\":\"message_stop\"}\n\n"))
+	})
+
+	var tokens []ai.Token
+	for token := range m.GenerateStream(context.Background(), ai.AIRequest{Prompt: "hello"}) {
+		tokens = append(tokens, token)
+	}
+	if len(tokens) != 1 || tokens[0].Type != ai.TokenTypeToolCall || tokens[0].ToolCall == nil || tokens[0].ToolCall.Name != "search" {
+		t.Fatalf("unexpected tokens: %#v", tokens)
+	}
+}
+
+func TestConsumeSSERejectsMissingMessageStop(t *testing.T) {
+	err := consumeSSE(strings.NewReader("data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\"}}\n\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n"), func(ai.Token) bool { return true })
+	if err == nil || !strings.Contains(err.Error(), "message_stop") {
+		t.Fatalf("consumeSSE() error = %v, want missing message_stop", err)
 	}
 }
 

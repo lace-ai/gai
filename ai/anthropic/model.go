@@ -17,12 +17,11 @@ import (
 )
 
 const (
-	anthropicTracerName  = "github.com/lace-ai/gai/ai/anthropic"
-	defaultMaxTokens     = 4096
-	maxResponseBody      = 1 << 20
-	maxSSEEvent          = 1 << 20
-	minThinkingTokens    = 1024
-	structuredOutputBeta = "structured-outputs-2025-11-13"
+	anthropicTracerName = "github.com/lace-ai/gai/ai/anthropic"
+	defaultMaxTokens    = 4096
+	maxResponseBody     = 1 << 20
+	maxSSEEvent         = 1 << 20
+	minThinkingTokens   = 1024
 )
 
 type Model struct {
@@ -103,7 +102,7 @@ func buildMessagesRequest(req ai.AIRequest, model string, stream bool) (messages
 	p.OutputConfig = format
 	if req.Reasoning.Effort != "" {
 		if !supportsAdaptiveThinking(model) {
-			return messagesRequest{}, fmt.Errorf("%w: Anthropic reasoning effort is unsupported by %s", ai.ErrUnsupportedCapability, model)
+			return messagesRequest{}, fmt.Errorf("%w: anthropic reasoning effort is unsupported by %s", ai.ErrUnsupportedCapability, model)
 		}
 		switch req.Reasoning.Effort {
 		case ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh:
@@ -122,16 +121,16 @@ func buildMessagesRequest(req ai.AIRequest, model string, stream bool) (messages
 		}
 		if req.Reasoning.BudgetTokens > 0 {
 			if req.Reasoning.BudgetTokens < minThinkingTokens || req.Reasoning.BudgetTokens >= p.MaxTokens {
-				return messagesRequest{}, fmt.Errorf("%w: Anthropic thinking budget must be at least %d and less than max_tokens", ai.ErrUnsupportedCapability, minThinkingTokens)
+				return messagesRequest{}, fmt.Errorf("%w: anthropic thinking budget must be at least %d and less than max_tokens", ai.ErrUnsupportedCapability, minThinkingTokens)
 			}
 			p.Thinking = &thinkingRequest{Type: "enabled", BudgetTokens: req.Reasoning.BudgetTokens, Display: display}
 		} else if supportsAdaptiveThinking(model) {
 			p.Thinking = &thinkingRequest{Type: "adaptive", Display: display}
 		} else {
-			return messagesRequest{}, fmt.Errorf("%w: Anthropic adaptive thinking is unsupported by %s", ai.ErrUnsupportedCapability, model)
+			return messagesRequest{}, fmt.Errorf("%w: anthropic adaptive thinking is unsupported by %s", ai.ErrUnsupportedCapability, model)
 		}
 		if p.ToolChoice != nil && (p.ToolChoice.Type == "any" || p.ToolChoice.Type == "tool") {
-			return messagesRequest{}, fmt.Errorf("%w: Anthropic thinking is incompatible with required tool choice", ai.ErrUnsupportedCapability)
+			return messagesRequest{}, fmt.Errorf("%w: anthropic thinking is incompatible with required tool choice", ai.ErrUnsupportedCapability)
 		}
 	}
 	return p, nil
@@ -152,12 +151,12 @@ func mapToolChoice(choice ai.ToolChoice) (*toolChoiceRequest, error) {
 	switch choice.Mode {
 	case "", ai.ToolChoiceAuto:
 		if len(names) != 0 {
-			return nil, fmt.Errorf("%w: Anthropic auto tool choice cannot restrict names", ai.ErrUnsupportedCapability)
+			return nil, fmt.Errorf("%w: anthropic auto tool choice cannot restrict names", ai.ErrUnsupportedCapability)
 		}
 		return &toolChoiceRequest{Type: "auto"}, nil
 	case ai.ToolChoiceNone:
 		if len(names) != 0 {
-			return nil, fmt.Errorf("%w: Anthropic none tool choice cannot name tools", ai.ErrUnsupportedCapability)
+			return nil, fmt.Errorf("%w: anthropic none tool choice cannot name tools", ai.ErrUnsupportedCapability)
 		}
 		return &toolChoiceRequest{Type: "none"}, nil
 	case ai.ToolChoiceRequired:
@@ -167,7 +166,7 @@ func mapToolChoice(choice ai.ToolChoice) (*toolChoiceRequest, error) {
 		if len(names) == 1 && strings.TrimSpace(names[0]) != "" {
 			return &toolChoiceRequest{Type: "tool", Name: strings.TrimSpace(names[0])}, nil
 		}
-		return nil, fmt.Errorf("%w: Anthropic required tool choice accepts at most one named tool", ai.ErrUnsupportedCapability)
+		return nil, fmt.Errorf("%w: anthropic required tool choice accepts at most one named tool", ai.ErrUnsupportedCapability)
 	default:
 		return nil, fmt.Errorf("unsupported anthropic tool choice mode %q", choice.Mode)
 	}
@@ -177,7 +176,7 @@ func mapResponseFormat(format ai.ResponseFormat) (*outputConfigRequest, error) {
 	case "", ai.ResponseFormatText:
 		return nil, nil
 	case ai.ResponseFormatJSONObject:
-		return nil, fmt.Errorf("%w: Anthropic JSON object responses require a JSON schema", ai.ErrUnsupportedCapability)
+		return nil, fmt.Errorf("%w: anthropic JSON object responses require a JSON schema", ai.ErrUnsupportedCapability)
 	case ai.ResponseFormatJSONSchema:
 		return &outputConfigRequest{Format: &outputFormatRequest{Type: "json_schema", Schema: append(json.RawMessage(nil), format.Schema...)}}, nil
 	default:
@@ -199,7 +198,7 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 	if err != nil {
 		return nil, err
 	}
-	httpReq, err := m.newRequest(ctx, "/v1/messages", body, false, payload.OutputConfig != nil)
+	httpReq, err := m.newRequest(ctx, "/v1/messages", body, false)
 	if err != nil {
 		return nil, err
 	}
@@ -218,7 +217,7 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 	}
 	var parsed messageResponse
 	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return nil, fmt.Errorf("decode Anthropic message: %w", err)
+		return nil, fmt.Errorf("decode anthropic message: %w", err)
 	}
 	text, thinking, calls, err := mapMessageContent(parsed.Content)
 	if err != nil {
@@ -233,10 +232,10 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 		}
 		m.debug.Emit(ctx, gai.DebugEvent{Name: "anthropic_generate_success", Source: "ai:anthropic.Model.Generate", Fields: fields})
 	}
-	return &ai.AIResponse{Text: text, Reasoning: thinking, ToolCalls: calls, Raw: append(json.RawMessage(nil), raw...), InputTokens: input, OutputTokens: parsed.Usage.OutputTokens, ReasoningTokens: parsed.Usage.OutputTokensDetails.ThinkingTokens}, nil
+	return &ai.AIResponse{Text: text, Reasoning: thinking, ToolCalls: calls, Raw: append(json.RawMessage(nil), raw...), FinishReason: parsed.StopReason, InputTokens: input, OutputTokens: parsed.Usage.OutputTokens, ReasoningTokens: parsed.Usage.OutputTokensDetails.ThinkingTokens}, nil
 }
 
-func (m *Model) newRequest(ctx context.Context, path string, body []byte, stream, structuredOutput bool) (*http.Request, error) {
+func (m *Model) newRequest(ctx context.Context, path string, body []byte, stream bool) (*http.Request, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, m.client.baseURL+path, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -247,15 +246,13 @@ func (m *Model) newRequest(ctx context.Context, path string, body []byte, stream
 	if stream {
 		req.Header.Set("Accept", "text/event-stream")
 	}
-	if structuredOutput {
-		req.Header.Set("anthropic-beta", structuredOutputBeta)
-	}
 	return req, nil
 }
 
 type messageResponse struct {
-	Content []contentBlock `json:"content"`
-	Usage   usage          `json:"usage"`
+	Content    []contentBlock `json:"content"`
+	StopReason string         `json:"stop_reason"`
+	Usage      usage          `json:"usage"`
 }
 type usage struct {
 	InputTokens              int `json:"input_tokens"`
@@ -312,7 +309,7 @@ func readBounded(reader io.Reader) ([]byte, error) {
 		return nil, err
 	}
 	if len(raw) > maxResponseBody {
-		return nil, fmt.Errorf("Anthropic response body exceeds %d bytes", maxResponseBody)
+		return nil, fmt.Errorf("anthropic response body exceeds %d bytes", maxResponseBody)
 	}
 	return raw, nil
 }
@@ -355,7 +352,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			emit(ai.Token{Type: ai.TokenTypeErr, Err: err, Text: err.Error()})
 			return
 		}
-		httpReq, err := m.newRequest(ctx, "/v1/messages", body, true, payload.OutputConfig != nil)
+		httpReq, err := m.newRequest(ctx, "/v1/messages", body, true)
 		if err != nil {
 			streamErr = err
 			emit(ai.Token{Type: ai.TokenTypeErr, Err: err, Text: err.Error()})
@@ -384,7 +381,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			emit(ai.Token{Type: ai.TokenTypeErr, Err: err, Text: err.Error()})
 		}
 	}()
-	return out
+	return ai.DetectToolCallsInStream(ctx, out, m.debug)
 }
 
 type streamBlock struct {
@@ -396,6 +393,7 @@ func consumeSSE(body io.Reader, emit func(ai.Token) bool) error {
 	reader := bufio.NewReader(body)
 	var data strings.Builder
 	blocks := map[int]*streamBlock{}
+	messageStopped := false
 	flush := func() error {
 		if data.Len() == 0 {
 			return nil
@@ -418,9 +416,11 @@ func consumeSSE(body io.Reader, emit func(ai.Token) bool) error {
 			} `json:"error"`
 		}
 		if err := json.Unmarshal(raw, &event); err != nil {
-			return fmt.Errorf("decode Anthropic stream event: %w", err)
+			return fmt.Errorf("decode anthropic stream event: %w", err)
 		}
 		switch event.Type {
+		case "message_stop":
+			messageStopped = true
 		case "error":
 			return &Error{Type: event.Error.Type, Message: event.Error.Message}
 		case "content_block_start":
@@ -428,7 +428,7 @@ func consumeSSE(body io.Reader, emit func(ai.Token) bool) error {
 		case "content_block_delta":
 			block := blocks[event.Index]
 			if block == nil {
-				return fmt.Errorf("Anthropic stream delta for unknown block %d", event.Index)
+				return fmt.Errorf("anthropic stream delta for unknown block %d", event.Index)
 			}
 			switch event.Delta.Type {
 			case "text_delta":
@@ -445,20 +445,20 @@ func consumeSSE(body io.Reader, emit func(ai.Token) bool) error {
 		case "content_block_stop":
 			block := blocks[event.Index]
 			if block == nil {
-				return fmt.Errorf("Anthropic stream stop for unknown block %d", event.Index)
+				return fmt.Errorf("anthropic stream stop for unknown block %d", event.Index)
 			}
 			delete(blocks, event.Index)
 			if block.typ == "tool_use" {
 				name := strings.TrimSpace(block.name)
 				if name == "" {
-					return fmt.Errorf("Anthropic stream tool use name empty")
+					return fmt.Errorf("anthropic stream tool use name empty")
 				}
 				args := json.RawMessage(block.input.String())
 				if len(args) == 0 {
 					args = json.RawMessage("{}")
 				}
 				if !json.Valid(args) {
-					return fmt.Errorf("Anthropic stream tool use input is invalid JSON")
+					return fmt.Errorf("anthropic stream tool use input is invalid JSON")
 				}
 				id := strings.TrimSpace(block.id)
 				if id == "" {
@@ -475,7 +475,7 @@ func consumeSSE(body io.Reader, emit func(ai.Token) bool) error {
 	for {
 		line, err := readSSELine(reader)
 		if err != nil && !errors.Is(err, io.EOF) {
-			return fmt.Errorf("read Anthropic stream: %w", err)
+			return fmt.Errorf("read anthropic stream: %w", err)
 		}
 		line = strings.TrimRight(line, "\r\n")
 		if line == "" {
@@ -488,7 +488,7 @@ func consumeSSE(body io.Reader, emit func(ai.Token) bool) error {
 			}
 			data.WriteString(strings.TrimSpace(strings.TrimPrefix(line, "data:")))
 			if data.Len() > maxSSEEvent {
-				return fmt.Errorf("Anthropic stream event exceeds %d bytes", maxSSEEvent)
+				return fmt.Errorf("anthropic stream event exceeds %d bytes", maxSSEEvent)
 			}
 		}
 		if errors.Is(err, io.EOF) {
@@ -496,7 +496,10 @@ func consumeSSE(body io.Reader, emit func(ai.Token) bool) error {
 				return flushErr
 			}
 			if len(blocks) != 0 {
-				return fmt.Errorf("Anthropic stream ended with %d open content block(s)", len(blocks))
+				return fmt.Errorf("anthropic stream ended with %d open content block(s)", len(blocks))
+			}
+			if !messageStopped {
+				return errors.New("anthropic stream ended before message_stop")
 			}
 			return nil
 		}
@@ -508,7 +511,7 @@ func readSSELine(reader *bufio.Reader) (string, error) {
 	for {
 		fragment, err := reader.ReadSlice('\n')
 		if line.Len()+len(fragment) > maxSSEEvent {
-			return "", fmt.Errorf("Anthropic stream line exceeds %d bytes", maxSSEEvent)
+			return "", fmt.Errorf("anthropic stream line exceeds %d bytes", maxSSEEvent)
 		}
 		line.Write(fragment)
 		if errors.Is(err, bufio.ErrBufferFull) {
@@ -568,7 +571,7 @@ func (t *Tokenizer) CountTokens(ctx context.Context, text string) (tokens int, e
 		InputTokens int `json:"input_tokens"`
 	}
 	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return 0, fmt.Errorf("decode Anthropic token count: %w", err)
+		return 0, fmt.Errorf("decode anthropic token count: %w", err)
 	}
 	return parsed.InputTokens, nil
 }
