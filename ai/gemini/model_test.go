@@ -50,6 +50,20 @@ func TestNativeContentsMapUserPayload(t *testing.T) {
 	}
 }
 
+func TestNativeContentsAllowsFunctionNameAfterResult(t *testing.T) {
+	contents, err := nativeContents(ai.AIRequest{Messages: []ai.RequestMessage{
+		{Role: ai.RequestMessageRoleAssistant, ToolCalls: []ai.RequestToolCall{{ID: "call_1", Name: "echo", Arguments: json.RawMessage(`{"message":"first"}`)}}},
+		{Role: ai.RequestMessageRoleTool, ToolResult: &ai.RequestToolResult{ToolCallID: "call_1", Name: "echo", Content: "first"}},
+		{Role: ai.RequestMessageRoleAssistant, ToolCalls: []ai.RequestToolCall{{ID: "call_2", Name: "echo", Arguments: json.RawMessage(`{"message":"second"}`)}}},
+	}})
+	if err != nil {
+		t.Fatalf("nativeContents error: %v", err)
+	}
+	if len(contents) != 3 {
+		t.Fatalf("expected three contents, got %#v", contents)
+	}
+}
+
 func TestMapFunctionCallEmptyName(t *testing.T) {
 	if _, err := mapFunctionCall(&genai.FunctionCall{ID: "call_1"}); err == nil {
 		t.Fatal("expected error for empty function name")

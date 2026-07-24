@@ -355,6 +355,7 @@ func nativeContents(req ai.AIRequest) ([]*genai.Content, error) {
 				response = map[string]any{"error": r.Content}
 			}
 			out = append(out, &genai.Content{Role: genai.RoleUser, Parts: []*genai.Part{{FunctionResponse: &genai.FunctionResponse{Name: r.Name, Response: response}}}})
+			delete(seen, r.Name)
 			continue
 		}
 		parts := []*genai.Part{}
