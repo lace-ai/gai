@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
 )
+
+const modelDiscoveryTimeout = 10 * time.Second
 
 // Provider resolves models served by OpenAI.
 type Provider struct {
@@ -66,7 +69,9 @@ func (p *Provider) ListModels() ([]string, error) {
 		return nil, err
 	}
 
-	discovered, err := p.listModels(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), modelDiscoveryTimeout)
+	defer cancel()
+	discovered, err := p.listModels(ctx)
 	if err == nil {
 		return discovered, nil
 	}

@@ -77,6 +77,26 @@ func TestProviderFallsBackWhenModelDiscoveryFails(t *testing.T) {
 	}
 }
 
+func TestProviderBoundsModelDiscovery(t *testing.T) {
+	p := New("test-key", nil)
+	var hasDeadline bool
+	p.httpClient = &http.Client{Transport: handlerRoundTripper(func(r *http.Request) (*http.Response, error) {
+		_, hasDeadline = r.Context().Deadline()
+		return nil, errors.New("model discovery unavailable")
+	})}
+
+	models, err := p.ListModels()
+	if err != nil {
+		t.Fatalf("ListModels returned error: %v", err)
+	}
+	if !hasDeadline {
+		t.Fatal("expected model discovery request to have a deadline")
+	}
+	if len(models) == 0 {
+		t.Fatal("expected fallback models after discovery failure")
+	}
+}
+
 func TestProviderModelValidation(t *testing.T) {
 	p := New("test-key", nil)
 	p.httpClient = &http.Client{Transport: errorRoundTripper{}}
