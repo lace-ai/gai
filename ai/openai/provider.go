@@ -108,11 +108,38 @@ func (p *Provider) listModels(ctx context.Context) ([]string, error) {
 
 	names := make([]string, 0, len(payload.Data))
 	for _, model := range payload.Data {
-		if name := strings.TrimSpace(model.ID); name != "" {
+		if name := strings.TrimSpace(model.ID); isChatCapableModel(name) {
 			names = append(names, name)
 		}
 	}
 	return names, nil
+}
+
+// isChatCapableModel excludes model families that the Models endpoint lists but
+// that cannot be used with this provider's Chat Completions adapter. The
+// endpoint does not expose per-endpoint capabilities, so unknown IDs remain
+// discoverable for compatible custom and future chat models.
+func isChatCapableModel(name string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		return false
+	}
+	for _, prefix := range []string{
+		"dall-e-",
+		"gpt-image-",
+		"text-embedding-",
+		"text-moderation-",
+		"omni-moderation-",
+		"whisper-",
+		"tts-",
+		"sora-",
+		"computer-use-",
+	} {
+		if strings.HasPrefix(name, prefix) {
+			return false
+		}
+	}
+	return name != "gpt-5.6-auto"
 }
 
 func fallbackModels() []string {

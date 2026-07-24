@@ -61,6 +61,21 @@ func TestProviderDynamicallyListsModelsAndAcceptsThem(t *testing.T) {
 	}
 }
 
+func TestProviderExcludesNonChatModelsFromDiscovery(t *testing.T) {
+	p := New("test-key", nil)
+	p.httpClient = &http.Client{Transport: handlerRoundTripper(func(*http.Request) (*http.Response, error) {
+		return response(http.StatusOK, `{"data":[{"id":"gpt-dynamic"},{"id":"gpt-image-1"},{"id":"text-embedding-3-large"},{"id":"omni-moderation-latest"}]}`), nil
+	})}
+
+	models, err := p.ListModels()
+	if err != nil {
+		t.Fatalf("ListModels returned error: %v", err)
+	}
+	if len(models) != 1 || models[0] != "gpt-dynamic" {
+		t.Fatalf("expected only chat-capable models, got %#v", models)
+	}
+}
+
 func TestProviderFallsBackWhenModelDiscoveryFails(t *testing.T) {
 	p := New("test-key", nil)
 	p.httpClient = &http.Client{Transport: errorRoundTripper{}}
