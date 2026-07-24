@@ -26,7 +26,7 @@ var _ ai.Provider = (*Provider)(nil)
 
 // New creates an Anthropic provider using apiKey.
 func New(apiKey string, debug gai.DebugSink) *Provider {
-	return &Provider{apiKey: apiKey, baseURL: "https://api.anthropic.com", httpClient: &http.Client{}, debug: debug}
+	return &Provider{apiKey: strings.TrimSpace(apiKey), baseURL: "https://api.anthropic.com", httpClient: &http.Client{}, debug: debug}
 }
 
 func (p *Provider) Validate() error {
