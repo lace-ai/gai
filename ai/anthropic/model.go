@@ -49,6 +49,9 @@ func (p *Provider) sdkClient() antropic.Client {
 }
 
 func buildMessagesRequest(req ai.AIRequest, model string) (antropic.MessageNewParams, error) {
+	if err := req.ValidateMessages(); err != nil {
+		return antropic.MessageNewParams{}, err
+	}
 	if err := req.ResponseFormat.Validate(); err != nil {
 		return antropic.MessageNewParams{}, err
 	}
@@ -60,6 +63,13 @@ func buildMessagesRequest(req ai.AIRequest, model string) (antropic.MessageNewPa
 		Model:     antropic.Model(model),
 		MaxTokens: int64(maxTokens),
 		Messages:  []antropic.MessageParam{antropic.NewUserMessage(antropic.NewTextBlock(req.Prompt))},
+	}
+	if len(req.Messages) > 0 {
+		msgs, err := mapNativeMessages(req.Messages)
+		if err != nil {
+			return antropic.MessageNewParams{}, err
+		}
+		p.Messages = msgs
 	}
 	if len(req.Tools) > 0 {
 		tools, err := mapTools(req.Tools)
@@ -121,6 +131,33 @@ func buildMessagesRequest(req ai.AIRequest, model string) (antropic.MessageNewPa
 		}
 	}
 	return p, nil
+}
+
+func mapNativeMessages(messages []ai.RequestMessage) ([]antropic.MessageParam, error) {
+	out := make([]antropic.MessageParam, 0, len(messages))
+	for _, m := range messages {
+		if m.Role == ai.RequestMessageRoleUser {
+			out = append(out, antropic.NewUserMessage(antropic.NewTextBlock(m.Text)))
+			continue
+		}
+		if m.Role == ai.RequestMessageRoleTool {
+			out = append(out, antropic.NewUserMessage(antropic.NewToolResultBlock(m.ToolResult.ToolCallID, m.ToolResult.Content, m.ToolResult.IsError)))
+			continue
+		}
+		blocks := []antropic.ContentBlockParamUnion{}
+		if m.Text != "" {
+			blocks = append(blocks, antropic.NewTextBlock(m.Text))
+		}
+		for _, c := range m.ToolCalls {
+			var input any
+			if err := json.Unmarshal(c.Arguments, &input); err != nil {
+				return nil, err
+			}
+			blocks = append(blocks, antropic.NewToolUseBlock(c.ID, input, c.Name))
+		}
+		out = append(out, antropic.NewAssistantMessage(blocks...))
+	}
+	return out, nil
 }
 
 func mapTools(defs []ai.ToolDefinition) ([]antropic.ToolUnionParam, error) {

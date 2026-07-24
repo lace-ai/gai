@@ -53,8 +53,19 @@ type chatCompletionRequest struct {
 }
 
 type chatMessageRequest struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string                `json:"role"`
+	Content    string                `json:"content"`
+	ToolCalls  []chatMessageToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string                `json:"tool_call_id,omitempty"`
+}
+type chatMessageToolCall struct {
+	ID       string               `json:"id"`
+	Type     string               `json:"type"`
+	Function chatToolCallFunction `json:"function"`
+}
+type chatToolCallFunction struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
 }
 
 type chatToolRequest struct {
@@ -92,6 +103,9 @@ type chatCompletionResponse struct {
 }
 
 func buildChatCompletionRequest(req ai.AIRequest, modelName string, stream bool) (chatCompletionRequest, error) {
+	if err := req.ValidateMessages(); err != nil {
+		return chatCompletionRequest{}, err
+	}
 	if err := req.ResponseFormat.Validate(); err != nil {
 		return chatCompletionRequest{}, err
 	}
@@ -104,6 +118,9 @@ func buildChatCompletionRequest(req ai.AIRequest, modelName string, stream bool)
 			},
 		},
 		Stream: stream,
+	}
+	if len(req.Messages) > 0 {
+		payload.Messages = mapNativeMessages(req.Messages)
 	}
 	if req.MaxTokens > 0 {
 		payload.MaxTokens = &req.MaxTokens
@@ -126,6 +143,30 @@ func buildChatCompletionRequest(req ai.AIRequest, modelName string, stream bool)
 	}
 	payload.ResponseFormat = responseFormat
 	return payload, nil
+}
+func mapNativeMessages(messages []ai.RequestMessage) []chatMessageRequest {
+	out := make([]chatMessageRequest, 0, len(messages))
+	for _, m := range messages {
+		if m.Role == ai.RequestMessageRoleUser {
+			out = append(out, chatMessageRequest{Role: "user", Content: m.Text})
+			continue
+		}
+		if m.Role == ai.RequestMessageRoleTool {
+			content := m.ToolResult.Content
+			if m.ToolResult.IsError {
+				encoded, _ := json.Marshal(map[string]string{"error": content})
+				content = string(encoded)
+			}
+			out = append(out, chatMessageRequest{Role: "tool", Content: content, ToolCallID: m.ToolResult.ToolCallID})
+			continue
+		}
+		x := chatMessageRequest{Role: "assistant", Content: m.Text}
+		for _, c := range m.ToolCalls {
+			x.ToolCalls = append(x.ToolCalls, chatMessageToolCall{ID: c.ID, Type: "function", Function: chatToolCallFunction{Name: c.Name, Arguments: string(c.Arguments)}})
+		}
+		out = append(out, x)
+	}
+	return out
 }
 
 func mapChatTools(definitions []ai.ToolDefinition) ([]chatToolRequest, error) {

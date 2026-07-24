@@ -83,6 +83,24 @@ func TestGenerateSendsAnthropicRequestAndMapsBlocksAndUsage(t *testing.T) {
 	}
 }
 
+func TestNativeMessagesMapUserPayload(t *testing.T) {
+	messages, err := mapNativeMessages([]ai.RequestMessage{{Role: ai.RequestMessageRoleUser, Text: "initial request"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(messages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload []map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload) != 1 || payload[0]["role"] != "user" || object(t, array(t, payload[0]["content"])[0])["text"] != "initial request" {
+		t.Fatalf("payload = %#v", payload)
+	}
+}
+
 func TestGenerateMapsCapabilitiesAndRejectsUnsupportedResponseFormat(t *testing.T) {
 	var got map[string]any
 	m := testModel(t, func(w http.ResponseWriter, r *http.Request) {

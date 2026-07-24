@@ -292,8 +292,11 @@ type Model interface {
 
 </summary>
 
-Providers receive a rendered prompt string plus provider-neutral capability
-requests for native tools, structured responses, and reasoning:
+Providers currently receive a rendered prompt string plus provider-neutral
+capability requests for native tools, structured responses, and reasoning.
+Assistant and tool-result conversation history remains rendered into `Prompt`
+for compatibility; provider-native multi-turn messages are planned separately:
+[`docs/issue-45-provider-native-messages-plan.md`](docs/issue-45-provider-native-messages-plan.md).
 
 ```go
 type AIRequest struct {

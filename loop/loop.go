@@ -47,7 +47,7 @@ type Loop struct {
 	RetryCount int
 	// PromptBuilder constructs the prompt for each iteration.
 	PromptBuilder gaictx.PromptBuilder
-	// ToolResponseProcessor optionally processes tool responses before they are recorded.
+	// ToolResponseProcessor optionally processes recorded tool responses before the iteration is persisted.
 	ToolResponseProcessor ToolResponseProcessor
 }
 
@@ -87,6 +87,48 @@ func New(model ai.Model, tools []Tool, promptBuilder gaictx.PromptBuilder, toolR
 type pendingToolCall struct {
 	partIndex int
 	call      ai.ToolCall
+}
+
+// renderedPromptRequest creates the compatibility request used by the loop.
+// Conversation state remains in Prompt until a provider-native message path is
+// introduced deliberately; this boundary keeps that future change separate
+// from the current rendered-prompt behavior.
+func renderedPromptRequest(prompt string, maxTokens int, tools []ai.ToolDefinition, responseFormat ai.ResponseFormat, reasoning ai.ReasoningConfig) ai.AIRequest {
+	return ai.AIRequest{
+		Prompt:         prompt,
+		MaxTokens:      maxTokens,
+		Tools:          tools,
+		ResponseFormat: responseFormat,
+		Reasoning:      reasoning,
+	}
+}
+
+func nativeRequestMessages(basePrompt string, iterations []Iteration) []ai.RequestMessage {
+	messages := []ai.RequestMessage{{Role: ai.RequestMessageRoleUser, Text: basePrompt}}
+	for _, iteration := range iterations {
+		for _, part := range iteration.Parts {
+			switch part.Type {
+			case IterationTypeResponse:
+				if part.Response != nil && part.Response.Text != "" {
+					messages = append(messages, ai.RequestMessage{Role: ai.RequestMessageRoleAssistant, Text: part.Response.Text})
+				}
+			case IterationTypeToolCall, IterationTypeToolError:
+				if part.ToolReq == nil {
+					continue
+				}
+				messages = append(messages, ai.RequestMessage{Role: ai.RequestMessageRoleAssistant, ToolCalls: []ai.RequestToolCall{{ID: part.ToolReq.ID, Name: part.ToolReq.Name, Arguments: append([]byte(nil), part.ToolReq.Args...)}}})
+				if part.ToolResp != nil {
+					result := ai.RequestToolResult{ToolCallID: part.ToolReq.ID, Name: part.ToolReq.Name, Content: part.ToolResp.TextValue()}
+					if err := part.ToolResp.ErrorValue(); err != nil {
+						result.Content = err.Error()
+						result.IsError = true
+					}
+					messages = append(messages, ai.RequestMessage{Role: ai.RequestMessageRoleTool, ToolResult: &result})
+				}
+			}
+		}
+	}
+	return messages
 }
 
 // Run starts asynchronous model and tool execution.
@@ -173,6 +215,22 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 					return
 				}
 
+				basePrompt, err := l.PromptBuilder.BuildPrompt(iterCtx, nil)
+				if err != nil {
+					if cancelErr := cancellationError(iterCtx, err); cancelErr != nil {
+						sendAttemptCanceled(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, cancelErr)
+						cancel()
+						iterState.markCanceled(cancelErr)
+						iterState.finish(nil)
+						return
+					}
+					iterationErr = fmt.Errorf("%w: %w", ErrBuildPrompt, err)
+					sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, iterationErr)
+					cancel()
+					iterState.finish(iterationErr)
+					return
+				}
+
 				prompt, err := l.PromptBuilder.BuildPrompt(iterCtx, l)
 				if err != nil {
 					if cancelErr := cancellationError(iterCtx, err); cancelErr != nil {
@@ -189,13 +247,8 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 					return
 				}
 
-				request := ai.AIRequest{
-					Prompt:         prompt,
-					MaxTokens:      l.MaxTokens,
-					Tools:          toolDefinitions,
-					ResponseFormat: l.ResponseFormat,
-					Reasoning:      l.Reasoning,
-				}
+				request := renderedPromptRequest(prompt, l.MaxTokens, toolDefinitions, l.ResponseFormat, l.Reasoning)
+				request.Messages = nativeRequestMessages(basePrompt, l.Iterations)
 
 				tokens := l.Model.GenerateStream(iterCtx, request)
 
@@ -370,6 +423,7 @@ func (l *Loop) executeToolCalls(ctx context.Context, iteration *Iteration, toolC
 			defer wg.Done()
 
 			toolRes := CallTool(ctx, &tc.call, l.Tools)
+			iteration.Parts[tc.partIndex].ToolResp = toolRes
 			if l.ToolResponseProcessor != nil {
 				if err := l.ToolResponseProcessor.Process(tc.call, toolRes); err != nil {
 					toolErrMu.Lock()
@@ -380,8 +434,6 @@ func (l *Loop) executeToolCalls(ctx context.Context, iteration *Iteration, toolC
 					return
 				}
 			}
-
-			iteration.Parts[tc.partIndex].ToolResp = toolRes
 		}(tc)
 	}
 	wg.Wait()
