@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lace-ai/gai/ai"
 )
@@ -76,6 +77,27 @@ func TestProviderFallsBackWhenModelDiscoveryFails(t *testing.T) {
 	}
 	if _, err := p.Model(Gemini3FlashPreview); err != nil {
 		t.Fatalf("Model did not accept fallback model: %v", err)
+	}
+}
+
+func TestProviderBoundsModelDiscoveryRequest(t *testing.T) {
+	var deadline time.Time
+	p := New("test-key", nil)
+	p.httpClient = &http.Client{Transport: handlerRoundTripper(func(r *http.Request) (*http.Response, error) {
+		var ok bool
+		deadline, ok = r.Context().Deadline()
+		if !ok {
+			t.Fatal("expected discovery request context to have a deadline")
+		}
+		return response(http.StatusOK, `{"models":[]}`), nil
+	})}
+	p.baseURL = "https://models.test"
+
+	if _, err := p.ListModels(); err != nil {
+		t.Fatalf("ListModels returned error: %v", err)
+	}
+	if remaining := time.Until(deadline); remaining <= 0 {
+		t.Fatalf("unexpected expired discovery deadline: %s", remaining)
 	}
 }
 
