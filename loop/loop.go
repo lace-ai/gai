@@ -47,7 +47,7 @@ type Loop struct {
 	RetryCount int
 	// PromptBuilder constructs the prompt for each iteration.
 	PromptBuilder gaictx.PromptBuilder
-	// ToolResponseProcessor optionally processes tool responses before they are recorded.
+	// ToolResponseProcessor optionally processes recorded tool responses before the iteration is persisted.
 	ToolResponseProcessor ToolResponseProcessor
 }
 
