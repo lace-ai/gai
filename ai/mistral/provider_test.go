@@ -29,7 +29,11 @@ func TestProviderDynamicallyListsModelsAndAcceptsThem(t *testing.T) {
 	p := New("test-key", nil)
 	p.httpClient = &http.Client{Transport: handlerRoundTripper(func(r *http.Request) (*http.Response, error) {
 		requests = append(requests, r.Clone(r.Context()))
-		return response(http.StatusOK, `{"data":[{"id":"mistral-dynamic"}]}`), nil
+		return response(http.StatusOK, `{"data":[
+			{"id":"mistral-chat","capabilities":{"completion_chat":true}},
+			{"id":"mistral-fim","capabilities":{"completion_chat":false}},
+			{"id":"mistral-without-capability"}
+		]}`), nil
 	})}
 	p.baseURL = "https://models.test"
 
@@ -37,15 +41,15 @@ func TestProviderDynamicallyListsModelsAndAcceptsThem(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListModels returned error: %v", err)
 	}
-	if len(models) != 1 || models[0] != "mistral-dynamic" {
+	if len(models) != 1 || models[0] != "mistral-chat" {
 		t.Fatalf("unexpected models: %#v", models)
 	}
 
-	model, err := p.Model("mistral-dynamic")
+	model, err := p.Model("mistral-chat")
 	if err != nil {
 		t.Fatalf("Model returned error: %v", err)
 	}
-	if model.Name() != "mistral-dynamic" {
+	if model.Name() != "mistral-chat" {
 		t.Fatalf("unexpected model name: %q", model.Name())
 	}
 	if len(requests) != 1 {

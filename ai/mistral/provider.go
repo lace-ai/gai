@@ -95,7 +95,10 @@ func (p *Provider) listModels(ctx context.Context) ([]string, error) {
 
 	var payload struct {
 		Data []struct {
-			ID string `json:"id"`
+			ID           string `json:"id"`
+			Capabilities struct {
+				CompletionChat bool `json:"completion_chat"`
+			} `json:"capabilities"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
@@ -104,7 +107,7 @@ func (p *Provider) listModels(ctx context.Context) ([]string, error) {
 
 	names := make([]string, 0, len(payload.Data))
 	for _, model := range payload.Data {
-		if name := strings.TrimSpace(model.ID); name != "" {
+		if name := strings.TrimSpace(model.ID); name != "" && model.Capabilities.CompletionChat {
 			names = append(names, name)
 		}
 	}
