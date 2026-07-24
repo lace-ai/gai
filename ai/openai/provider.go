@@ -40,6 +40,14 @@ func (p *Provider) Validate() error {
 
 func (p *Provider) Name() string { return "openai" }
 
+// streamingHTTPClient returns a client whose request lifetime is controlled by
+// the caller's context, rather than the provider's non-streaming timeout.
+func (p *Provider) streamingHTTPClient() *http.Client {
+	client := *p.httpClient
+	client.Timeout = 0
+	return &client
+}
+
 func (p *Provider) Model(name string) (ai.Model, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err

@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
 	sdk "github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
@@ -33,7 +34,7 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (*ai.AIResponse,
 	if err != nil {
 		return nil, err
 	}
-	response, err := m.client().Chat.Completions.New(ctx, params)
+	response, err := m.client(false).Chat.Completions.New(ctx, params)
 	if err != nil {
 		return nil, err
 	}
@@ -72,8 +73,16 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			ai.SendToken(ctx, out, ai.Token{Type: ai.TokenTypeErr, Err: err, Text: err.Error()})
 			return
 		}
-		stream := m.client().Chat.Completions.NewStreaming(ctx, params)
-		defer stream.Close()
+		stream := m.client(true).Chat.Completions.NewStreaming(ctx, params)
+		defer func() {
+			if err := stream.Close(); err != nil && m.provider.debug != nil {
+				m.provider.debug.Emit(ctx, gai.DebugEvent{
+					Name:   "stream_close_failed",
+					Source: "ai:openai.Model.GenerateStream",
+					Err:    err,
+				})
+			}
+		}()
 		calls := map[int64]*streamToolCall{}
 		for stream.Next() {
 			chunk := stream.Current()
@@ -190,6 +199,7 @@ func applyTools(params *sdk.ChatCompletionNewParams, definitions []ai.ToolDefini
 		return nil
 	}
 	params.Tools = make([]sdk.ChatCompletionToolParam, 0, len(definitions))
+	available := make(map[string]struct{}, len(definitions))
 	for _, definition := range definitions {
 		if err := definition.Validate(); err != nil {
 			return err
@@ -199,6 +209,25 @@ func applyTools(params *sdk.ChatCompletionNewParams, definitions []ai.ToolDefini
 			return fmt.Errorf("decode tool %q schema: %w", definition.Name, err)
 		}
 		params.Tools = append(params.Tools, sdk.ChatCompletionToolParam{Function: shared.FunctionDefinitionParam{Name: definition.Name, Description: param.NewOpt(definition.Description), Parameters: schema}})
+		available[definition.Name] = struct{}{}
+	}
+	if choice.Mode == ai.ToolChoiceRequired && len(choice.Names) > 0 {
+		allowed := make(map[string]struct{}, len(choice.Names))
+		for _, name := range choice.Names {
+			if _, ok := available[name]; !ok {
+				return fmt.Errorf("required tool %q is not defined", name)
+			}
+			allowed[name] = struct{}{}
+		}
+		if len(choice.Names) > 1 {
+			filtered := make([]sdk.ChatCompletionToolParam, 0, len(allowed))
+			for _, tool := range params.Tools {
+				if _, ok := allowed[tool.Function.Name]; ok {
+					filtered = append(filtered, tool)
+				}
+			}
+			params.Tools = filtered
+		}
 	}
 	switch choice.Mode {
 	case "", ai.ToolChoiceAuto, ai.ToolChoiceNone, ai.ToolChoiceRequired:
@@ -235,8 +264,12 @@ func applyResponseFormat(params *sdk.ChatCompletionNewParams, format ai.Response
 	}
 }
 
-func (m *Model) client() *sdk.Client {
-	client := sdk.NewClient(option.WithAPIKey(m.provider.apiKey), option.WithBaseURL(m.provider.baseURL), option.WithHTTPClient(m.provider.httpClient), option.WithMaxRetries(0))
+func (m *Model) client(streaming bool) *sdk.Client {
+	httpClient := m.provider.httpClient
+	if streaming {
+		httpClient = m.provider.streamingHTTPClient()
+	}
+	client := sdk.NewClient(option.WithAPIKey(m.provider.apiKey), option.WithBaseURL(m.provider.baseURL), option.WithHTTPClient(httpClient), option.WithMaxRetries(0))
 	return &client
 }
 
