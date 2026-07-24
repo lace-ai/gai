@@ -2,37 +2,60 @@
 
 Issue: #45
 
-## Current compatibility contract
+## Goal
 
-The loop renders the complete conversation—including assistant tool calls and
-tool results—into `ai.AIRequest.Prompt`. Provider adapters consume that prompt
-and the existing provider-neutral tool fields. This remains the only execution
-path in this change.
+Send the current loop's assistant and tool-result history to provider adapters as
+structured messages, while preserving the fully rendered `AIRequest.Prompt` as
+the compatibility fallback.
 
-The request construction is now isolated in `renderedPromptRequest` so a future
-native-message path can be added beside it without changing today's rendered
-prompt behavior.
+## Design
 
-## Non-goals of this change
+`ai.AIRequest` will receive an opt-in `Messages []RequestMessage` field. Each
+message preserves a role, assistant text, structured tool calls (including the
+provider call ID and JSON arguments), or a tool result that references its
+call ID. Empty history means prompt-only behavior exactly as before.
 
-- No `AIRequest` native-message field is added.
-- No Gemini or Mistral request payload changes are made.
-- No provider capability detection or fallback selection is added.
-- No conversation, tool-call, or tool-result serialization changes are made.
+The loop will always build both forms. It will retain the rendered prompt for
+providers or histories that cannot use native messages. It will derive native
+history directly from completed `Iteration.Parts`, rather than
+`Iteration.Messages()`, because the latter intentionally renders tool data and
+does not retain tool-call IDs.
 
-## Follow-up implementation sequence
+Provider adapters will prefer non-empty native history when they can map it
+without losing tool-call correlation:
 
-1. Define provider-neutral request-message types that preserve roles, tool-call
-   identifiers, arguments, result content, and error state.
-2. Add an opt-in message-history field to `AIRequest` while retaining `Prompt`
-   as the compatibility fallback. Document precedence and empty-history rules.
-3. Convert loop iterations into that message history at the request boundary;
-   keep the existing rendered prompt available for providers without native
-   message support.
-4. Implement adapter-specific mappings and capability checks one provider at a
-   time. Use the rendered prompt only for adapters that do not opt in.
-5. Add cross-provider tests for a user turn, assistant tool call, tool result,
-   and final assistant response. Keep regression tests asserting unchanged
-   rendered-prompt behavior for fallback providers.
-6. Update public documentation and release notes once at least one provider
-   uses the native path, including any compatibility or migration guidance.
+- OpenAI: assistant `tool_calls` and `tool` messages keyed by `tool_call_id`.
+- Anthropic: assistant `tool_use` blocks followed by user `tool_result` blocks.
+- Mistral: OpenAI-style `tool_calls` and `tool_call_id` payload fields.
+- Gemini: model `FunctionCall` and user `FunctionResponse` parts. Because the
+  Gemini SDK has no tool-call ID, duplicate calls to the same function in a
+  native history are rejected rather than correlated incorrectly.
+
+Persisted historical context is out of scope: existing persisted tool content
+does not retain provider tool-call IDs, so it remains safely rendered into the
+fallback prompt. No IDs will be synthesized for it.
+
+## Steps
+
+1. Add provider-neutral request-message types and validation/copy helpers in
+   `ai`; document empty-history fallback and native-message precedence.
+2. Add a loop test for a tool call followed by its result, run it red, then
+   convert completed loop iterations into native request history while keeping
+   the existing rendered prompt unchanged.
+3. Add red/green provider-builder tests for OpenAI and Anthropic native
+   histories, including call ID, JSON arguments, result text, and tool errors.
+4. Add red/green provider-builder tests for Mistral and Gemini native
+   histories. Cover Gemini's duplicate-function-name safety failure.
+5. Update public request/provider documentation. Run focused package tests,
+   the complete Go suite, vet, formatting, and `git diff --check`.
+
+## Acceptance checks
+
+- The second request in a user -> assistant tool call -> tool result exchange
+  includes structured assistant/tool history with the exact call ID and JSON
+  arguments.
+- Providers that support native messages receive native payloads; prompt-only
+  requests preserve their current payloads.
+- Tool errors retain their provider-native error representation.
+- Tests cover the multi-turn exchange and provider payload mappings without
+  calling live provider APIs.
