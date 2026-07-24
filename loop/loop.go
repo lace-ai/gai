@@ -369,6 +369,7 @@ func (l *Loop) executeToolCalls(ctx context.Context, iteration *Iteration, toolC
 			defer wg.Done()
 
 			toolRes := CallTool(ctx, &tc.call, l.Tools)
+			iteration.Parts[tc.partIndex].ToolResp = toolRes
 			if l.ToolResponseProcessor != nil {
 				if err := l.ToolResponseProcessor.Process(tc.call, toolRes); err != nil {
 					toolErrMu.Lock()
@@ -379,8 +380,6 @@ func (l *Loop) executeToolCalls(ctx context.Context, iteration *Iteration, toolC
 					return
 				}
 			}
-
-			iteration.Parts[tc.partIndex].ToolResp = toolRes
 		}(tc)
 	}
 	wg.Wait()

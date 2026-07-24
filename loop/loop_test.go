@@ -535,6 +535,9 @@ func TestLoopWrapsToolPreprocessErrors(t *testing.T) {
 	if errorEvents[0].Iteration == nil || errorEvents[0].Iteration.UserMessage == nil {
 		t.Fatalf("expected failed tool-processing snapshot, got %#v", errorEvents[0].Iteration)
 	}
+	if len(errorEvents[0].Iteration.Parts) != 1 || errorEvents[0].Iteration.Parts[0].ToolResp == nil {
+		t.Fatalf("expected failed tool-processing snapshot to retain tool response, got %#v", errorEvents[0].Iteration)
+	}
 	if len(l.Iterations) != 0 {
 		t.Fatalf("expected preprocess failure to skip persisted iteration, got %d", len(l.Iterations))
 	}
