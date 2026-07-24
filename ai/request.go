@@ -57,7 +57,7 @@ func (m RequestMessage) Validate() error {
 }
 
 func (r AIRequest) ValidateMessages() error {
-	seen := map[string]struct{}{}
+	seen := map[string]string{}
 	for _, m := range r.Messages {
 		if err := m.Validate(); err != nil {
 			return err
@@ -68,11 +68,15 @@ func (r AIRequest) ValidateMessages() error {
 				if _, ok := seen[c.ID]; ok {
 					return fmt.Errorf("duplicate request tool call ID %q", c.ID)
 				}
-				seen[c.ID] = struct{}{}
+				seen[c.ID] = c.Name
 			}
 		case RequestMessageRoleTool:
-			if _, ok := seen[m.ToolResult.ToolCallID]; !ok {
+			name, ok := seen[m.ToolResult.ToolCallID]
+			if !ok {
 				return fmt.Errorf("tool result references unknown tool call %q", m.ToolResult.ToolCallID)
+			}
+			if m.ToolResult.Name != name {
+				return fmt.Errorf("tool result name %q does not match tool call %q", m.ToolResult.Name, name)
 			}
 		}
 	}
