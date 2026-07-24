@@ -3,7 +3,6 @@ package openai
 import (
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
@@ -23,7 +22,7 @@ func New(apiKey string, debug gai.DebugSink) *Provider {
 	return &Provider{
 		apiKey:     apiKey,
 		baseURL:    "https://api.openai.com/v1",
-		httpClient: &http.Client{Timeout: 60 * time.Second},
+		httpClient: &http.Client{},
 		debug:      debug,
 	}
 }

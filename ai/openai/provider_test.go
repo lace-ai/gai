@@ -72,6 +72,9 @@ func TestProviderValidation(t *testing.T) {
 
 func TestStreamingHTTPClientDoesNotApplyProviderTimeout(t *testing.T) {
 	p := New("test-key", nil)
+	if p.httpClient.Timeout != 0 {
+		t.Fatalf("expected no provider client timeout, got %s", p.httpClient.Timeout)
+	}
 	p.httpClient.Timeout = time.Millisecond
 
 	streaming := p.streamingHTTPClient()
