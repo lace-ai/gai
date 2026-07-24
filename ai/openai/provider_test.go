@@ -3,6 +3,7 @@ package openai
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/lace-ai/gai/ai"
 )
@@ -44,5 +45,21 @@ func TestProviderValidation(t *testing.T) {
 	}
 	if model, err := New("test-key", nil).Model("unknown"); !errors.Is(err, ai.ErrModelNotFound) || model != nil {
 		t.Fatalf("expected unknown model rejection, got model=%#v err=%v", model, err)
+	}
+}
+
+func TestStreamingHTTPClientDoesNotApplyProviderTimeout(t *testing.T) {
+	p := New("test-key", nil)
+	p.httpClient.Timeout = time.Millisecond
+
+	streaming := p.streamingHTTPClient()
+	if streaming == p.httpClient {
+		t.Fatal("streamingHTTPClient must return a copy")
+	}
+	if streaming.Timeout != 0 {
+		t.Fatalf("expected no streaming client timeout, got %s", streaming.Timeout)
+	}
+	if p.httpClient.Timeout != time.Millisecond {
+		t.Fatalf("streamingHTTPClient mutated provider timeout: %s", p.httpClient.Timeout)
 	}
 }

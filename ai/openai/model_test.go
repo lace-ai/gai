@@ -130,6 +130,31 @@ func TestBuildChatCompletionParamsRejectsReasoningEffortForNonReasoningModels(t 
 	}
 }
 
+func TestApplyToolsRestrictsRequiredToolNames(t *testing.T) {
+	definitions := []ai.ToolDefinition{
+		{Type: "function", Name: "first", Description: "First", Parameters: json.RawMessage(`{"type":"object"}`)},
+		{Type: "function", Name: "second", Description: "Second", Parameters: json.RawMessage(`{"type":"object"}`)},
+		{Type: "function", Name: "excluded", Description: "Excluded", Parameters: json.RawMessage(`{"type":"object"}`)},
+	}
+	params, err := buildChatCompletionParams(GPT41Mini, ai.AIRequest{
+		Prompt: "hello", Tools: definitions,
+		ToolChoice: ai.ToolChoice{Mode: ai.ToolChoiceRequired, Names: []string{"second", "first"}},
+	}, false)
+	if err != nil {
+		t.Fatalf("buildChatCompletionParams returned error: %v", err)
+	}
+	if len(params.Tools) != 2 || params.Tools[0].Function.Name != "first" || params.Tools[1].Function.Name != "second" {
+		t.Fatalf("unexpected restricted tools: %#v", params.Tools)
+	}
+
+	if _, err := buildChatCompletionParams(GPT41Mini, ai.AIRequest{
+		Prompt: "hello", Tools: definitions,
+		ToolChoice: ai.ToolChoice{Mode: ai.ToolChoiceRequired, Names: []string{"missing"}},
+	}, false); err == nil {
+		t.Fatal("expected an undefined required tool to be rejected")
+	}
+}
+
 func TestModelGenerateValidatesToolCallArguments(t *testing.T) {
 	for _, tt := range []struct {
 		name      string
