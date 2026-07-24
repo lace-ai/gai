@@ -29,7 +29,7 @@ func TestProviderDynamicallyListsModelsAndAcceptsThem(t *testing.T) {
 	p := New("test-key", nil)
 	p.httpClient = &http.Client{Transport: handlerRoundTripper(func(r *http.Request) (*http.Response, error) {
 		requests = append(requests, r.Clone(r.Context()))
-		return response(http.StatusOK, `{"models":[{"name":"models/gemini-dynamic"}]}`), nil
+		return response(http.StatusOK, `{"models":[{"name":"models/gemini-dynamic","supportedGenerationMethods":["generateContent"]},{"name":"models/text-embedding-004","supportedGenerationMethods":["embedContent"]}]}`), nil
 	})}
 	p.baseURL = "https://models.test"
 

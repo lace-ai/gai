@@ -83,6 +83,9 @@ func (p *Provider) listModels(ctx context.Context) ([]string, error) {
 	var names []string
 	for {
 		for _, model := range page.Items {
+			if !containsModel(model.SupportedActions, "generateContent") {
+				continue
+			}
 			name := strings.TrimSpace(strings.TrimPrefix(model.Name, "models/"))
 			if name != "" {
 				names = append(names, name)
