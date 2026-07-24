@@ -152,7 +152,12 @@ func mapNativeMessages(messages []ai.RequestMessage) []chatMessageRequest {
 			continue
 		}
 		if m.Role == ai.RequestMessageRoleTool {
-			out = append(out, chatMessageRequest{Role: "tool", Content: m.ToolResult.Content, ToolCallID: m.ToolResult.ToolCallID})
+			content := m.ToolResult.Content
+			if m.ToolResult.IsError {
+				encoded, _ := json.Marshal(map[string]string{"error": content})
+				content = string(encoded)
+			}
+			out = append(out, chatMessageRequest{Role: "tool", Content: content, ToolCallID: m.ToolResult.ToolCallID})
 			continue
 		}
 		x := chatMessageRequest{Role: "assistant", Content: m.Text}

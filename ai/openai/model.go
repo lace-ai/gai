@@ -203,7 +203,12 @@ func mapNativeMessages(messages []ai.RequestMessage) ([]sdk.ChatCompletionMessag
 			continue
 		}
 		if m.Role == ai.RequestMessageRoleTool {
-			out = append(out, sdk.ToolMessage(m.ToolResult.Content, m.ToolResult.ToolCallID))
+			content := m.ToolResult.Content
+			if m.ToolResult.IsError {
+				encoded, _ := json.Marshal(map[string]string{"error": content})
+				content = string(encoded)
+			}
+			out = append(out, sdk.ToolMessage(content, m.ToolResult.ToolCallID))
 			continue
 		}
 		a := sdk.ChatCompletionAssistantMessageParam{}

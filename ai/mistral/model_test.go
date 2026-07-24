@@ -82,6 +82,21 @@ func TestNativeMessagesMapUserPayload(t *testing.T) {
 	}
 }
 
+func TestNativeMessagesMapToolErrorPayload(t *testing.T) {
+	messages := mapNativeMessages([]ai.RequestMessage{{
+		Role: ai.RequestMessageRoleTool,
+		ToolResult: &ai.RequestToolResult{
+			ToolCallID: "call_1",
+			Name:       "search",
+			Content:    "upstream unavailable",
+			IsError:    true,
+		},
+	}})
+	if len(messages) != 1 || messages[0].Role != "tool" || messages[0].ToolCallID != "call_1" || messages[0].Content != `{"error":"upstream unavailable"}` {
+		t.Fatalf("payload = %#v", messages)
+	}
+}
+
 func TestModelGenerateMapsRequestCapabilities(t *testing.T) {
 	var gotReq chatCompletionRequest
 
