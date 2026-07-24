@@ -532,9 +532,7 @@ func (m *Model) getClient(ctx context.Context) (*genai.Client, error) {
 		return m.api, nil
 	}
 
-	client, err := genai.NewClient(ctx, &genai.ClientConfig{
-		APIKey: m.client.apiKey,
-	})
+	client, err := m.client.getClient(ctx)
 	if err != nil {
 		return nil, err
 	}

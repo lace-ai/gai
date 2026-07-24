@@ -1,12 +1,18 @@
 package openai
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
 )
+
+const modelDiscoveryTimeout = 10 * time.Second
 
 // Provider resolves models served by OpenAI.
 type Provider struct {
@@ -52,7 +58,7 @@ func (p *Provider) Model(name string) (ai.Model, error) {
 		return nil, err
 	}
 	name = strings.TrimSpace(name)
-	if name == "" || !isKnownModel(name) {
+	if name == "" {
 		return nil, ai.ErrModelNotFound
 	}
 	return &Model{name: name, provider: p}, nil
@@ -62,9 +68,84 @@ func (p *Provider) ListModels() ([]string, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), modelDiscoveryTimeout)
+	defer cancel()
+	discovered, err := p.listModels(ctx)
+	if err == nil {
+		return discovered, nil
+	}
+	return fallbackModels(), nil
+}
+
+func (p *Provider) listModels(ctx context.Context) ([]string, error) {
+	if p.httpClient == nil {
+		return nil, fmt.Errorf("openai model discovery: nil HTTP client")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(p.baseURL, "/")+"/models", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+p.apiKey)
+
+	res, err := p.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+	if res.StatusCode < http.StatusOK || res.StatusCode >= http.StatusMultipleChoices {
+		return nil, fmt.Errorf("openai model discovery: unexpected status %s", res.Status)
+	}
+
+	var payload struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+
+	names := make([]string, 0, len(payload.Data))
+	for _, model := range payload.Data {
+		if name := strings.TrimSpace(model.ID); isChatCapableModel(name) {
+			names = append(names, name)
+		}
+	}
+	return names, nil
+}
+
+// isChatCapableModel excludes model families that the Models endpoint lists but
+// that cannot be used with this provider's Chat Completions adapter. The
+// endpoint does not expose per-endpoint capabilities, so unknown IDs remain
+// discoverable for compatible custom and future chat models.
+func isChatCapableModel(name string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		return false
+	}
+	for _, prefix := range []string{
+		"dall-e-",
+		"gpt-image-",
+		"text-embedding-",
+		"text-moderation-",
+		"omni-moderation-",
+		"whisper-",
+		"tts-",
+		"sora-",
+		"computer-use-",
+	} {
+		if strings.HasPrefix(name, prefix) {
+			return false
+		}
+	}
+	return name != "gpt-5.6-auto"
+}
+
+func fallbackModels() []string {
 	out := make([]string, len(models))
 	copy(out, models)
-	return out, nil
+	return out
 }
 
 func isKnownModel(name string) bool {
