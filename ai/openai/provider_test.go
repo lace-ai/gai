@@ -36,6 +36,28 @@ func TestProviderModelAndStaticList(t *testing.T) {
 	}
 }
 
+func TestProviderExposesTextModelsOnly(t *testing.T) {
+	p := New("test-key", nil)
+	models, err := p.ListModels()
+	if err != nil {
+		t.Fatalf("ListModels returned error: %v", err)
+	}
+
+	for _, want := range []string{GPT56Terra, GPT56Sol, GPT56Luna} {
+		if !isKnownModel(want) {
+			t.Errorf("expected text model %q to be supported", want)
+		}
+	}
+	for _, excluded := range []string{"gpt-image-1", "gpt-5.6-auto"} {
+		if isKnownModel(excluded) {
+			t.Errorf("did not expect non-text model %q to be supported", excluded)
+		}
+	}
+	if len(models) == 0 {
+		t.Fatal("expected text models")
+	}
+}
+
 func TestProviderValidation(t *testing.T) {
 	if err := (*Provider)(nil).Validate(); !errors.Is(err, ai.ErrNilProvider) {
 		t.Fatalf("expected ErrNilProvider, got %v", err)
