@@ -271,6 +271,20 @@ func TestGenerateStreamRejectsTruncatedToolBlock(t *testing.T) {
 	}
 }
 
+func TestGenerateStreamPrefersStreamErrorOverOpenBlock(t *testing.T) {
+	m := testModel(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"search\"}}\n\nevent: content_block_delta\ndata: not-json\n\n"))
+	})
+	var tokens []ai.Token
+	for token := range m.GenerateStream(context.Background(), ai.AIRequest{Prompt: "hello"}) {
+		tokens = append(tokens, token)
+	}
+	if len(tokens) != 1 || tokens[0].Type != ai.TokenTypeErr || tokens[0].Err == nil || strings.Contains(tokens[0].Err.Error(), "open content") {
+		t.Fatalf("unexpected tokens: %#v", tokens)
+	}
+}
+
 func TestCountTokens(t *testing.T) {
 	m := testModel(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/messages/count_tokens" {

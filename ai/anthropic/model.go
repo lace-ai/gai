@@ -330,14 +330,11 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 				break
 			}
 		}
-		if streamErr == nil && len(blocks) != 0 {
-			streamErr = fmt.Errorf("anthropic stream ended with %d open content block(s)", len(blocks))
-		}
 		if streamErr == nil {
 			streamErr = localError(stream.Err())
 		}
 		if streamErr == nil && len(blocks) != 0 {
-			streamErr = errors.New("anthropic stream ended with open content block")
+			streamErr = fmt.Errorf("anthropic stream ended with %d open content block(s)", len(blocks))
 		}
 		if streamErr != nil && !errors.Is(streamErr, context.Canceled) {
 			emit(ai.Token{Type: ai.TokenTypeErr, Err: streamErr, Text: streamErr.Error()})
