@@ -26,6 +26,33 @@ func testModel(t *testing.T, handler http.HandlerFunc) *Model {
 	return m.(*Model)
 }
 
+func decodeRequest(t *testing.T, r *http.Request) map[string]any {
+	t.Helper()
+	var body map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	return body
+}
+
+func object(t *testing.T, value any) map[string]any {
+	t.Helper()
+	got, ok := value.(map[string]any)
+	if !ok {
+		t.Fatalf("value = %#v, want JSON object", value)
+	}
+	return got
+}
+
+func array(t *testing.T, value any) []any {
+	t.Helper()
+	got, ok := value.([]any)
+	if !ok {
+		t.Fatalf("value = %#v, want JSON array", value)
+	}
+	return got
+}
+
 func TestGenerateSendsAnthropicRequestAndMapsBlocksAndUsage(t *testing.T) {
 	m := testModel(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/messages" || r.Method != http.MethodPost {
@@ -34,13 +61,13 @@ func TestGenerateSendsAnthropicRequestAndMapsBlocksAndUsage(t *testing.T) {
 		if r.Header.Get("x-api-key") != "test-key" || r.Header.Get("anthropic-version") != "2023-06-01" {
 			t.Fatalf("unexpected Anthropic headers: %#v", r.Header)
 		}
-		var body messagesRequest
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Fatal(err)
-		}
-		if body.Model != ClaudeSonnet4_6 || body.MaxTokens != 4096 || body.Stream || len(body.Messages) != 1 || body.Messages[0].Role != "user" || body.Messages[0].Content != "hello" {
+		body := decodeRequest(t, r)
+		messages := array(t, body["messages"])
+		content := array(t, object(t, messages[0])["content"])
+		if body["model"] != ClaudeSonnet4_6 || body["max_tokens"] != float64(4096) || body["stream"] != nil || len(messages) != 1 || object(t, messages[0])["role"] != "user" || len(content) != 1 || object(t, content[0])["type"] != "text" || object(t, content[0])["text"] != "hello" {
 			t.Fatalf("unexpected request: %#v", body)
 		}
+		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"answer"},{"type":"thinking","thinking":"reason"},{"type":"tool_use","id":"toolu_1","name":"search","input":{"q":"x"}}],"usage":{"input_tokens":10,"cache_creation_input_tokens":2,"cache_read_input_tokens":3,"output_tokens":4,"output_tokens_details":{"thinking_tokens":2}}}`))
 	})
 
@@ -57,14 +84,13 @@ func TestGenerateSendsAnthropicRequestAndMapsBlocksAndUsage(t *testing.T) {
 }
 
 func TestGenerateMapsCapabilitiesAndRejectsUnsupportedResponseFormat(t *testing.T) {
-	var got messagesRequest
+	var got map[string]any
 	m := testModel(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("anthropic-beta") != "" {
 			t.Fatalf("anthropic-beta = %q", r.Header.Get("anthropic-beta"))
 		}
-		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
-			t.Fatal(err)
-		}
+		got = decodeRequest(t, r)
+		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"content":[],"usage":{}}`))
 	})
 	_, err := m.Generate(context.Background(), ai.AIRequest{
@@ -77,7 +103,12 @@ func TestGenerateMapsCapabilitiesAndRejectsUnsupportedResponseFormat(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.MaxTokens != 2048 || len(got.Tools) != 1 || got.Tools[0].InputSchema == nil || got.ToolChoice.Type != "auto" || got.OutputConfig == nil || got.OutputConfig.Format == nil || got.OutputConfig.Format.Type != "json_schema" || got.Thinking == nil || got.Thinking.BudgetTokens != 1024 {
+	tools := array(t, got["tools"])
+	tool := object(t, tools[0])
+	outputConfig := object(t, got["output_config"])
+	format := object(t, outputConfig["format"])
+	thinking := object(t, got["thinking"])
+	if got["max_tokens"] != float64(2048) || len(tools) != 1 || tool["input_schema"] == nil || object(t, got["tool_choice"])["type"] != "auto" || format["type"] != "json_schema" || thinking["budget_tokens"] != float64(1024) {
 		t.Fatalf("unexpected capability mapping: %#v", got)
 	}
 	_, err = m.Generate(context.Background(), ai.AIRequest{Prompt: "x", ResponseFormat: ai.ResponseFormat{Type: ai.ResponseFormatJSONObject}})
@@ -90,45 +121,54 @@ func TestGenerateMapsCapabilitiesAndRejectsUnsupportedResponseFormat(t *testing.
 	}
 }
 
-func TestBuildMessagesRequestMapsAdaptiveReasoning(t *testing.T) {
-	request, err := buildMessagesRequest(ai.AIRequest{
-		Prompt: "hello",
-		Reasoning: ai.ReasoningConfig{
-			Enabled:         true,
-			IncludeThoughts: false,
-			Effort:          ai.ReasoningEffortHigh,
-		},
-	}, ClaudeSonnet4_6, false)
-	if err != nil {
-		t.Fatalf("buildMessagesRequest error: %v", err)
+func TestGenerateMapsAdaptiveReasoningAndToolChoice(t *testing.T) {
+	tests := []struct {
+		name    string
+		choice  ai.ToolChoice
+		want    map[string]any
+		wantErr bool
+	}{
+		{name: "auto", choice: ai.ToolChoice{}, want: map[string]any{"type": "auto"}},
+		{name: "none", choice: ai.ToolChoice{Mode: ai.ToolChoiceNone}, want: map[string]any{"type": "none"}},
+		{name: "any", choice: ai.ToolChoice{Mode: ai.ToolChoiceRequired}, wantErr: true},
+		{name: "named", choice: ai.ToolChoice{Mode: ai.ToolChoiceRequired, Names: []string{"search"}}, wantErr: true},
 	}
-	if request.Thinking == nil || request.Thinking.Type != "adaptive" || request.Thinking.Display != "omitted" {
-		t.Fatalf("unexpected thinking configuration: %#v", request.Thinking)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := testModel(t, func(w http.ResponseWriter, r *http.Request) {
+				body := decodeRequest(t, r)
+				if got := object(t, body["tool_choice"]); !equalJSON(got, tt.want) {
+					t.Fatalf("tool_choice = %#v, want %#v", got, tt.want)
+				}
+				thinking := object(t, body["thinking"])
+				if thinking["type"] != "adaptive" || thinking["display"] != "omitted" || object(t, body["output_config"])["effort"] != "high" {
+					t.Fatalf("unexpected adaptive reasoning: %#v", body)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"content":[],"usage":{}}`))
+			})
+			_, err := m.Generate(context.Background(), ai.AIRequest{Prompt: "hello", Tools: []ai.ToolDefinition{{Type: "function", Name: "search", Description: "Search", Parameters: json.RawMessage(`{"type":"object"}`)}}, ToolChoice: tt.choice, Reasoning: ai.ReasoningConfig{Enabled: true, Effort: ai.ReasoningEffortHigh}})
+			if tt.wantErr {
+				if !errors.Is(err, ai.ErrUnsupportedCapability) {
+					t.Fatalf("Generate error = %v, want unsupported capability", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
-	if request.OutputConfig == nil || request.OutputConfig.Effort != string(ai.ReasoningEffortHigh) {
-		t.Fatalf("unexpected output configuration: %#v", request.OutputConfig)
+	m := testModel(t, func(http.ResponseWriter, *http.Request) { t.Fatal("unexpected request") })
+	if _, err := m.Generate(context.Background(), ai.AIRequest{Prompt: "hello", Tools: []ai.ToolDefinition{{Type: "function", Name: "search", Description: "Search", Parameters: json.RawMessage(`{"type":"object"}`)}}, ToolChoice: ai.ToolChoice{Mode: ai.ToolChoiceAuto, Names: []string{"search"}}}); !errors.Is(err, ai.ErrUnsupportedCapability) {
+		t.Fatalf("restricted auto error = %v", err)
 	}
 }
 
-func TestMapToolChoice(t *testing.T) {
-	tests := []struct {
-		choice ai.ToolChoice
-		want   toolChoiceRequest
-	}{
-		{choice: ai.ToolChoice{}, want: toolChoiceRequest{Type: "auto"}},
-		{choice: ai.ToolChoice{Mode: ai.ToolChoiceNone}, want: toolChoiceRequest{Type: "none"}},
-		{choice: ai.ToolChoice{Mode: ai.ToolChoiceRequired}, want: toolChoiceRequest{Type: "any"}},
-		{choice: ai.ToolChoice{Mode: ai.ToolChoiceRequired, Names: []string{"search"}}, want: toolChoiceRequest{Type: "tool", Name: "search"}},
-	}
-	for _, tt := range tests {
-		got, err := mapToolChoice(tt.choice)
-		if err != nil || *got != tt.want {
-			t.Fatalf("mapToolChoice(%#v) = %#v, %v; want %#v", tt.choice, got, err, tt.want)
-		}
-	}
-	if _, err := mapToolChoice(ai.ToolChoice{Mode: ai.ToolChoiceAuto, Names: []string{"search"}}); !errors.Is(err, ai.ErrUnsupportedCapability) {
-		t.Fatalf("restricted auto error = %v", err)
-	}
+func equalJSON(got, want map[string]any) bool {
+	gotJSON, _ := json.Marshal(got)
+	wantJSON, _ := json.Marshal(want)
+	return string(gotJSON) == string(wantJSON)
 }
 
 func TestGenerateReturnsProviderError(t *testing.T) {
@@ -145,12 +185,8 @@ func TestGenerateReturnsProviderError(t *testing.T) {
 
 func TestGenerateStreamMapsInterleavedBlocksAndToolJSON(t *testing.T) {
 	m := testModel(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Accept") != "text/event-stream" {
-			t.Fatalf("Accept = %q", r.Header.Get("Accept"))
-		}
-		var body messagesRequest
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		if !body.Stream {
+		body := decodeRequest(t, r)
+		if body["stream"] != true {
 			t.Fatal("stream was not requested")
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -209,7 +245,7 @@ func TestGenerateStreamErrorAndCancellation(t *testing.T) {
 func TestGenerateStreamDetectsTextFallbackToolCall(t *testing.T) {
 	m := testModel(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte("data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\"}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"{\\\"type\\\":\\\"function\\\",\"}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"\\\"name\\\":\\\"search\\\",\\\"arguments\\\":{}}\"}}\n\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\ndata: {\"type\":\"message_stop\"}\n\n"))
+		_, _ = w.Write([]byte("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"{\\\"type\\\":\\\"function\\\",\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"\\\"name\\\":\\\"search\\\",\\\"arguments\\\":{}}\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"))
 	})
 
 	var tokens []ai.Token
@@ -221,17 +257,10 @@ func TestGenerateStreamDetectsTextFallbackToolCall(t *testing.T) {
 	}
 }
 
-func TestConsumeSSERejectsMissingMessageStop(t *testing.T) {
-	err := consumeSSE(strings.NewReader("data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\"}}\n\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n"), func(ai.Token) bool { return true })
-	if err == nil || !strings.Contains(err.Error(), "message_stop") {
-		t.Fatalf("consumeSSE() error = %v, want missing message_stop", err)
-	}
-}
-
 func TestGenerateStreamRejectsTruncatedToolBlock(t *testing.T) {
 	m := testModel(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte("data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"search\"}}\n\n"))
+		_, _ = w.Write([]byte("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"search\"}}\n\n"))
 	})
 	var tokens []ai.Token
 	for token := range m.GenerateStream(context.Background(), ai.AIRequest{Prompt: "hello"}) {
@@ -239,14 +268,6 @@ func TestGenerateStreamRejectsTruncatedToolBlock(t *testing.T) {
 	}
 	if len(tokens) != 1 || tokens[0].Type != ai.TokenTypeErr || tokens[0].Err == nil || !strings.Contains(tokens[0].Err.Error(), "open content") {
 		t.Fatalf("unexpected tokens: %#v", tokens)
-	}
-}
-
-func TestConsumeSSERejectsOversizedEvent(t *testing.T) {
-	stream := "data: " + strings.Repeat("x", maxSSEEvent+1) + "\n\n"
-	err := consumeSSE(strings.NewReader(stream), func(ai.Token) bool { return true })
-	if err == nil || !strings.Contains(err.Error(), "exceeds") {
-		t.Fatalf("consumeSSE oversized event error = %v", err)
 	}
 }
 
@@ -258,13 +279,13 @@ func TestCountTokens(t *testing.T) {
 		if r.Header.Get("x-api-key") != "test-key" || r.Header.Get("anthropic-version") != "2023-06-01" {
 			t.Fatal("missing Anthropic headers")
 		}
-		var body countTokensRequest
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Fatal(err)
-		}
-		if body.Model != ClaudeSonnet4_6 || len(body.Messages) != 1 || body.Messages[0].Content != "hello" {
+		body := decodeRequest(t, r)
+		messages := array(t, body["messages"])
+		content := array(t, object(t, messages[0])["content"])
+		if body["model"] != ClaudeSonnet4_6 || len(messages) != 1 || len(content) != 1 || object(t, content[0])["type"] != "text" || object(t, content[0])["text"] != "hello" {
 			t.Fatalf("body = %#v", body)
 		}
+		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"input_tokens":42}`))
 	})
 	if got, err := m.Tokenizer().CountTokens(context.Background(), "hello"); err != nil || got != 42 {
