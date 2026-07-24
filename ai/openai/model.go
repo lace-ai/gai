@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/lace-ai/gai/ai"
@@ -48,8 +49,15 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (*ai.AIResponse,
 	message := response.Choices[0].Message
 	result.Text = message.Content
 	for _, call := range message.ToolCalls {
+		args := json.RawMessage(strings.TrimSpace(call.Function.Arguments))
+		if len(args) == 0 {
+			args = json.RawMessage("{}")
+		}
+		if !json.Valid(args) {
+			return nil, fmt.Errorf("invalid JSON arguments for tool %q", call.Function.Name)
+		}
 		result.ToolCalls = append(result.ToolCalls, ai.ToolCall{
-			ID: call.ID, Type: "function", Name: call.Function.Name, Args: json.RawMessage(call.Function.Arguments),
+			ID: call.ID, Type: "function", Name: call.Function.Name, Args: args,
 		})
 	}
 	return result, nil
@@ -111,7 +119,13 @@ type streamToolCall struct {
 }
 
 func sendStreamToolCalls(ctx context.Context, out chan<- ai.Token, calls map[int64]*streamToolCall) bool {
-	for _, call := range calls {
+	indices := make([]int64, 0, len(calls))
+	for index := range calls {
+		indices = append(indices, index)
+	}
+	sort.Slice(indices, func(i, j int) bool { return indices[i] < indices[j] })
+	for _, index := range indices {
+		call := calls[index]
 		if call.emitted {
 			continue
 		}
@@ -150,6 +164,9 @@ func buildChatCompletionParams(model string, req ai.AIRequest, stream bool) (sdk
 	if err := applyResponseFormat(&params, req.ResponseFormat); err != nil {
 		return sdk.ChatCompletionNewParams{}, err
 	}
+	if req.Reasoning.Effort != "" && !isReasoningModel(model) {
+		return sdk.ChatCompletionNewParams{}, fmt.Errorf("%w: reasoning effort is unsupported for model %q", ai.ErrUnsupportedCapability, model)
+	}
 	switch req.Reasoning.Effort {
 	case "", ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh:
 		params.ReasoningEffort = shared.ReasoningEffort(req.Reasoning.Effort)
@@ -157,6 +174,15 @@ func buildChatCompletionParams(model string, req ai.AIRequest, stream bool) (sdk
 		return sdk.ChatCompletionNewParams{}, fmt.Errorf("%w: OpenAI reasoning effort %q", ai.ErrUnsupportedCapability, req.Reasoning.Effort)
 	}
 	return params, nil
+}
+
+func isReasoningModel(model string) bool {
+	switch model {
+	case O3, O3Mini, O4Mini:
+		return true
+	default:
+		return false
+	}
 }
 
 func applyTools(params *sdk.ChatCompletionNewParams, definitions []ai.ToolDefinition, choice ai.ToolChoice) error {

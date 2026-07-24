@@ -3,6 +3,7 @@ package openai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -29,7 +30,7 @@ func TestModelGenerateMapsCapabilitiesAndResponse(t *testing.T) {
 
 	p := New("test-key", nil)
 	p.baseURL = ts.URL
-	m, err := p.Model(GPT41Mini)
+	m, err := p.Model(O3)
 	if err != nil {
 		t.Fatalf("Model returned error: %v", err)
 	}
@@ -44,7 +45,7 @@ func TestModelGenerateMapsCapabilitiesAndResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Generate returned error: %v", err)
 	}
-	if got["model"] != GPT41Mini || got["max_completion_tokens"] != float64(42) || got["reasoning_effort"] != "high" {
+	if got["model"] != O3 || got["max_completion_tokens"] != float64(42) || got["reasoning_effort"] != "high" {
 		t.Fatalf("unexpected request mapping: %#v", got)
 	}
 	if len(got["tools"].([]any)) != 1 || got["tool_choice"].(map[string]any)["function"].(map[string]any)["name"] != "search" {
@@ -87,4 +88,93 @@ func TestModelGenerateStreamMapsTextAndToolCalls(t *testing.T) {
 	if call := tokens[1].ToolCall; tokens[1].Type != ai.TokenTypeToolCall || call == nil || call.ID != "call_1" || call.Name != "search" || string(call.Args) != `{"q":"go"}` {
 		t.Fatalf("unexpected tool token: %#v", tokens[1])
 	}
+}
+
+func TestModelGenerateStreamEmitsToolCallsByIndex(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":1,\"id\":\"call_2\",\"type\":\"function\",\"function\":{\"name\":\"second\",\"arguments\":\"{}\"}},{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"first\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer ts.Close()
+
+	p := New("test-key", nil)
+	p.baseURL = ts.URL
+	m, err := p.Model(GPT41Mini)
+	if err != nil {
+		t.Fatalf("Model returned error: %v", err)
+	}
+	var calls []*ai.ToolCall
+	for token := range m.GenerateStream(context.Background(), ai.AIRequest{Prompt: "hello"}) {
+		if token.Type == ai.TokenTypeToolCall {
+			calls = append(calls, token.ToolCall)
+		}
+	}
+	if len(calls) != 2 || calls[0].ID != "call_1" || calls[1].ID != "call_2" {
+		t.Fatalf("unexpected tool-call order: %#v", calls)
+	}
+}
+
+func TestBuildChatCompletionParamsRejectsReasoningEffortForNonReasoningModels(t *testing.T) {
+	for _, model := range []string{GPT41, GPT41Mini, GPT41Nano, GPT4o, GPT4oMini} {
+		_, err := buildChatCompletionParams(model, ai.AIRequest{Prompt: "hello", Reasoning: ai.ReasoningConfig{Effort: ai.ReasoningEffortHigh}}, false)
+		if !errors.Is(err, ai.ErrUnsupportedCapability) {
+			t.Fatalf("expected unsupported capability error for %q, got %v", model, err)
+		}
+	}
+	if _, err := buildChatCompletionParams(O3, ai.AIRequest{Prompt: "hello", Reasoning: ai.ReasoningConfig{Effort: ai.ReasoningEffortHigh}}, false); err != nil {
+		t.Fatalf("expected reasoning model to accept effort: %v", err)
+	}
+	if _, err := buildChatCompletionParams(GPT41Mini, ai.AIRequest{Prompt: "hello"}, false); err != nil {
+		t.Fatalf("expected non-reasoning model to accept empty effort: %v", err)
+	}
+}
+
+func TestModelGenerateValidatesToolCallArguments(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		arguments string
+		wantArgs  string
+		wantErr   bool
+	}{
+		{name: "empty defaults to object", arguments: "", wantArgs: "{}"},
+		{name: "invalid JSON is rejected", arguments: "not-json", wantErr: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"search","arguments":` + mustMarshalJSON(t, tt.arguments) + `}}]}}]}`))
+			}))
+			defer ts.Close()
+
+			p := New("test-key", nil)
+			p.baseURL = ts.URL
+			m, err := p.Model(GPT41Mini)
+			if err != nil {
+				t.Fatalf("Model returned error: %v", err)
+			}
+			res, err := m.Generate(context.Background(), ai.AIRequest{Prompt: "hello"})
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected Generate to reject invalid tool-call arguments")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Generate returned error: %v", err)
+			}
+			if len(res.ToolCalls) != 1 || string(res.ToolCalls[0].Args) != tt.wantArgs {
+				t.Fatalf("unexpected tool calls: %#v", res.ToolCalls)
+			}
+		})
+	}
+}
+
+func mustMarshalJSON(t *testing.T, value string) string {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal JSON: %v", err)
+	}
+	return string(raw)
 }
