@@ -75,6 +75,13 @@ func TestModelGenerate(t *testing.T) {
 	}
 }
 
+func TestNativeMessagesMapUserPayload(t *testing.T) {
+	messages := mapNativeMessages([]ai.RequestMessage{{Role: ai.RequestMessageRoleUser, Text: "initial request"}})
+	if len(messages) != 1 || messages[0].Role != "user" || messages[0].Content != "initial request" {
+		t.Fatalf("payload = %#v", messages)
+	}
+}
+
 func TestModelGenerateMapsRequestCapabilities(t *testing.T) {
 	var gotReq chatCompletionRequest
 

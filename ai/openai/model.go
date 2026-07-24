@@ -157,10 +157,20 @@ func sendStreamToolCalls(ctx context.Context, out chan<- ai.Token, calls map[int
 }
 
 func buildChatCompletionParams(model string, req ai.AIRequest, stream bool) (sdk.ChatCompletionNewParams, error) {
+	if err := req.ValidateMessages(); err != nil {
+		return sdk.ChatCompletionNewParams{}, err
+	}
 	if err := req.ResponseFormat.Validate(); err != nil {
 		return sdk.ChatCompletionNewParams{}, err
 	}
 	params := sdk.ChatCompletionNewParams{Model: shared.ChatModel(model), Messages: []sdk.ChatCompletionMessageParamUnion{sdk.UserMessage(req.Prompt)}}
+	if len(req.Messages) > 0 {
+		messages, err := mapNativeMessages(req.Messages)
+		if err != nil {
+			return sdk.ChatCompletionNewParams{}, err
+		}
+		params.Messages = messages
+	}
 	if req.MaxTokens > 0 {
 		params.MaxCompletionTokens = param.NewOpt(int64(req.MaxTokens))
 	}
@@ -183,6 +193,29 @@ func buildChatCompletionParams(model string, req ai.AIRequest, stream bool) (sdk
 		return sdk.ChatCompletionNewParams{}, fmt.Errorf("%w: OpenAI reasoning effort %q", ai.ErrUnsupportedCapability, req.Reasoning.Effort)
 	}
 	return params, nil
+}
+
+func mapNativeMessages(messages []ai.RequestMessage) ([]sdk.ChatCompletionMessageParamUnion, error) {
+	out := make([]sdk.ChatCompletionMessageParamUnion, 0, len(messages))
+	for _, m := range messages {
+		if m.Role == ai.RequestMessageRoleUser {
+			out = append(out, sdk.UserMessage(m.Text))
+			continue
+		}
+		if m.Role == ai.RequestMessageRoleTool {
+			out = append(out, sdk.ToolMessage(m.ToolResult.Content, m.ToolResult.ToolCallID))
+			continue
+		}
+		a := sdk.ChatCompletionAssistantMessageParam{}
+		if m.Text != "" {
+			a.Content.OfString = param.NewOpt(m.Text)
+		}
+		for _, c := range m.ToolCalls {
+			a.ToolCalls = append(a.ToolCalls, sdk.ChatCompletionMessageToolCallParam{ID: c.ID, Function: sdk.ChatCompletionMessageToolCallFunctionParam{Name: c.Name, Arguments: string(c.Arguments)}})
+		}
+		out = append(out, sdk.ChatCompletionMessageParamUnion{OfAssistant: &a})
+	}
+	return out, nil
 }
 
 func isReasoningModel(model string) bool {

@@ -103,6 +103,34 @@ func renderedPromptRequest(prompt string, maxTokens int, tools []ai.ToolDefiniti
 	}
 }
 
+func nativeRequestMessages(basePrompt string, iterations []Iteration) []ai.RequestMessage {
+	messages := []ai.RequestMessage{{Role: ai.RequestMessageRoleUser, Text: basePrompt}}
+	for _, iteration := range iterations {
+		for _, part := range iteration.Parts {
+			switch part.Type {
+			case IterationTypeResponse:
+				if part.Response != nil && part.Response.Text != "" {
+					messages = append(messages, ai.RequestMessage{Role: ai.RequestMessageRoleAssistant, Text: part.Response.Text})
+				}
+			case IterationTypeToolCall, IterationTypeToolError:
+				if part.ToolReq == nil {
+					continue
+				}
+				messages = append(messages, ai.RequestMessage{Role: ai.RequestMessageRoleAssistant, ToolCalls: []ai.RequestToolCall{{ID: part.ToolReq.ID, Name: part.ToolReq.Name, Arguments: append([]byte(nil), part.ToolReq.Args...)}}})
+				if part.ToolResp != nil {
+					result := ai.RequestToolResult{ToolCallID: part.ToolReq.ID, Name: part.ToolReq.Name, Content: part.ToolResp.TextValue()}
+					if err := part.ToolResp.ErrorValue(); err != nil {
+						result.Content = err.Error()
+						result.IsError = true
+					}
+					messages = append(messages, ai.RequestMessage{Role: ai.RequestMessageRoleTool, ToolResult: &result})
+				}
+			}
+		}
+	}
+	return messages
+}
+
 // Run starts asynchronous model and tool execution.
 //
 // The returned channel carries every token, retry, iteration, and terminal
@@ -187,6 +215,22 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 					return
 				}
 
+				basePrompt, err := l.PromptBuilder.BuildPrompt(iterCtx, nil)
+				if err != nil {
+					if cancelErr := cancellationError(iterCtx, err); cancelErr != nil {
+						sendAttemptCanceled(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, cancelErr)
+						cancel()
+						iterState.markCanceled(cancelErr)
+						iterState.finish(nil)
+						return
+					}
+					iterationErr = fmt.Errorf("%w: %w", ErrBuildPrompt, err)
+					sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, iterationErr)
+					cancel()
+					iterState.finish(iterationErr)
+					return
+				}
+
 				prompt, err := l.PromptBuilder.BuildPrompt(iterCtx, l)
 				if err != nil {
 					if cancelErr := cancellationError(iterCtx, err); cancelErr != nil {
@@ -204,6 +248,7 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 				}
 
 				request := renderedPromptRequest(prompt, l.MaxTokens, toolDefinitions, l.ResponseFormat, l.Reasoning)
+				request.Messages = nativeRequestMessages(basePrompt, l.Iterations)
 
 				tokens := l.Model.GenerateStream(iterCtx, request)
 

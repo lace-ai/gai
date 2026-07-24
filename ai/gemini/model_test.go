@@ -40,6 +40,16 @@ func TestMapFunctionCall(t *testing.T) {
 	}
 }
 
+func TestNativeContentsMapUserPayload(t *testing.T) {
+	contents, err := nativeContents(ai.AIRequest{Messages: []ai.RequestMessage{{Role: ai.RequestMessageRoleUser, Text: "initial request"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(contents) != 1 || contents[0].Role != genai.RoleUser || len(contents[0].Parts) != 1 || contents[0].Parts[0].Text != "initial request" {
+		t.Fatalf("contents = %#v", contents)
+	}
+}
+
 func TestMapFunctionCallEmptyName(t *testing.T) {
 	if _, err := mapFunctionCall(&genai.FunctionCall{ID: "call_1"}); err == nil {
 		t.Fatal("expected error for empty function name")

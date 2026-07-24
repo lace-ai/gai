@@ -103,7 +103,12 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			return
 		}
 
-		contents := genai.Text(prompt)
+		contents, err := nativeContents(req)
+		if err != nil {
+			streamErr = err
+			ai.SendToken(ctx, out, ai.Token{Err: err, Type: ai.TokenTypeErr, Text: err.Error()})
+			return
+		}
 
 		for resp, err := range client.Models.GenerateContentStream(ctx, m.name, contents, config) {
 			if err != nil {
@@ -255,12 +260,19 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 		return nil, err
 	}
 
+	contents, err := nativeContents(req)
+	if err != nil {
+		return nil, err
+	}
 	result, err := client.Models.GenerateContent(
 		ctx,
 		m.name,
-		genai.Text(prompt),
+		contents,
 		config,
 	)
+	if err != nil {
+		return nil, err
+	}
 	if err != nil {
 		if m.debug != nil {
 			m.debug.Emit(ctx, gai.DebugEvent{
@@ -320,6 +332,49 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 		OutputTokens:    outputTokens,
 		ReasoningTokens: reasoningTokens,
 	}, nil
+}
+
+func nativeContents(req ai.AIRequest) ([]*genai.Content, error) {
+	if err := req.ValidateMessages(); err != nil {
+		return nil, err
+	}
+	if len(req.Messages) == 0 {
+		return genai.Text(req.Prompt), nil
+	}
+	seen := map[string]struct{}{}
+	out := make([]*genai.Content, 0, len(req.Messages))
+	for _, m := range req.Messages {
+		if m.Role == ai.RequestMessageRoleUser {
+			out = append(out, &genai.Content{Role: genai.RoleUser, Parts: []*genai.Part{{Text: m.Text}}})
+			continue
+		}
+		if m.Role == ai.RequestMessageRoleTool {
+			r := m.ToolResult
+			response := map[string]any{"output": r.Content}
+			if r.IsError {
+				response = map[string]any{"error": r.Content}
+			}
+			out = append(out, &genai.Content{Role: genai.RoleUser, Parts: []*genai.Part{{FunctionResponse: &genai.FunctionResponse{Name: r.Name, Response: response}}}})
+			continue
+		}
+		parts := []*genai.Part{}
+		if m.Text != "" {
+			parts = append(parts, &genai.Part{Text: m.Text})
+		}
+		for _, c := range m.ToolCalls {
+			if _, ok := seen[c.Name]; ok {
+				return nil, fmt.Errorf("gemini native history has duplicate function %q", c.Name)
+			}
+			seen[c.Name] = struct{}{}
+			var args map[string]any
+			if err := json.Unmarshal(c.Arguments, &args); err != nil {
+				return nil, err
+			}
+			parts = append(parts, &genai.Part{FunctionCall: &genai.FunctionCall{Name: c.Name, Args: args}})
+		}
+		out = append(out, &genai.Content{Role: genai.RoleModel, Parts: parts})
+	}
+	return out, nil
 }
 
 func buildGenerateContentConfig(req ai.AIRequest) (*genai.GenerateContentConfig, error) {
