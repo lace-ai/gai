@@ -69,8 +69,15 @@ func TestProviderFallsBackWhenModelDiscoveryFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListModels returned error: %v", err)
 	}
-	if !isKnownModel(GPT56Sol) {
-		t.Fatalf("expected hard-coded fallback models, got %#v", models)
+	found := false
+	for _, model := range models {
+		if model == GPT56Sol {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected fallback models to include %q, got %#v", GPT56Sol, models)
 	}
 	if _, err := p.Model(GPT56Sol); err != nil {
 		t.Fatalf("Model did not accept fallback model: %v", err)
