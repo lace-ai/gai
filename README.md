@@ -328,7 +328,7 @@ Constructor:
 gemini.New(apiKey string, debug gai.DebugSink) *gemini.Provider
 ```
 
-Known model names:
+Models are discovered dynamically from the Gemini API by `ListModels()`. If discovery is unavailable, it falls back to these bundled model names:
 
 - `gemini-3-flash-preview`
 - `gemini-2.5-flash`
@@ -353,7 +353,7 @@ Constructor:
 mistral.New(apiKey string, debug gai.DebugSink) *mistral.Provider
 ```
 
-Known model names:
+Models are discovered dynamically from the Mistral API by `ListModels()`. If discovery is unavailable, it falls back to these bundled model names:
 
 - `mistral-small-latest`
 - `mistral-medium-latest`
