@@ -17,6 +17,8 @@ type RunInput struct {
 	Prompt gaictx.PromptInput
 	// MaxTokens overrides Definition.Limits.MaxTokens when it is positive.
 	MaxTokens int
+	// ResponseFormat requests the output shape for every model call in this run.
+	ResponseFormat ai.ResponseFormat
 	// Meta carries application data such as user, session, or request IDs.
 	Meta map[string]any
 }
@@ -52,6 +54,8 @@ type Definition struct {
 	Prompt Prompt
 	// Limits configures loop execution defaults.
 	Limits Limits
+	// Reasoning configures model reasoning/thinking behavior for every model call.
+	Reasoning ai.ReasoningConfig
 	// Tokenizer overrides Model.Tokenizer when it is non-nil.
 	Tokenizer ai.Tokenizer
 	// ToolResponseProcessor can transform tool responses before they enter the transcript.
@@ -168,6 +172,8 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 	} else {
 		l.MaxTokens = a.def.Limits.MaxTokens
 	}
+	l.ResponseFormat = cloneResponseFormat(input.ResponseFormat)
+	l.Reasoning = a.def.Reasoning
 	return l, nil
 }
 

@@ -240,6 +240,35 @@ func loopError(events []loop.Event) error {
 	return err
 }
 
+func TestLoopPropagatesReasoningToModelRequests(t *testing.T) {
+	t.Parallel()
+
+	for _, reasoning := range []ai.ReasoningConfig{
+		{},
+		{Enabled: true, IncludeThoughts: true, BudgetTokens: 128, Effort: ai.ReasoningEffortHigh},
+	} {
+		reasoning := reasoning
+		t.Run(fmt.Sprintf("enabled=%t", reasoning.Enabled), func(t *testing.T) {
+			t.Parallel()
+
+			model := &scriptedStreamModel{sequences: [][]ai.Token{{{Type: ai.TokenTypeText, Text: "done"}}}}
+			l := loop.New(model, nil, &countingPromptBuilder{}, nil)
+			l.Reasoning = reasoning
+
+			if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
+				t.Fatalf("unexpected loop error: %v", err)
+			}
+			requests := model.Requests()
+			if len(requests) != 1 {
+				t.Fatalf("expected 1 model request, got %d", len(requests))
+			}
+			if requests[0].Reasoning != reasoning {
+				t.Fatalf("expected reasoning %+v, got %+v", reasoning, requests[0].Reasoning)
+			}
+		})
+	}
+}
+
 func loopEventsOfType(events []loop.Event, eventType loop.EventType) []loop.Event {
 	var filtered []loop.Event
 	for _, event := range events {
@@ -248,6 +277,22 @@ func loopEventsOfType(events []loop.Event, eventType loop.EventType) []loop.Even
 		}
 	}
 	return filtered
+}
+
+func TestLoopRejectsInvalidResponseFormatWithoutWrapping(t *testing.T) {
+	t.Parallel()
+
+	model := &scriptedStreamModel{}
+	l := loop.New(model, nil, testPromptBuilder(), nil)
+	l.ResponseFormat = ai.ResponseFormat{Type: ai.ResponseFormatJSONSchema}
+
+	err := loopError(collectLoopEvents(t, l, context.Background()))
+	if !errors.Is(err, ai.ErrInvalidResponseFormat) {
+		t.Fatalf("expected invalid response format error, got %v", err)
+	}
+	if len(model.Requests()) != 0 {
+		t.Fatalf("model must not be called for an invalid response format")
+	}
 }
 
 func renderTestMessages(messages []gaictx.Message) string {

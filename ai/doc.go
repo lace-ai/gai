@@ -5,6 +5,6 @@
 // returns a complete AIResponse or streams Tokens. ModelRepository provides a
 // small registry for selecting models by provider and model name.
 //
-// Provider-specific implementations live in subpackages such as gemini and
-// mistral.
+// Provider-specific implementations live in subpackages such as anthropic,
+// gemini, and mistral.
 package ai

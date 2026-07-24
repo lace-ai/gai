@@ -39,6 +39,10 @@ type Loop struct {
 	MaxLoopIterations int
 	// MaxTokens limits model output for each generation request.
 	MaxTokens int
+	// ResponseFormat requests the output shape for each model generation.
+	ResponseFormat ai.ResponseFormat
+	// Reasoning configures model reasoning/thinking behavior for each model generation.
+	Reasoning ai.ReasoningConfig
 	// RetryCount is the number of model stream failures retried before stopping.
 	RetryCount int
 	// PromptBuilder constructs the prompt for each iteration.
@@ -60,6 +64,9 @@ func (l *Loop) Validate() error {
 	}
 	if l.PromptBuilder == nil {
 		return ErrPromptNotConfigured
+	}
+	if err := l.ResponseFormat.Validate(); err != nil {
+		return err
 	}
 	return nil
 }
@@ -86,11 +93,13 @@ type pendingToolCall struct {
 // Conversation state remains in Prompt until a provider-native message path is
 // introduced deliberately; this boundary keeps that future change separate
 // from the current rendered-prompt behavior.
-func renderedPromptRequest(prompt string, maxTokens int, tools []ai.ToolDefinition) ai.AIRequest {
+func renderedPromptRequest(prompt string, maxTokens int, tools []ai.ToolDefinition, responseFormat ai.ResponseFormat, reasoning ai.ReasoningConfig) ai.AIRequest {
 	return ai.AIRequest{
-		Prompt:    prompt,
-		MaxTokens: maxTokens,
-		Tools:     tools,
+		Prompt:         prompt,
+		MaxTokens:      maxTokens,
+		Tools:          tools,
+		ResponseFormat: responseFormat,
+		Reasoning:      reasoning,
 	}
 }
 
@@ -194,7 +203,7 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 					return
 				}
 
-				request := renderedPromptRequest(prompt, l.MaxTokens, toolDefinitions)
+				request := renderedPromptRequest(prompt, l.MaxTokens, toolDefinitions, l.ResponseFormat, l.Reasoning)
 
 				tokens := l.Model.GenerateStream(iterCtx, request)
 
