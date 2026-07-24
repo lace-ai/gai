@@ -316,6 +316,34 @@ type AIRequest struct {
 
 <summary>
 
+### 🟣 Anthropic
+
+</summary>
+
+Package: `ai/anthropic`
+
+Constructor:
+
+```go
+anthropic.New(apiKey string, debug gai.DebugSink) *anthropic.Provider
+```
+
+The provider uses Anthropic's Messages API. GAI currently sends the rendered
+prompt as one user message; it does not yet map native multi-turn messages.
+JSON Schema response formats opt into Anthropic's structured-outputs beta.
+
+Known model names:
+
+- `claude-opus-4-6`
+- `claude-sonnet-4-6`
+- `claude-haiku-4-5`
+
+</details>
+
+<details>
+
+<summary>
+
 ### ♊ Gemini
 
 </summary>
@@ -687,6 +715,7 @@ Common exported errors include:
 - `context.ErrTokenizerNotFound`
 - `gemini.ErrInvalidAPIKey`
 - `mistral.ErrInvalidAPIKey`
+- `anthropic.ErrInvalidAPIKey`
 
 Handle provider and tool errors at the call site, especially when a model or session store is user-configured.
 
