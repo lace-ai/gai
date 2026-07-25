@@ -52,9 +52,9 @@ go get github.com/lace-ai/gai
 ### 🧭 Usage
 
 The shortest path is to create a provider model, define an agent, create a
-single-use workflow, and consume all three workflow streams. Import GAI's
+single-use workflow, and consume its ordered event stream. Import GAI's
 `context` package with an alias so it does not conflict with the standard
-library package.
+library package, and import `loop` for the event types.
 
 ```go
 provider := gemini.New(os.Getenv("GEMINI_API_KEY"), nil)
@@ -84,32 +84,15 @@ if err != nil {
   return err
 }
 
-tokens, statuses, errs := workflow.Run(ctx)
-statusDone := make(chan struct{})
-go func() {
-  defer close(statusDone)
-  for range statuses {
-  }
-}()
-
-var runErr error
-errorDone := make(chan struct{})
-go func() {
-  defer close(errorDone)
-  for err := range errs {
-    if err != nil && runErr == nil {
-      runErr = err
+for event := range workflow.RunEvents(ctx) {
+  switch event.Type {
+  case loop.EventToken:
+    if event.Token != nil {
+      fmt.Print(event.Token.Text)
     }
+  case loop.EventError:
+    return event.Err
   }
-}()
-
-for token := range tokens {
-  fmt.Print(token.Text)
-}
-<-statusDone
-<-errorDone
-if runErr != nil {
-  return runErr
 }
 
 result := workflow.Result()
