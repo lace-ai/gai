@@ -103,8 +103,14 @@ func renderedPromptRequest(prompt string, maxTokens int, tools []ai.ToolDefiniti
 	}
 }
 
-func nativeRequestMessages(basePrompt string, iterations []Iteration) []ai.RequestMessage {
-	messages := []ai.RequestMessage{{Role: ai.RequestMessageRoleUser, Text: basePrompt}}
+// NativeMessages returns the provider-neutral history for completed iterations.
+// Prompt builders combine it with their own base user message.
+func (l *Loop) NativeMessages() []ai.RequestMessage {
+	var messages []ai.RequestMessage
+	if l == nil {
+		return nil
+	}
+	iterations := l.Iterations
 	for _, iteration := range iterations {
 		var toolCalls []ai.RequestToolCall
 		var toolResults []ai.RequestMessage
@@ -140,12 +146,6 @@ func nativeRequestMessages(basePrompt string, iterations []Iteration) []ai.Reque
 		}
 	}
 	return messages
-}
-
-type emptyConversation struct{}
-
-func (emptyConversation) Messages() []gaictx.Message {
-	return nil
 }
 
 // Run starts asynchronous model and tool execution.
@@ -232,22 +232,6 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 					return
 				}
 
-				basePrompt, err := l.PromptBuilder.BuildPrompt(iterCtx, emptyConversation{})
-				if err != nil {
-					if cancelErr := cancellationError(iterCtx, err); cancelErr != nil {
-						sendAttemptCanceled(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, cancelErr)
-						cancel()
-						iterState.markCanceled(cancelErr)
-						iterState.finish(nil)
-						return
-					}
-					iterationErr = fmt.Errorf("%w: %w", ErrBuildPrompt, err)
-					sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, iterationErr)
-					cancel()
-					iterState.finish(iterationErr)
-					return
-				}
-
 				prompt, err := l.PromptBuilder.BuildPrompt(iterCtx, l)
 				if err != nil {
 					if cancelErr := cancellationError(iterCtx, err); cancelErr != nil {
@@ -265,7 +249,21 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 				}
 
 				request := renderedPromptRequest(prompt, l.MaxTokens, toolDefinitions, l.ResponseFormat, l.Reasoning)
-				request.Messages = nativeRequestMessages(basePrompt, l.Iterations)
+				request.Messages, err = l.PromptBuilder.BuildMessages(iterCtx, l)
+				if err != nil {
+					if cancelErr := cancellationError(iterCtx, err); cancelErr != nil {
+						sendAttemptCanceled(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, cancelErr)
+						cancel()
+						iterState.markCanceled(cancelErr)
+						iterState.finish(nil)
+						return
+					}
+					iterationErr = fmt.Errorf("%w: %w", ErrBuildPrompt, err)
+					sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, iterationErr)
+					cancel()
+					iterState.finish(iterationErr)
+					return
+				}
 
 				tokens := l.Model.GenerateStream(iterCtx, request)
 

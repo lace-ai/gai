@@ -73,6 +73,10 @@ func (b *countingPromptBuilder) BuildPrompt(ctx context.Context, conv gaictx.Con
 	return fmt.Sprintf("prompt-%d", count), nil
 }
 
+func (b *countingPromptBuilder) BuildMessages(ctx context.Context, conv gaictx.Conversation) ([]ai.RequestMessage, error) {
+	return testNativeMessages(ctx, b, conv)
+}
+
 func (b *countingPromptBuilder) Input() gaictx.PromptInput {
 	return gaictx.PromptInput{User: gaictx.NewTextContent("Initial prompt")}
 }
@@ -139,6 +143,26 @@ func (b *stubPromptBuilder) BuildPrompt(ctx context.Context, conv gaictx.Convers
 		prompt.WriteString(renderTestMessages(conv.Messages()))
 	}
 	return prompt.String(), nil
+}
+
+func (b *stubPromptBuilder) BuildMessages(ctx context.Context, conv gaictx.Conversation) ([]ai.RequestMessage, error) {
+	return testNativeMessages(ctx, b, conv)
+}
+
+type emptyPromptConversation struct{}
+
+func (emptyPromptConversation) Messages() []gaictx.Message { return nil }
+
+func testNativeMessages(ctx context.Context, builder gaictx.PromptBuilder, conv gaictx.Conversation) ([]ai.RequestMessage, error) {
+	base, err := builder.BuildPrompt(ctx, emptyPromptConversation{})
+	if err != nil {
+		return nil, err
+	}
+	messages := []ai.RequestMessage{{Role: ai.RequestMessageRoleUser, Text: base}}
+	if native, ok := conv.(gaictx.NativeConversation); ok {
+		messages = append(messages, native.NativeMessages()...)
+	}
+	return messages, nil
 }
 
 func (b *stubPromptBuilder) Input() gaictx.PromptInput {
@@ -950,7 +974,7 @@ func TestLoopFallsBackToBuildPromptEveryIteration(t *testing.T) {
 	if len(requests) != 2 {
 		t.Fatalf("expected 2 model requests, got %d", len(requests))
 	}
-	if requests[0].Prompt != "prompt-2" || requests[1].Prompt != "prompt-4" {
+	if requests[0].Prompt != "prompt-1" || requests[1].Prompt != "prompt-3" {
 		t.Fatalf("expected rebuilt prompts, got first=%q second=%q", requests[0].Prompt, requests[1].Prompt)
 	}
 	for index, request := range requests {

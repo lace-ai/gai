@@ -35,8 +35,16 @@ type PromptBuilder interface {
 	AppendSystemInstructions(ctx context.Context, instructions ...Part) error
 	BuildContext(ctx context.Context) ([]Part, error)
 	BuildPrompt(ctx context.Context, conv Conversation) (string, error)
+	BuildMessages(ctx context.Context, conv Conversation) ([]ai.RequestMessage, error)
 	Input() PromptInput
 	SetInput(input PromptInput)
+}
+
+// NativeConversation exposes provider-neutral conversation history alongside
+// the rendered conversation used to construct a compatibility prompt.
+type NativeConversation interface {
+	Conversation
+	NativeMessages() []ai.RequestMessage
 }
 
 // TokenBudget exposes prompt-window configuration and remaining capacity.
@@ -294,6 +302,25 @@ func (b *Builder) BuildPrompt(ctx context.Context, conv Conversation) (prompt st
 	}
 	obs.RenderFinished(ctx, stats, promptDebugFields(ctx, parts, prompt))
 	return prompt, nil
+}
+
+type basePromptConversation struct{}
+
+func (basePromptConversation) Messages() []Message { return nil }
+
+// BuildMessages builds the provider-neutral request messages for conv. The
+// initial user message is the prompt without rendered conversation history;
+// native conversation entries follow when conv provides them.
+func (b *Builder) BuildMessages(ctx context.Context, conv Conversation) ([]ai.RequestMessage, error) {
+	basePrompt, err := b.BuildPrompt(ctx, basePromptConversation{})
+	if err != nil {
+		return nil, err
+	}
+	messages := []ai.RequestMessage{{Role: ai.RequestMessageRoleUser, Text: basePrompt}}
+	if native, ok := conv.(NativeConversation); ok {
+		messages = append(messages, native.NativeMessages()...)
+	}
+	return messages, nil
 }
 
 func (b *Builder) Input() PromptInput {
