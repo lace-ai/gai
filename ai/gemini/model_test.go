@@ -1,10 +1,14 @@
 package gemini
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
 	"google.golang.org/genai"
 )
@@ -62,6 +66,35 @@ func TestNativeContentsAllowsFunctionNameAfterResult(t *testing.T) {
 	if len(contents) != 3 {
 		t.Fatalf("expected three contents, got %#v", contents)
 	}
+}
+
+func TestGenerateEmitsDebugEventOnGenerationFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, `{"error":{"message":"generation failed"}}`, http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	var events []gai.DebugEvent
+	provider := New("test-api-key", gai.DebugSinkFunc(func(_ context.Context, event gai.DebugEvent) {
+		events = append(events, event)
+	}))
+	provider.httpClient = server.Client()
+	provider.baseURL = server.URL
+	model, err := provider.Model("gemini-test")
+	if err != nil {
+		t.Fatalf("Model error: %v", err)
+	}
+
+	_, err = model.Generate(t.Context(), ai.AIRequest{Prompt: "hello"})
+	if err == nil {
+		t.Fatal("Generate error = nil, want API error")
+	}
+	for _, event := range events {
+		if event.Name == "gemini_generate_content_failed" && event.Err != nil {
+			return
+		}
+	}
+	t.Fatalf("gemini_generate_content_failed event not emitted: %#v", events)
 }
 
 func TestMapFunctionCallEmptyName(t *testing.T) {

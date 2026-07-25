@@ -271,9 +271,6 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 		config,
 	)
 	if err != nil {
-		return nil, err
-	}
-	if err != nil {
 		if m.debug != nil {
 			m.debug.Emit(ctx, gai.DebugEvent{
 				Name:   "gemini_generate_content_failed",
