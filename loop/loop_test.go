@@ -988,6 +988,40 @@ func TestLoopNativeHistoryIncludesBaseRequestWithoutRenderedHistory(t *testing.T
 	}
 }
 
+func TestLoopNativeHistoryGroupsParallelToolCallsInOneAssistantMessage(t *testing.T) {
+	t.Parallel()
+
+	model := &scriptedStreamModel{sequences: [][]ai.Token{
+		{
+			{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-1", Type: "function", Name: "echo", Args: json.RawMessage(`{"text":"first"}`)}},
+			{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-2", Type: "function", Name: "echo", Args: json.RawMessage(`{"text":"second"}`)}},
+		},
+		{{Type: ai.TokenTypeText, Data: []byte("done")}},
+	}}
+	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, &stubPromptBuilder{systemPrompt: "system", userPrompt: "user"}, nil)
+	l.MaxLoopIterations = 3
+
+	if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+	requests := model.Requests()
+	if len(requests) != 2 {
+		t.Fatalf("requests = %d, want 2", len(requests))
+	}
+	second := requests[1]
+	if len(second.Messages) != 4 {
+		t.Fatalf("native messages = %#v, want base user, one assistant tool-call turn, and two results", second.Messages)
+	}
+	if assistant := second.Messages[1]; assistant.Role != ai.RequestMessageRoleAssistant || len(assistant.ToolCalls) != 2 {
+		t.Fatalf("assistant tool-call turn = %#v, want two tool calls", assistant)
+	}
+	for i, message := range second.Messages[2:] {
+		if message.Role != ai.RequestMessageRoleTool {
+			t.Fatalf("tool result message %d = %#v", i, message)
+		}
+	}
+}
+
 func TestIterationCountsLeadingThoughtTokens(t *testing.T) {
 	t.Parallel()
 

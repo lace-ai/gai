@@ -106,6 +106,8 @@ func renderedPromptRequest(prompt string, maxTokens int, tools []ai.ToolDefiniti
 func nativeRequestMessages(basePrompt string, iterations []Iteration) []ai.RequestMessage {
 	messages := []ai.RequestMessage{{Role: ai.RequestMessageRoleUser, Text: basePrompt}}
 	for _, iteration := range iterations {
+		var toolCalls []ai.RequestToolCall
+		var toolResults []ai.RequestMessage
 		for _, part := range iteration.Parts {
 			switch part.Type {
 			case IterationTypeResponse:
@@ -116,16 +118,20 @@ func nativeRequestMessages(basePrompt string, iterations []Iteration) []ai.Reque
 				if part.ToolReq == nil {
 					continue
 				}
-				messages = append(messages, ai.RequestMessage{Role: ai.RequestMessageRoleAssistant, ToolCalls: []ai.RequestToolCall{{ID: part.ToolReq.ID, Name: part.ToolReq.Name, Arguments: append([]byte(nil), part.ToolReq.Args...)}}})
+				toolCalls = append(toolCalls, ai.RequestToolCall{ID: part.ToolReq.ID, Name: part.ToolReq.Name, Arguments: append([]byte(nil), part.ToolReq.Args...)})
 				if part.ToolResp != nil {
 					result := ai.RequestToolResult{ToolCallID: part.ToolReq.ID, Name: part.ToolReq.Name, Content: part.ToolResp.TextValue()}
 					if err := part.ToolResp.ErrorValue(); err != nil {
 						result.Content = err.Error()
 						result.IsError = true
 					}
-					messages = append(messages, ai.RequestMessage{Role: ai.RequestMessageRoleTool, ToolResult: &result})
+					toolResults = append(toolResults, ai.RequestMessage{Role: ai.RequestMessageRoleTool, ToolResult: &result})
 				}
 			}
+		}
+		if len(toolCalls) > 0 {
+			messages = append(messages, ai.RequestMessage{Role: ai.RequestMessageRoleAssistant, ToolCalls: toolCalls})
+			messages = append(messages, toolResults...)
 		}
 	}
 	return messages
