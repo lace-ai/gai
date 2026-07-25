@@ -137,6 +137,12 @@ func nativeRequestMessages(basePrompt string, iterations []Iteration) []ai.Reque
 	return messages
 }
 
+type emptyConversation struct{}
+
+func (emptyConversation) Messages() []gaictx.Message {
+	return nil
+}
+
 // Run starts asynchronous model and tool execution.
 //
 // The returned channel carries every token, retry, iteration, and terminal
@@ -221,7 +227,7 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 					return
 				}
 
-				basePrompt, err := l.PromptBuilder.BuildPrompt(iterCtx, nil)
+				basePrompt, err := l.PromptBuilder.BuildPrompt(iterCtx, emptyConversation{})
 				if err != nil {
 					if cancelErr := cancellationError(iterCtx, err); cancelErr != nil {
 						sendAttemptCanceled(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, cancelErr)

@@ -87,6 +87,17 @@ type stubPromptBuilder struct {
 	buildContext func() string
 }
 
+type nonNilConversationPromptBuilder struct {
+	stubPromptBuilder
+}
+
+func (b *nonNilConversationPromptBuilder) BuildPrompt(ctx context.Context, conv gaictx.Conversation) (string, error) {
+	if conv == nil {
+		return "", errors.New("conversation must not be nil")
+	}
+	return b.stubPromptBuilder.BuildPrompt(ctx, conv)
+}
+
 func (b *stubPromptBuilder) PrependContextSource(ctx context.Context, source gaictx.ContextSource) error {
 	return nil
 }
@@ -985,6 +996,25 @@ func TestLoopNativeHistoryIncludesBaseRequestWithoutRenderedHistory(t *testing.T
 	}
 	if !strings.Contains(second.Prompt, "payload") {
 		t.Fatalf("complete rendered fallback omitted tool history: %q", second.Prompt)
+	}
+}
+
+func TestLoopBuildsBasePromptWithNonNilConversation(t *testing.T) {
+	t.Parallel()
+
+	model := &scriptedStreamModel{sequences: [][]ai.Token{{{Type: ai.TokenTypeText, Data: []byte("done")}}}}
+	promptBuilder := &nonNilConversationPromptBuilder{stubPromptBuilder: stubPromptBuilder{systemPrompt: "system", userPrompt: "user"}}
+	l := loop.New(model, nil, promptBuilder, nil)
+
+	if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+	requests := model.Requests()
+	if len(requests) != 1 {
+		t.Fatalf("requests = %d, want 1", len(requests))
+	}
+	if len(requests[0].Messages) != 1 || requests[0].Messages[0].Text != "system\nuser\n" {
+		t.Fatalf("base native message = %#v", requests[0].Messages)
 	}
 }
 
