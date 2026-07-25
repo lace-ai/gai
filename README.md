@@ -292,15 +292,17 @@ type Model interface {
 
 </summary>
 
-Providers currently receive a rendered prompt string plus provider-neutral
-capability requests for native tools, structured responses, and reasoning.
-Assistant and tool-result conversation history remains rendered into `Prompt`
-for compatibility; provider-native multi-turn messages are planned separately:
-[`docs/issue-45-provider-native-messages-plan.md`](docs/issue-45-provider-native-messages-plan.md).
+Providers receive a rendered prompt string plus provider-neutral capability
+requests for native tools, structured responses, and reasoning. `AIRequest.Messages`
+optionally carries provider-neutral native conversation history (user, assistant,
+and tool-result messages). When `Messages` is non-empty, built-in providers send
+that native history instead of `Prompt`; when it is empty, `Prompt` remains the
+rendered compatibility fallback.
 
 ```go
 type AIRequest struct {
     Prompt         string
+    Messages       []RequestMessage
     MaxTokens      int
     Tools          []ToolDefinition
     ToolChoice     ToolChoice
