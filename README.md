@@ -152,33 +152,16 @@ workflow, err := assistant.NewRun(ctx, agent.RunInput{
 if err != nil {
   return err
 }
-tokens, statuses, errs := workflow.Run(ctx)
 
-statusDone := make(chan struct{})
-go func() {
-  defer close(statusDone)
-  for range statuses {
-  }
-}()
-
-var runErr error
-errorDone := make(chan struct{})
-go func() {
-  defer close(errorDone)
-  for err := range errs {
-    if err != nil && runErr == nil {
-      runErr = err
+for event := range workflow.RunEvents(ctx) {
+  switch event.Type {
+  case loop.EventToken:
+    if event.Token != nil {
+      fmt.Print(event.Token.Text)
     }
+  case loop.EventError:
+    return event.Err
   }
-}()
-
-for token := range tokens {
-  fmt.Print(token.Text)
-}
-<-statusDone
-<-errorDone
-if runErr != nil {
-  return runErr
 }
 
 result := workflow.Result()
