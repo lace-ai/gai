@@ -606,7 +606,11 @@ provider, err := langfuse.NewTracerProvider(ctx, langfuse.Config{
   ServiceName: "my-agent-service",
 })
 if err != nil { /* handle configuration error */ }
-defer provider.Shutdown(context.Background())
+defer func() {
+  if err := provider.Shutdown(context.Background()); err != nil {
+    log.Printf("flush Langfuse traces: %v", err)
+  }
+}()
 otel.SetTracerProvider(provider)
 ```
 
