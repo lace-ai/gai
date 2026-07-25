@@ -192,6 +192,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 						ai.SendToken(ctx, out, ai.Token{Err: mapErr, Type: ai.TokenTypeErr, Text: mapErr.Error()})
 						return
 					}
+					toolCall.ThoughtSignature = append([]byte(nil), part.ThoughtSignature...)
 					if m.debug != nil {
 						fields := map[string]any{}
 						if m.debug.IncludeSensitiveData() {
@@ -368,7 +369,10 @@ func nativeContents(req ai.AIRequest) ([]*genai.Content, error) {
 			if err := json.Unmarshal(c.Arguments, &args); err != nil {
 				return nil, err
 			}
-			parts = append(parts, &genai.Part{FunctionCall: &genai.FunctionCall{Name: c.Name, Args: args}})
+			parts = append(parts, &genai.Part{
+				FunctionCall:     &genai.FunctionCall{Name: c.Name, Args: args},
+				ThoughtSignature: append([]byte(nil), c.ThoughtSignature...),
+			})
 		}
 		out = append(out, &genai.Content{Role: genai.RoleModel, Parts: parts})
 	}
@@ -528,6 +532,7 @@ func mapGenerateContentResponse(result *genai.GenerateContentResponse) (string, 
 			if err != nil {
 				return "", "", nil, err
 			}
+			toolCall.ThoughtSignature = append([]byte(nil), part.ThoughtSignature...)
 			toolCalls = append(toolCalls, *toolCall)
 		}
 	}

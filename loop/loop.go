@@ -118,7 +118,12 @@ func nativeRequestMessages(basePrompt string, iterations []Iteration) []ai.Reque
 				if part.ToolReq == nil {
 					continue
 				}
-				toolCalls = append(toolCalls, ai.RequestToolCall{ID: part.ToolReq.ID, Name: part.ToolReq.Name, Arguments: append([]byte(nil), part.ToolReq.Args...)})
+				toolCalls = append(toolCalls, ai.RequestToolCall{
+					ID:               part.ToolReq.ID,
+					Name:             part.ToolReq.Name,
+					Arguments:        append([]byte(nil), part.ToolReq.Args...),
+					ThoughtSignature: append([]byte(nil), part.ToolReq.ThoughtSignature...),
+				})
 				if part.ToolResp != nil {
 					result := ai.RequestToolResult{ToolCallID: part.ToolReq.ID, Name: part.ToolReq.Name, Content: part.ToolResp.TextValue()}
 					if err := part.ToolResp.ErrorValue(); err != nil {

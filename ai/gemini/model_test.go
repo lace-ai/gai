@@ -68,6 +68,25 @@ func TestNativeContentsAllowsFunctionNameAfterResult(t *testing.T) {
 	}
 }
 
+func TestNativeContentsPreservesThoughtSignatureOnFunctionCall(t *testing.T) {
+	signature := []byte("opaque-thought-signature")
+	contents, err := nativeContents(ai.AIRequest{Messages: []ai.RequestMessage{
+		{Role: ai.RequestMessageRoleAssistant, ToolCalls: []ai.RequestToolCall{{
+			ID:               "call_1",
+			Name:             "echo",
+			Arguments:        json.RawMessage(`{"message":"hello"}`),
+			ThoughtSignature: signature,
+		}}},
+		{Role: ai.RequestMessageRoleTool, ToolResult: &ai.RequestToolResult{ToolCallID: "call_1", Name: "echo", Content: "hello"}},
+	}})
+	if err != nil {
+		t.Fatalf("nativeContents error: %v", err)
+	}
+	if got := contents[0].Parts[0].ThoughtSignature; string(got) != string(signature) {
+		t.Fatalf("thought signature = %q, want %q", got, signature)
+	}
+}
+
 func TestGenerateEmitsDebugEventOnGenerationFailure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, `{"error":{"message":"generation failed"}}`, http.StatusInternalServerError)

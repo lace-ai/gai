@@ -103,6 +103,7 @@ func (r *AIResponse) AppendToken(t Token) {
 		if t.ToolCall != nil {
 			tc := *t.ToolCall
 			tc.Args = append([]byte(nil), t.ToolCall.Args...)
+			tc.ThoughtSignature = append([]byte(nil), t.ToolCall.ThoughtSignature...)
 			r.ToolCalls = append(r.ToolCalls, tc)
 		}
 	}

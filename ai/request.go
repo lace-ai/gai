@@ -23,8 +23,9 @@ const (
 )
 
 type RequestToolCall struct {
-	ID, Name  string
-	Arguments json.RawMessage
+	ID, Name         string
+	Arguments        json.RawMessage
+	ThoughtSignature []byte
 }
 type RequestToolResult struct {
 	ToolCallID, Name, Content string
@@ -90,6 +91,7 @@ func (r AIRequest) Copy() AIRequest {
 		r.Messages[i].ToolCalls = append([]RequestToolCall(nil), r.Messages[i].ToolCalls...)
 		for j := range r.Messages[i].ToolCalls {
 			r.Messages[i].ToolCalls[j].Arguments = append(json.RawMessage(nil), r.Messages[i].ToolCalls[j].Arguments...)
+			r.Messages[i].ToolCalls[j].ThoughtSignature = append([]byte(nil), r.Messages[i].ToolCalls[j].ThoughtSignature...)
 		}
 		if x := r.Messages[i].ToolResult; x != nil {
 			y := *x

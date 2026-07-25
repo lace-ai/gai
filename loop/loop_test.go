@@ -967,7 +967,7 @@ func TestLoopNativeHistoryIncludesBaseRequestWithoutRenderedHistory(t *testing.T
 	t.Parallel()
 
 	model := &scriptedStreamModel{sequences: [][]ai.Token{
-		{{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-1", Type: "function", Name: "echo", Args: json.RawMessage(`{"text":"payload"}`)}}},
+		{{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-1", Type: "function", Name: "echo", Args: json.RawMessage(`{"text":"payload"}`), ThoughtSignature: []byte("opaque-thought-signature")}}},
 		{{Type: ai.TokenTypeText, Data: []byte("done")}},
 	}}
 	promptBuilder := &stubPromptBuilder{systemPrompt: "system", userPrompt: "user"}
@@ -993,6 +993,9 @@ func TestLoopNativeHistoryIncludesBaseRequestWithoutRenderedHistory(t *testing.T
 	}
 	if second.Messages[1].Role != ai.RequestMessageRoleAssistant || len(second.Messages[1].ToolCalls) != 1 || second.Messages[2].Role != ai.RequestMessageRoleTool {
 		t.Fatalf("native history = %#v", second.Messages)
+	}
+	if got := string(second.Messages[1].ToolCalls[0].ThoughtSignature); got != "opaque-thought-signature" {
+		t.Fatalf("thought signature = %q", got)
 	}
 	if !strings.Contains(second.Prompt, "payload") {
 		t.Fatalf("complete rendered fallback omitted tool history: %q", second.Prompt)
