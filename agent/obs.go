@@ -13,6 +13,40 @@ import (
 
 const agentTracerName = "github.com/lace-ai/gai/agent"
 
+type agentRunObserver struct {
+	span trace.Span
+}
+
+func newAgentRunObserver(ctx context.Context, workflow *Workflow) (context.Context, *agentRunObserver) {
+	name := ""
+	var input RunInput
+	if workflow != nil {
+		name = workflow.name
+		input = workflow.result.Input
+	}
+	attrs := []attribute.KeyValue{
+		attribute.String("agent.name", name),
+		attribute.Int("agent.meta_key_count", len(input.Meta)),
+	}
+	if input.ID != "" {
+		attrs = append(attrs, attribute.String("agent.run_id", input.ID))
+	}
+	ctx, span := gai.StartOperationSpan(ctx, agentTracerName, "agent", "agent.operation", "run", attrs...)
+	return ctx, &agentRunObserver{span: span}
+}
+
+func (o *agentRunObserver) Finished(result WorkflowResult) {
+	if o == nil || o.span == nil {
+		return
+	}
+	o.span.SetAttributes(
+		attribute.Int("agent.token_count", len(result.Tokens)),
+		attribute.Int("agent.error_count", len(result.Errors)),
+		attribute.Bool("agent.complete", result.Complete),
+	)
+	gai.EndSpan(o.span, errors.Join(result.Errors...))
+}
+
 type runCreationObserver struct {
 	debug           gai.DebugSink
 	span            trace.Span

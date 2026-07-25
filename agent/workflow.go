@@ -175,6 +175,7 @@ func (w *Workflow) Run(ctx context.Context) (<-chan ai.Token, <-chan loop.Iterat
 	w.started = true
 	w.mu.Unlock()
 
+	ctx, runObs := newAgentRunObserver(ctx, w)
 	ctx, obs := newWorkflowObserver(ctx, w)
 	obs.Started(ctx)
 	stream := w.capturePrimary(ctx, loopEventsToStream(ctx, w.Loop.Run(ctx)), obs)
@@ -182,7 +183,7 @@ func (w *Workflow) Run(ctx context.Context) (<-chan ai.Token, <-chan loop.Iterat
 	for _, middleware := range w.middleware {
 		stream = middleware.Process(ctx, run, stream)
 	}
-	stream = w.captureFinal(ctx, stream, obs)
+	stream = w.captureFinal(ctx, stream, obs, runObs)
 	return stream.Tokens, stream.Statuses, stream.Errors
 }
 
@@ -299,7 +300,7 @@ func (w *Workflow) capturePrimary(ctx context.Context, upstream Stream, obs *wor
 	})
 }
 
-func (w *Workflow) captureFinal(ctx context.Context, upstream Stream, obs *workflowObserver) Stream {
+func (w *Workflow) captureFinal(ctx context.Context, upstream Stream, obs *workflowObserver, runObs *agentRunObserver) Stream {
 	return captureStream(ctx, upstream, func(captured capturedStream) {
 		canceled, cancellationErr := captured.cancellation()
 		w.mu.Lock()
@@ -315,6 +316,7 @@ func (w *Workflow) captureFinal(ctx context.Context, upstream Stream, obs *workf
 		result := cloneWorkflowResult(w.result)
 		w.mu.Unlock()
 		obs.Finished(ctx, result)
+		runObs.Finished(result)
 	})
 }
 

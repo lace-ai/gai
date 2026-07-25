@@ -249,3 +249,23 @@ func (o *iterationObserver) finish(err error, stats loopIterationStats) {
 	o.span.SetAttributes(attrs...)
 	gai.EndSpan(o.span, err)
 }
+
+func startToolSpan(ctx context.Context, call ai.ToolCall) (context.Context, func(*ToolResponse)) {
+	ctx, span := gai.StartOperationSpan(ctx, loopTracerName, "loop", "loop.operation", "tool",
+		attribute.String("tool.name", call.Name),
+		attribute.String("tool.call_id", call.ID),
+	)
+	return ctx, func(response *ToolResponse) {
+		status := "success"
+		var err error
+		if response == nil {
+			status = "error"
+			err = ErrToolErrorMissing
+		} else if responseErr := response.ErrorValue(); responseErr != nil {
+			status = "error"
+			err = responseErr
+		}
+		span.SetAttributes(attribute.String("tool.status", status))
+		gai.EndSpan(span, err)
+	}
+}

@@ -15,6 +15,9 @@ import (
 	gaictx "github.com/lace-ai/gai/context"
 	"github.com/lace-ai/gai/loop"
 	"github.com/lace-ai/gai/testutil/mocks"
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 type wrapStreamModel struct {
@@ -1138,6 +1141,41 @@ func TestIterationCountsLeadingThoughtTokens(t *testing.T) {
 	if response.OutputTokens != 12 {
 		t.Fatalf("unexpected output tokens: %d", response.OutputTokens)
 	}
+}
+
+func TestLoopCreatesToolSpans(t *testing.T) {
+	previousProvider := otel.GetTracerProvider()
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	otel.SetTracerProvider(provider)
+	t.Cleanup(func() {
+		_ = provider.Shutdown(context.Background())
+		otel.SetTracerProvider(previousProvider)
+	})
+
+	model := &scriptedStreamModel{sequences: [][]ai.Token{
+		{{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-1", Type: "function", Name: "echo", Args: json.RawMessage(`{"text":"payload"}`)}}},
+		{{Type: ai.TokenTypeText, Text: "done"}},
+	}}
+	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
+	if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+
+	for _, span := range recorder.Ended() {
+		if span.Name() != "loop.tool" {
+			continue
+		}
+		attributes := map[string]any{}
+		for _, attribute := range span.Attributes() {
+			attributes[string(attribute.Key)] = attribute.Value.AsInterface()
+		}
+		if attributes["tool.name"] != "echo" || attributes["tool.call_id"] != "call-1" || attributes["tool.status"] != "success" {
+			t.Fatalf("unexpected tool span attributes: %#v", attributes)
+		}
+		return
+	}
+	t.Fatalf("expected loop.tool span, got %#v", recorder.Ended())
 }
 
 func TestIterationDeltaMessagesSkipsThoughtOnlyResponses(t *testing.T) {
