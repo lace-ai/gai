@@ -73,10 +73,6 @@ func (b *countingPromptBuilder) BuildPrompt(ctx context.Context, conv gaictx.Con
 	return fmt.Sprintf("prompt-%d", count), nil
 }
 
-func (b *countingPromptBuilder) BuildMessages(ctx context.Context, conv gaictx.Conversation) ([]ai.RequestMessage, error) {
-	return testNativeMessages(ctx, b, conv)
-}
-
 func (b *countingPromptBuilder) Input() gaictx.PromptInput {
 	return gaictx.PromptInput{User: gaictx.NewTextContent("Initial prompt")}
 }
@@ -967,17 +963,20 @@ func TestLoopFallsBackToBuildPromptEveryIteration(t *testing.T) {
 		t.Fatalf("unexpected loop error: %v", err)
 	}
 
-	if got := promptBuilder.count.Load(); got != 4 {
-		t.Fatalf("expected prompt builder to render base and fallback prompts twice, got %d", got)
+	if got := promptBuilder.count.Load(); got != 2 {
+		t.Fatalf("expected prompt builder to render once per iteration, got %d", got)
 	}
 	requests := model.Requests()
 	if len(requests) != 2 {
 		t.Fatalf("expected 2 model requests, got %d", len(requests))
 	}
-	if requests[0].Prompt != "prompt-1" || requests[1].Prompt != "prompt-3" {
+	if requests[0].Prompt != "prompt-1" || requests[1].Prompt != "prompt-2" {
 		t.Fatalf("expected rebuilt prompts, got first=%q second=%q", requests[0].Prompt, requests[1].Prompt)
 	}
 	for index, request := range requests {
+		if len(request.Messages) != 0 {
+			t.Fatalf("request %d expected rendered-prompt fallback, got native messages %#v", index, request.Messages)
+		}
 		if len(request.Tools) != 1 {
 			t.Fatalf("request %d expected 1 tool definition, got %d", index, len(request.Tools))
 		}

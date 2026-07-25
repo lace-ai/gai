@@ -35,9 +35,15 @@ type PromptBuilder interface {
 	AppendSystemInstructions(ctx context.Context, instructions ...Part) error
 	BuildContext(ctx context.Context) ([]Part, error)
 	BuildPrompt(ctx context.Context, conv Conversation) (string, error)
-	BuildMessages(ctx context.Context, conv Conversation) ([]ai.RequestMessage, error)
 	Input() PromptInput
 	SetInput(input PromptInput)
+}
+
+// NativeMessageBuilder optionally exposes provider-neutral request messages.
+// PromptBuilder implementations that do not provide it continue to use the
+// rendered prompt as their request input.
+type NativeMessageBuilder interface {
+	BuildMessages(ctx context.Context, conv Conversation) ([]ai.RequestMessage, error)
 }
 
 // NativeConversation exposes provider-neutral conversation history alongside
