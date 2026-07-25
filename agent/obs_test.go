@@ -91,6 +91,59 @@ func TestAgentWorkflowEmitsLifecycleEventsAndSpans(t *testing.T) {
 	}
 }
 
+func TestAgentRunSpanIsParentOfWorkflow(t *testing.T) {
+	previousProvider := otel.GetTracerProvider()
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	otel.SetTracerProvider(provider)
+	t.Cleanup(func() {
+		_ = provider.Shutdown(context.Background())
+		otel.SetTracerProvider(previousProvider)
+	})
+
+	a := agent.New(agent.Definition{
+		Name:  "primary",
+		Model: &mocks.MockModel{Responses: []mocks.MockModelResponse{{Res: ai.AIResponse{Text: "done"}}}},
+		Prompt: func(_ context.Context, _ agent.RunInput) (gaictx.PromptBuilder, error) {
+			return &testPromptBuilder{}, nil
+		},
+	})
+	workflow, err := a.NewRun(t.Context(), agent.RunInput{ID: "run-42", Prompt: gaictx.PromptInput{User: gaictx.NewTextContent("question")}, Meta: map[string]any{"session_id": "session-1"}})
+	if err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	consumed := consumeWorkflow(t, workflow)
+	if len(consumed.errs) != 0 {
+		t.Fatalf("workflow errors: %v", consumed.errs)
+	}
+
+	var run, workflowSpan sdktrace.ReadOnlySpan
+	for _, span := range recorder.Ended() {
+		switch span.Name() {
+		case "agent.run":
+			run = span
+		case "agent.workflow.run":
+			workflowSpan = span
+		}
+	}
+	if run == nil || workflowSpan == nil {
+		t.Fatalf("expected agent.run and agent.workflow.run spans, got %#v", recorder.Ended())
+	}
+	if workflowSpan.Parent().SpanID() != run.SpanContext().SpanID() {
+		t.Fatalf("workflow span parent = %s, want run span %s", workflowSpan.Parent().SpanID(), run.SpanContext().SpanID())
+	}
+	attributes := map[string]any{}
+	for _, attribute := range run.Attributes() {
+		attributes[string(attribute.Key)] = attribute.Value.AsInterface()
+	}
+	if attributes["agent.run_id"] != "run-42" || attributes["agent.meta_key_count"] != int64(1) {
+		t.Fatalf("unexpected run attributes: %#v", attributes)
+	}
+	if _, leaked := attributes["agent.meta.session_id"]; leaked {
+		t.Fatalf("run span leaked metadata value: %#v", attributes)
+	}
+}
+
 func TestAgentObservabilityReportsCreationAndMiddlewareFailures(t *testing.T) {
 	sink := &agentDebugSink{}
 	_, err := agent.New(agent.Definition{Name: "broken", DebugSink: sink}).NewRun(t.Context(), textRunInput("question"))

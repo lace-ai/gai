@@ -584,10 +584,34 @@ middleware. `Complete` becomes true only after the final workflow streams close.
 
 Set `Definition.DebugSink` to receive structured agent lifecycle events for run
 creation, workflow start/completion, primary completion, and middleware
-start/skip/success/failure. Agent execution also emits `agent.run.create`,
-`agent.workflow.run`, and `agent.middleware.run` OpenTelemetry spans. Event
-payloads contain counts and policy names by default; input and output text are
-included only when `DebugSink.IncludeSensitiveData()` returns true.
+start/skip/success/failure. Each `Workflow.Run` creates a root `agent.run` span;
+workflow, loop-attempt, tool, and (where a provider emits them) model spans are its
+children. Span attributes
+contain run IDs, metadata key counts, model/tool names, counts, usage, and errors
+by default; prompts, completions, tool arguments/results, reasoning, and metadata
+values are never exported unless an application adds them deliberately.
+
+#### Langfuse (optional)
+
+GAI's observability boundary is OpenTelemetry, so it can use any compatible
+exporter without coupling core packages to a vendor SDK. The optional
+`observability/langfuse` package creates a batched OTLP provider for Langfuse;
+export happens asynchronously, so an exporter outage cannot change agent results.
+
+```go
+provider, err := langfuse.NewTracerProvider(ctx, langfuse.Config{
+  Endpoint:    "https://cloud.langfuse.com/api/public/otel",
+  PublicKey:   os.Getenv("LANGFUSE_PUBLIC_KEY"),
+  SecretKey:   os.Getenv("LANGFUSE_SECRET_KEY"),
+  ServiceName: "my-agent-service",
+})
+if err != nil { /* handle configuration error */ }
+defer provider.Shutdown(context.Background())
+otel.SetTracerProvider(provider)
+```
+
+Install/configure the provider before creating agents. The caller owns
+`Shutdown`, where a final export error can be observed.
 
 </details>
 
