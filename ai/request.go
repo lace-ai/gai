@@ -78,6 +78,7 @@ func (r AIRequest) ValidateMessages() error {
 			if m.ToolResult.Name != name {
 				return fmt.Errorf("tool result name %q does not match tool call %q", m.ToolResult.Name, name)
 			}
+			delete(seen, m.ToolResult.ToolCallID)
 		}
 	}
 	return nil
