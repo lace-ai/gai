@@ -1079,6 +1079,39 @@ func TestLoopNativeHistoryGroupsParallelToolCallsInOneAssistantMessage(t *testin
 	}
 }
 
+func TestLoopNativeHistoryKeepsMixedTextAndToolCallsInOneAssistantMessage(t *testing.T) {
+	t.Parallel()
+
+	model := &scriptedStreamModel{sequences: [][]ai.Token{
+		{
+			{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-1", Type: "function", Name: "echo", Args: json.RawMessage(`{"text":"payload"}`)}},
+			{Type: ai.TokenTypeText, Data: []byte("calling echo")},
+		},
+		{{Type: ai.TokenTypeText, Data: []byte("done")}},
+	}}
+	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, &stubPromptBuilder{systemPrompt: "system", userPrompt: "user"}, nil)
+	l.MaxLoopIterations = 3
+
+	if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+	requests := model.Requests()
+	if len(requests) != 2 {
+		t.Fatalf("requests = %d, want 2", len(requests))
+	}
+	second := requests[1]
+	if len(second.Messages) != 3 {
+		t.Fatalf("native messages = %#v, want base user, one mixed assistant turn, and one result", second.Messages)
+	}
+	assistant := second.Messages[1]
+	if assistant.Role != ai.RequestMessageRoleAssistant || assistant.Text != "calling echo" || len(assistant.ToolCalls) != 1 {
+		t.Fatalf("mixed assistant turn = %#v", assistant)
+	}
+	if result := second.Messages[2]; result.Role != ai.RequestMessageRoleTool || result.ToolResult == nil || result.ToolResult.ToolCallID != "call-1" {
+		t.Fatalf("tool result = %#v", result)
+	}
+}
+
 func TestIterationCountsLeadingThoughtTokens(t *testing.T) {
 	t.Parallel()
 

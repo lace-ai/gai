@@ -112,13 +112,14 @@ func (l *Loop) NativeMessages() []ai.RequestMessage {
 	}
 	iterations := l.Iterations
 	for _, iteration := range iterations {
+		var text string
 		var toolCalls []ai.RequestToolCall
 		var toolResults []ai.RequestMessage
 		for _, part := range iteration.Parts {
 			switch part.Type {
 			case IterationTypeResponse:
 				if part.Response != nil && part.Response.Text != "" {
-					messages = append(messages, ai.RequestMessage{Role: ai.RequestMessageRoleAssistant, Text: part.Response.Text})
+					text += part.Response.Text
 				}
 			case IterationTypeToolCall, IterationTypeToolError:
 				if part.ToolReq == nil {
@@ -140,8 +141,8 @@ func (l *Loop) NativeMessages() []ai.RequestMessage {
 				}
 			}
 		}
-		if len(toolCalls) > 0 {
-			messages = append(messages, ai.RequestMessage{Role: ai.RequestMessageRoleAssistant, ToolCalls: toolCalls})
+		if text != "" || len(toolCalls) > 0 {
+			messages = append(messages, ai.RequestMessage{Role: ai.RequestMessageRoleAssistant, Text: text, ToolCalls: toolCalls})
 			messages = append(messages, toolResults...)
 		}
 	}
