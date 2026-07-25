@@ -445,8 +445,12 @@ func (a *mistralToolCallAccumulator) ready(final bool) []ai.ToolCall {
 		if callType == "" {
 			callType = "function"
 		}
+		toolCallID := strings.TrimSpace(state.id.String())
+		if toolCallID == "" {
+			toolCallID = ai.GenerateToolCallID(toolName)
+		}
 		result = append(result, ai.ToolCall{
-			ID:   ai.GenerateToolCallID(toolName),
+			ID:   toolCallID,
 			Type: callType,
 			Name: toolName,
 			Args: args,

@@ -507,8 +507,8 @@ func TestModelGenerateStreamToolCall(t *testing.T) {
 	if tok.ToolCall == nil {
 		t.Fatal("expected ToolCall to be populated, got nil")
 	}
-	if !strings.HasPrefix(tok.ToolCall.ID, "call_my_tool_") {
-		t.Fatalf("expected generated ToolCall.ID for my_tool, got %q", tok.ToolCall.ID)
+	if tok.ToolCall.ID != "call_abc" {
+		t.Fatalf("expected provider ToolCall.ID=call_abc, got %q", tok.ToolCall.ID)
 	}
 	if tok.ToolCall.Type != "function" {
 		t.Fatalf("expected ToolCall.Type=function, got %q", tok.ToolCall.Type)
@@ -572,6 +572,9 @@ func TestModelGenerateStreamToolCallDeltas(t *testing.T) {
 	}
 	if tok.ToolCall == nil {
 		t.Fatal("expected ToolCall to be populated, got nil")
+	}
+	if tok.ToolCall.ID != "call_abc" {
+		t.Fatalf("expected accumulated provider ToolCall.ID=call_abc, got %q", tok.ToolCall.ID)
 	}
 	if tok.ToolCall.Name != "my_tool" {
 		t.Fatalf("expected ToolCall.Name=my_tool, got %q", tok.ToolCall.Name)
