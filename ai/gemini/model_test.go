@@ -1,10 +1,14 @@
 package gemini
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
 	"google.golang.org/genai"
 )
@@ -38,6 +42,78 @@ func TestMapFunctionCall(t *testing.T) {
 	if args["query"] != "hello" {
 		t.Fatalf("unexpected args: %#v", args)
 	}
+}
+
+func TestNativeContentsMapUserPayload(t *testing.T) {
+	contents, err := nativeContents(ai.AIRequest{Messages: []ai.RequestMessage{{Role: ai.RequestMessageRoleUser, Text: "initial request"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(contents) != 1 || contents[0].Role != genai.RoleUser || len(contents[0].Parts) != 1 || contents[0].Parts[0].Text != "initial request" {
+		t.Fatalf("contents = %#v", contents)
+	}
+}
+
+func TestNativeContentsAllowsFunctionNameAfterResult(t *testing.T) {
+	contents, err := nativeContents(ai.AIRequest{Messages: []ai.RequestMessage{
+		{Role: ai.RequestMessageRoleAssistant, ToolCalls: []ai.RequestToolCall{{ID: "call_1", Name: "echo", Arguments: json.RawMessage(`{"message":"first"}`)}}},
+		{Role: ai.RequestMessageRoleTool, ToolResult: &ai.RequestToolResult{ToolCallID: "call_1", Name: "echo", Content: "first"}},
+		{Role: ai.RequestMessageRoleAssistant, ToolCalls: []ai.RequestToolCall{{ID: "call_2", Name: "echo", Arguments: json.RawMessage(`{"message":"second"}`)}}},
+	}})
+	if err != nil {
+		t.Fatalf("nativeContents error: %v", err)
+	}
+	if len(contents) != 3 {
+		t.Fatalf("expected three contents, got %#v", contents)
+	}
+}
+
+func TestNativeContentsPreservesThoughtSignatureOnFunctionCall(t *testing.T) {
+	signature := []byte("opaque-thought-signature")
+	contents, err := nativeContents(ai.AIRequest{Messages: []ai.RequestMessage{
+		{Role: ai.RequestMessageRoleAssistant, ToolCalls: []ai.RequestToolCall{{
+			ID:               "call_1",
+			Name:             "echo",
+			Arguments:        json.RawMessage(`{"message":"hello"}`),
+			ThoughtSignature: signature,
+		}}},
+		{Role: ai.RequestMessageRoleTool, ToolResult: &ai.RequestToolResult{ToolCallID: "call_1", Name: "echo", Content: "hello"}},
+	}})
+	if err != nil {
+		t.Fatalf("nativeContents error: %v", err)
+	}
+	if got := contents[0].Parts[0].ThoughtSignature; string(got) != string(signature) {
+		t.Fatalf("thought signature = %q, want %q", got, signature)
+	}
+}
+
+func TestGenerateEmitsDebugEventOnGenerationFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, `{"error":{"message":"generation failed"}}`, http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	var events []gai.DebugEvent
+	provider := New("test-api-key", gai.DebugSinkFunc(func(_ context.Context, event gai.DebugEvent) {
+		events = append(events, event)
+	}))
+	provider.httpClient = server.Client()
+	provider.baseURL = server.URL
+	model, err := provider.Model("gemini-test")
+	if err != nil {
+		t.Fatalf("Model error: %v", err)
+	}
+
+	_, err = model.Generate(t.Context(), ai.AIRequest{Prompt: "hello"})
+	if err == nil {
+		t.Fatal("Generate error = nil, want API error")
+	}
+	for _, event := range events {
+		if event.Name == "gemini_generate_content_failed" && event.Err != nil {
+			return
+		}
+	}
+	t.Fatalf("gemini_generate_content_failed event not emitted: %#v", events)
 }
 
 func TestMapFunctionCallEmptyName(t *testing.T) {

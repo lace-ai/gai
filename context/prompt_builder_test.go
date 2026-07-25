@@ -97,6 +97,39 @@ func (c messageConversation) Messages() []Message {
 	return c.messages
 }
 
+type nativeMessageConversation struct {
+	messageConversation
+	nativeMessages []ai.RequestMessage
+}
+
+func (c nativeMessageConversation) NativeMessages() []ai.RequestMessage {
+	return c.nativeMessages
+}
+
+func TestBuildMessagesCombinesBasePromptAndNativeConversation(t *testing.T) {
+	t.Parallel()
+
+	builder := New(Definition{
+		SystemInstructions: []Part{NewTextPart("system")},
+		PromptInput:        PromptInput{User: NewTextContent("question")},
+	})
+	messages, err := builder.BuildMessages(context.Background(), nativeMessageConversation{
+		nativeMessages: []ai.RequestMessage{{Role: ai.RequestMessageRoleAssistant, Text: "answer"}},
+	})
+	if err != nil {
+		t.Fatalf("BuildMessages failed: %v", err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("messages = %#v, want base user and native assistant messages", messages)
+	}
+	if messages[0].Role != ai.RequestMessageRoleUser || !strings.Contains(messages[0].Text, "system") || !strings.Contains(messages[0].Text, "question") {
+		t.Fatalf("base message = %#v", messages[0])
+	}
+	if messages[1].Role != ai.RequestMessageRoleAssistant || messages[1].Text != "answer" {
+		t.Fatalf("native message = %#v", messages[1])
+	}
+}
+
 func TestBuildPromptRendersStructuredConversationContent(t *testing.T) {
 	t.Parallel()
 

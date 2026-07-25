@@ -293,11 +293,16 @@ type Model interface {
 </summary>
 
 Providers receive a rendered prompt string plus provider-neutral capability
-requests for native tools, structured responses, and reasoning:
+requests for native tools, structured responses, and reasoning. `AIRequest.Messages`
+optionally carries provider-neutral native conversation history (user, assistant,
+and tool-result messages). When `Messages` is non-empty, built-in providers send
+that native history instead of `Prompt`; when it is empty, `Prompt` remains the
+rendered compatibility fallback.
 
 ```go
 type AIRequest struct {
     Prompt         string
+    Messages       []RequestMessage
     MaxTokens      int
     Tools          []ToolDefinition
     ToolChoice     ToolChoice

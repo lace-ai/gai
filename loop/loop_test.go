@@ -87,6 +87,17 @@ type stubPromptBuilder struct {
 	buildContext func() string
 }
 
+type nonNilConversationPromptBuilder struct {
+	stubPromptBuilder
+}
+
+func (b *nonNilConversationPromptBuilder) BuildPrompt(ctx context.Context, conv gaictx.Conversation) (string, error) {
+	if conv == nil {
+		return "", errors.New("conversation must not be nil")
+	}
+	return b.stubPromptBuilder.BuildPrompt(ctx, conv)
+}
+
 func (b *stubPromptBuilder) PrependContextSource(ctx context.Context, source gaictx.ContextSource) error {
 	return nil
 }
@@ -124,8 +135,30 @@ func (b *stubPromptBuilder) BuildPrompt(ctx context.Context, conv gaictx.Convers
 		prompt.WriteString(b.userPrompt)
 		prompt.WriteString("\n")
 	}
-	prompt.WriteString(renderTestMessages(conv.Messages()))
+	if conv != nil {
+		prompt.WriteString(renderTestMessages(conv.Messages()))
+	}
 	return prompt.String(), nil
+}
+
+func (b *stubPromptBuilder) BuildMessages(ctx context.Context, conv gaictx.Conversation) ([]ai.RequestMessage, error) {
+	return testNativeMessages(ctx, b, conv)
+}
+
+type emptyPromptConversation struct{}
+
+func (emptyPromptConversation) Messages() []gaictx.Message { return nil }
+
+func testNativeMessages(ctx context.Context, builder gaictx.PromptBuilder, conv gaictx.Conversation) ([]ai.RequestMessage, error) {
+	base, err := builder.BuildPrompt(ctx, emptyPromptConversation{})
+	if err != nil {
+		return nil, err
+	}
+	messages := []ai.RequestMessage{{Role: ai.RequestMessageRoleUser, Text: base}}
+	if native, ok := conv.(gaictx.NativeConversation); ok {
+		messages = append(messages, native.NativeMessages()...)
+	}
+	return messages, nil
 }
 
 func (b *stubPromptBuilder) Input() gaictx.PromptInput {
@@ -580,6 +613,9 @@ func TestLoopWrapsToolPreprocessErrors(t *testing.T) {
 	if errorEvents[0].Iteration == nil || errorEvents[0].Iteration.UserMessage == nil {
 		t.Fatalf("expected failed tool-processing snapshot, got %#v", errorEvents[0].Iteration)
 	}
+	if len(errorEvents[0].Iteration.Parts) != 1 || errorEvents[0].Iteration.Parts[0].ToolResp == nil {
+		t.Fatalf("expected failed tool-processing snapshot to retain tool response, got %#v", errorEvents[0].Iteration)
+	}
 	if len(l.Iterations) != 0 {
 		t.Fatalf("expected preprocess failure to skip persisted iteration, got %d", len(l.Iterations))
 	}
@@ -928,7 +964,7 @@ func TestLoopFallsBackToBuildPromptEveryIteration(t *testing.T) {
 	}
 
 	if got := promptBuilder.count.Load(); got != 2 {
-		t.Fatalf("expected non-incremental prompt builder to run twice, got %d", got)
+		t.Fatalf("expected prompt builder to render once per iteration, got %d", got)
 	}
 	requests := model.Requests()
 	if len(requests) != 2 {
@@ -938,12 +974,140 @@ func TestLoopFallsBackToBuildPromptEveryIteration(t *testing.T) {
 		t.Fatalf("expected rebuilt prompts, got first=%q second=%q", requests[0].Prompt, requests[1].Prompt)
 	}
 	for index, request := range requests {
+		if len(request.Messages) != 0 {
+			t.Fatalf("request %d expected rendered-prompt fallback, got native messages %#v", index, request.Messages)
+		}
 		if len(request.Tools) != 1 {
 			t.Fatalf("request %d expected 1 tool definition, got %d", index, len(request.Tools))
 		}
 		if request.Tools[0].Name != "echo" {
 			t.Fatalf("request %d expected echo tool definition, got %#v", index, request.Tools[0])
 		}
+	}
+}
+
+func TestLoopNativeHistoryIncludesBaseRequestWithoutRenderedHistory(t *testing.T) {
+	t.Parallel()
+
+	model := &scriptedStreamModel{sequences: [][]ai.Token{
+		{{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-1", Type: "function", Name: "echo", Args: json.RawMessage(`{"text":"payload"}`), ThoughtSignature: []byte("opaque-thought-signature")}}},
+		{{Type: ai.TokenTypeText, Data: []byte("done")}},
+	}}
+	promptBuilder := &stubPromptBuilder{systemPrompt: "system", userPrompt: "user"}
+	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, promptBuilder, nil)
+	l.MaxLoopIterations = 3
+
+	if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+	requests := model.Requests()
+	if len(requests) != 2 {
+		t.Fatalf("requests = %d, want 2", len(requests))
+	}
+	second := requests[1]
+	if len(second.Messages) != 3 {
+		t.Fatalf("native messages = %#v, want base user plus assistant/tool history", second.Messages)
+	}
+	if base := second.Messages[0]; base.Role != ai.RequestMessageRoleUser || base.Text != "system\nuser\n" {
+		t.Fatalf("base native message = %#v", base)
+	}
+	if strings.Contains(second.Messages[0].Text, "payload") {
+		t.Fatalf("base native message duplicated rendered history: %q", second.Messages[0].Text)
+	}
+	if second.Messages[1].Role != ai.RequestMessageRoleAssistant || len(second.Messages[1].ToolCalls) != 1 || second.Messages[2].Role != ai.RequestMessageRoleTool {
+		t.Fatalf("native history = %#v", second.Messages)
+	}
+	if got := string(second.Messages[1].ToolCalls[0].ThoughtSignature); got != "opaque-thought-signature" {
+		t.Fatalf("thought signature = %q", got)
+	}
+	if !strings.Contains(second.Prompt, "payload") {
+		t.Fatalf("complete rendered fallback omitted tool history: %q", second.Prompt)
+	}
+}
+
+func TestLoopBuildsBasePromptWithNonNilConversation(t *testing.T) {
+	t.Parallel()
+
+	model := &scriptedStreamModel{sequences: [][]ai.Token{{{Type: ai.TokenTypeText, Data: []byte("done")}}}}
+	promptBuilder := &nonNilConversationPromptBuilder{stubPromptBuilder: stubPromptBuilder{systemPrompt: "system", userPrompt: "user"}}
+	l := loop.New(model, nil, promptBuilder, nil)
+
+	if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+	requests := model.Requests()
+	if len(requests) != 1 {
+		t.Fatalf("requests = %d, want 1", len(requests))
+	}
+	if len(requests[0].Messages) != 1 || requests[0].Messages[0].Text != "system\nuser\n" {
+		t.Fatalf("base native message = %#v", requests[0].Messages)
+	}
+}
+
+func TestLoopNativeHistoryGroupsParallelToolCallsInOneAssistantMessage(t *testing.T) {
+	t.Parallel()
+
+	model := &scriptedStreamModel{sequences: [][]ai.Token{
+		{
+			{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-1", Type: "function", Name: "echo", Args: json.RawMessage(`{"text":"first"}`)}},
+			{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-2", Type: "function", Name: "echo", Args: json.RawMessage(`{"text":"second"}`)}},
+		},
+		{{Type: ai.TokenTypeText, Data: []byte("done")}},
+	}}
+	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, &stubPromptBuilder{systemPrompt: "system", userPrompt: "user"}, nil)
+	l.MaxLoopIterations = 3
+
+	if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+	requests := model.Requests()
+	if len(requests) != 2 {
+		t.Fatalf("requests = %d, want 2", len(requests))
+	}
+	second := requests[1]
+	if len(second.Messages) != 4 {
+		t.Fatalf("native messages = %#v, want base user, one assistant tool-call turn, and two results", second.Messages)
+	}
+	if assistant := second.Messages[1]; assistant.Role != ai.RequestMessageRoleAssistant || len(assistant.ToolCalls) != 2 {
+		t.Fatalf("assistant tool-call turn = %#v, want two tool calls", assistant)
+	}
+	for i, message := range second.Messages[2:] {
+		if message.Role != ai.RequestMessageRoleTool {
+			t.Fatalf("tool result message %d = %#v", i, message)
+		}
+	}
+}
+
+func TestLoopNativeHistoryKeepsMixedTextAndToolCallsInOneAssistantMessage(t *testing.T) {
+	t.Parallel()
+
+	model := &scriptedStreamModel{sequences: [][]ai.Token{
+		{
+			{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-1", Type: "function", Name: "echo", Args: json.RawMessage(`{"text":"payload"}`)}},
+			{Type: ai.TokenTypeText, Data: []byte("calling echo")},
+		},
+		{{Type: ai.TokenTypeText, Data: []byte("done")}},
+	}}
+	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, &stubPromptBuilder{systemPrompt: "system", userPrompt: "user"}, nil)
+	l.MaxLoopIterations = 3
+
+	if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+	requests := model.Requests()
+	if len(requests) != 2 {
+		t.Fatalf("requests = %d, want 2", len(requests))
+	}
+	second := requests[1]
+	if len(second.Messages) != 3 {
+		t.Fatalf("native messages = %#v, want base user, one mixed assistant turn, and one result", second.Messages)
+	}
+	assistant := second.Messages[1]
+	if assistant.Role != ai.RequestMessageRoleAssistant || assistant.Text != "calling echo" || len(assistant.ToolCalls) != 1 {
+		t.Fatalf("mixed assistant turn = %#v", assistant)
+	}
+	if result := second.Messages[2]; result.Role != ai.RequestMessageRoleTool || result.ToolResult == nil || result.ToolResult.ToolCallID != "call-1" {
+		t.Fatalf("tool result = %#v", result)
 	}
 }
 

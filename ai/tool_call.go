@@ -23,6 +23,9 @@ type ToolCall struct {
 	Name string
 	// Args contains the function arguments as JSON.
 	Args json.RawMessage
+	// ThoughtSignature is opaque provider state that must accompany a tool call
+	// in a subsequent provider-native history request.
+	ThoughtSignature []byte
 }
 
 // Validate checks that the tool call has an ID, the "function" type, and a

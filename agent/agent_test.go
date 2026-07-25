@@ -51,6 +51,10 @@ func (b *testPromptBuilder) BuildPrompt(ctx context.Context, conv gaictx.Convers
 	return b.prompt, nil
 }
 
+func (b *testPromptBuilder) BuildMessages(ctx context.Context, conv gaictx.Conversation) ([]ai.RequestMessage, error) {
+	return []ai.RequestMessage{{Role: ai.RequestMessageRoleUser, Text: b.prompt}}, nil
+}
+
 func (b *testPromptBuilder) Input() gaictx.PromptInput {
 	return b.input.Clone()
 }
