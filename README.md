@@ -529,11 +529,35 @@ The `agent/summary` package is a built-in component. `summary.Definition` return
 
 </summary>
 
-`Agent.NewRun` creates a single-use `Workflow`. Calling `Workflow.Run` starts the
-primary loop and passes its stream through every entry in `Definition.Middleware`
-in declaration order. Callers must consume the token, status, and error channels.
-After they close, `Workflow.Result()` contains the immutable primary result, the
-final visible output, accumulated errors, and named middleware stages.
+`Agent.NewRun` creates a single-use `Workflow`. For consumers that need one
+causally ordered primary-agent stream, call `Workflow.RunEvents`:
+
+```go
+for event := range workflow.RunEvents(ctx) {
+  switch event.Type {
+  case loop.EventToken:
+    fmt.Print(event.Token.Text)
+  case loop.EventRetry:
+    // Remove output associated with event.AttemptID from the visible transcript.
+  case loop.EventIterationDone, loop.EventDone:
+    // Read completion metadata in event.
+  case loop.EventError, loop.EventCanceled:
+    // Handle terminal failure or cancellation.
+  }
+}
+```
+
+`RunEvents` forwards the loop's ordered events unchanged, including attempt
+starts, tokens, retry rollbacks, completed iterations, errors, cancellation, and
+done. It is the preferred API for new primary-agent streaming consumers.
+
+`Workflow.Run` remains the compatibility API for middleware workflows. It starts
+the primary loop and passes its stream through every entry in
+`Definition.Middleware` in declaration order. Callers must consume the token,
+status, and error channels. After they close, `Workflow.Result()` contains the
+immutable primary result, the final visible output, accumulated errors, and named
+middleware stages. The legacy middleware interface has separate channels, so it
+cannot preserve a total event order; use `Run` when middleware output is needed.
 
 An ordinary agent can become middleware with `NewAgentMiddleware`. By default it
 receives the current visible text as named `upstream_output` context, plus the

@@ -160,25 +160,31 @@ func middlewareIsNil(item Middleware) bool {
 	}
 }
 
-// Run starts the workflow and returns the final transformed stream. Callers must
-// consume all three channels. It can be called only once.
+// RunEvents starts the workflow and returns its ordered primary-agent event stream.
+// The stream is the preferred API for consumers that need causal ordering between
+// tokens, retries, completed iterations, errors, and cancellation. It can be
+// called only once. Middleware remains available through Run because the legacy
+// three-channel Middleware interface cannot preserve a total event order.
+func (w *Workflow) RunEvents(ctx context.Context) <-chan loop.Event {
+	if err := w.begin(); err != nil {
+		return failedEventStream(err)
+	}
+	return w.Loop.Run(ctx)
+}
+
+// Run starts the workflow and returns the final transformed stream. Deprecated:
+// prefer RunEvents for new consumers. Callers must consume all three channels.
+// It can be called only once.
 func (w *Workflow) Run(ctx context.Context) (<-chan ai.Token, <-chan loop.IterationInformation, <-chan error) {
-	if w == nil || w.Loop == nil {
-		return failedStream(ErrWorkflowNotConfigured)
+	if err := w.begin(); err != nil {
+		return failedStream(err)
 	}
-
-	w.mu.Lock()
-	if w.started {
-		w.mu.Unlock()
-		return failedStream(ErrWorkflowAlreadyRun)
-	}
-	w.started = true
-	w.mu.Unlock()
-
 	ctx, runObs := newAgentRunObserver(ctx, w)
 	ctx, obs := newWorkflowObserver(ctx, w)
+	events := w.Loop.Run(ctx)
+
 	obs.Started(ctx)
-	stream := w.capturePrimary(ctx, loopEventsToStream(ctx, w.Loop.Run(ctx)), obs)
+	stream := w.capturePrimary(ctx, loopEventsToStream(ctx, events), obs)
 	run := &MiddlewareContext{workflow: w}
 	for _, middleware := range w.middleware {
 		stream = middleware.Process(ctx, run, stream)
@@ -410,6 +416,27 @@ func captureStream(ctx context.Context, upstream Stream, completed func(captured
 	}()
 
 	return Stream{Tokens: tokens, Statuses: statuses, Errors: errs}
+}
+
+func (w *Workflow) begin() error {
+	if w == nil || w.Loop == nil {
+		return ErrWorkflowNotConfigured
+	}
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.started {
+		return ErrWorkflowAlreadyRun
+	}
+	w.started = true
+	return nil
+}
+
+func failedEventStream(err error) <-chan loop.Event {
+	events := make(chan loop.Event, 1)
+	events <- loop.ErrorEvent(err)
+	close(events)
+	return events
 }
 
 func failedStream(err error) (<-chan ai.Token, <-chan loop.IterationInformation, <-chan error) {

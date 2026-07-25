@@ -3,6 +3,7 @@ package agent_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -357,4 +358,64 @@ func TestAgentWorkflowEndToEndWithAppendMiddleware(t *testing.T) {
 	if len(result.Stages) != 1 || result.Stages[0].Name != "audit" || result.Stages[0].Result.Text != " audited" {
 		t.Fatalf("unexpected middleware stages: %+v", result.Stages)
 	}
+}
+
+func TestAgentWorkflowRunEventsPreservesRetryOrdering(t *testing.T) {
+	model := &scriptedWorkflowModel{
+		scripts: [][]ai.Token{
+			{
+				{Type: ai.TokenTypeText, Text: "partial"},
+				{Err: errors.New("retriable stream error")},
+			},
+			{{Type: ai.TokenTypeText, Text: "final"}},
+		},
+	}
+	assistant := agent.New(agent.Definition{
+		Name:  "retry-events",
+		Model: model,
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return gaictx.New(gaictx.Definition{Renderer: &gaictx.SimpleRenderer{}}), nil
+		},
+		Limits: agent.Limits{MaxLoopIterations: 1},
+	})
+
+	workflow, err := assistant.NewRun(context.Background(), textRunInput("retry"))
+	if err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	workflow.Loop.RetryCount = 1
+
+	var events []loop.Event
+	for event := range workflow.RunEvents(context.Background()) {
+		events = append(events, event)
+	}
+
+	if got, want := eventTypes(events), []loop.EventType{
+		loop.EventAttemptStart,
+		loop.EventToken,
+		loop.EventRetry,
+		loop.EventAttemptStart,
+		loop.EventToken,
+		loop.EventIterationDone,
+		loop.EventDone,
+	}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected event order: got %v want %v", got, want)
+	}
+	if events[1].Token == nil || events[1].Token.Text != "partial" || events[1].AttemptID != 1 {
+		t.Fatalf("unexpected first token event: %#v", events[1])
+	}
+	if events[2].AttemptID != 1 || events[2].RetryCount != 1 || events[2].Iteration == nil {
+		t.Fatalf("retry event did not preserve attempt metadata: %#v", events[2])
+	}
+	if events[4].Token == nil || events[4].Token.Text != "final" || events[4].AttemptID != 2 {
+		t.Fatalf("unexpected final token event: %#v", events[4])
+	}
+}
+
+func eventTypes(events []loop.Event) []loop.EventType {
+	types := make([]loop.EventType, len(events))
+	for i, event := range events {
+		types[i] = event.Type
+	}
+	return types
 }
