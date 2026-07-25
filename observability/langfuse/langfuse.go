@@ -50,7 +50,8 @@ func NewTracerProvider(ctx context.Context, config Config) (*sdktrace.TracerProv
 	exporter, err := otlptracehttp.New(ctx,
 		otlptracehttp.WithEndpointURL(endpoint),
 		otlptracehttp.WithHeaders(map[string]string{
-			"Authorization": "Basic " + base64.StdEncoding.EncodeToString([]byte(publicKey+":"+secretKey)),
+			"Authorization":                "Basic " + base64.StdEncoding.EncodeToString([]byte(publicKey+":"+secretKey)),
+			"x-langfuse-ingestion-version": "4",
 		}),
 	)
 	if err != nil {
