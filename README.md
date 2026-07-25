@@ -52,9 +52,9 @@ go get github.com/lace-ai/gai
 ### 🧭 Usage
 
 The shortest path is to create a provider model, define an agent, create a
-single-use workflow, and consume all three workflow streams. Import GAI's
+single-use workflow, and consume its ordered event stream. Import GAI's
 `context` package with an alias so it does not conflict with the standard
-library package.
+library package, and import `loop` for the event types.
 
 ```go
 provider := gemini.New(os.Getenv("GEMINI_API_KEY"), nil)
@@ -84,32 +84,15 @@ if err != nil {
   return err
 }
 
-tokens, statuses, errs := workflow.Run(ctx)
-statusDone := make(chan struct{})
-go func() {
-  defer close(statusDone)
-  for range statuses {
-  }
-}()
-
-var runErr error
-errorDone := make(chan struct{})
-go func() {
-  defer close(errorDone)
-  for err := range errs {
-    if err != nil && runErr == nil {
-      runErr = err
+for event := range workflow.RunEvents(ctx) {
+  switch event.Type {
+  case loop.EventToken:
+    if event.Token != nil {
+      fmt.Print(event.Token.Text)
     }
+  case loop.EventError:
+    return event.Err
   }
-}()
-
-for token := range tokens {
-  fmt.Print(token.Text)
-}
-<-statusDone
-<-errorDone
-if runErr != nil {
-  return runErr
 }
 
 result := workflow.Result()
@@ -529,11 +512,35 @@ The `agent/summary` package is a built-in component. `summary.Definition` return
 
 </summary>
 
-`Agent.NewRun` creates a single-use `Workflow`. Calling `Workflow.Run` starts the
-primary loop and passes its stream through every entry in `Definition.Middleware`
-in declaration order. Callers must consume the token, status, and error channels.
-After they close, `Workflow.Result()` contains the immutable primary result, the
-final visible output, accumulated errors, and named middleware stages.
+`Agent.NewRun` creates a single-use `Workflow`. For consumers that need one
+causally ordered primary-agent stream, call `Workflow.RunEvents`:
+
+```go
+for event := range workflow.RunEvents(ctx) {
+  switch event.Type {
+  case loop.EventToken:
+    fmt.Print(event.Token.Text)
+  case loop.EventRetry:
+    // Remove output associated with event.AttemptID from the visible transcript.
+  case loop.EventIterationDone, loop.EventDone:
+    // Read completion metadata in event.
+  case loop.EventError, loop.EventCanceled:
+    // Handle terminal failure or cancellation.
+  }
+}
+```
+
+`RunEvents` forwards the loop's ordered events unchanged, including attempt
+starts, tokens, retry rollbacks, completed iterations, errors, cancellation, and
+done. It is the preferred API for new primary-agent streaming consumers.
+
+`Workflow.Run` remains the compatibility API for middleware workflows. It starts
+the primary loop and passes its stream through every entry in
+`Definition.Middleware` in declaration order. Callers must consume the token,
+status, and error channels. After they close, `Workflow.Result()` contains the
+immutable primary result, the final visible output, accumulated errors, and named
+middleware stages. The legacy middleware interface has separate channels, so it
+cannot preserve a total event order; use `Run` when middleware output is needed.
 
 An ordinary agent can become middleware with `NewAgentMiddleware`. By default it
 receives the current visible text as named `upstream_output` context, plus the
