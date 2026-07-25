@@ -410,6 +410,10 @@ func TestAgentWorkflowRunEventsPreservesRetryOrdering(t *testing.T) {
 	if events[4].Token == nil || events[4].Token.Text != "final" || events[4].AttemptID != 2 {
 		t.Fatalf("unexpected final token event: %#v", events[4])
 	}
+	result := workflow.Result()
+	if !result.Complete || result.Text != "partialfinal" || result.Primary.Text != "partialfinal" {
+		t.Fatalf("RunEvents did not finalize workflow result: %+v", result)
+	}
 }
 
 func eventTypes(events []loop.Event) []loop.EventType {

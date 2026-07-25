@@ -169,7 +169,10 @@ func (w *Workflow) RunEvents(ctx context.Context) <-chan loop.Event {
 	if err := w.begin(); err != nil {
 		return failedEventStream(err)
 	}
-	return w.Loop.Run(ctx)
+	ctx, runObs := newAgentRunObserver(ctx, w)
+	ctx, obs := newWorkflowObserver(ctx, w)
+	obs.Started(ctx)
+	return w.captureEvents(ctx, w.Loop.Run(ctx), obs, runObs)
 }
 
 // Run starts the workflow and returns the final transformed stream. Deprecated:
@@ -324,6 +327,61 @@ func (w *Workflow) captureFinal(ctx context.Context, upstream Stream, obs *workf
 		obs.Finished(ctx, result)
 		runObs.Finished(result)
 	})
+}
+
+func (w *Workflow) captureEvents(ctx context.Context, upstream <-chan loop.Event, obs *workflowObserver, runObs *agentRunObserver) <-chan loop.Event {
+	events := make(chan loop.Event, 32)
+	go func() {
+		defer close(events)
+
+		var tokens []ai.Token
+		var errs []error
+		var canceled bool
+		var cancellationErr error
+		for event := range upstream {
+			switch event.Type {
+			case loop.EventToken:
+				if event.Token != nil {
+					tokens = append(tokens, *event.Token)
+				}
+			case loop.EventError:
+				if event.Err != nil {
+					errs = append(errs, event.Err)
+				}
+			case loop.EventCanceled:
+				canceled = true
+				cancellationErr = event.Err
+			}
+			events <- event
+		}
+
+		primary := AgentResult{
+			Tokens:          cloneTokens(tokens),
+			Text:            tokenText(tokens),
+			Reasoning:       tokenReasoning(tokens),
+			Messages:        cloneMessages(w.Loop.Messages()),
+			Iterations:      cloneIterations(w.Loop.Iterations),
+			Errors:          append([]error(nil), errs...),
+			Canceled:        canceled,
+			CancellationErr: cancellationErr,
+		}
+		w.mu.Lock()
+		w.result.Primary = primary
+		w.result.Tokens = cloneTokens(tokens)
+		w.result.Text = primary.Text
+		w.result.Reasoning = primary.Reasoning
+		w.result.Errors = append([]error(nil), errs...)
+		w.result.Canceled = canceled
+		w.result.CancellationErr = cancellationErr
+		w.result.Complete = true
+		result := cloneWorkflowResult(w.result)
+		w.mu.Unlock()
+
+		obs.PrimaryFinished(ctx, primary)
+		obs.Finished(ctx, result)
+		runObs.Finished(result)
+	}()
+	return events
 }
 
 func (w *Workflow) addStage(stage StageResult, tokens []ai.Token) {
