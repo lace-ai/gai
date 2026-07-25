@@ -101,6 +101,31 @@ func TestNativeMessagesMapUserPayload(t *testing.T) {
 	}
 }
 
+func TestNativeMessagesGroupAdjacentToolResults(t *testing.T) {
+	messages, err := mapNativeMessages([]ai.RequestMessage{
+		{Role: ai.RequestMessageRoleTool, ToolResult: &ai.RequestToolResult{ToolCallID: "call_1", Name: "search", Content: "first"}},
+		{Role: ai.RequestMessageRoleTool, ToolResult: &ai.RequestToolResult{ToolCallID: "call_2", Name: "lookup", Content: "second", IsError: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(messages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload []map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload) != 1 || payload[0]["role"] != "user" {
+		t.Fatalf("payload = %#v", payload)
+	}
+	content := array(t, payload[0]["content"])
+	if len(content) != 2 || object(t, content[0])["tool_use_id"] != "call_1" || object(t, content[1])["tool_use_id"] != "call_2" || object(t, content[1])["is_error"] != true {
+		t.Fatalf("tool result content = %#v", content)
+	}
+}
+
 func TestGenerateMapsCapabilitiesAndRejectsUnsupportedResponseFormat(t *testing.T) {
 	var got map[string]any
 	m := testModel(t, func(w http.ResponseWriter, r *http.Request) {

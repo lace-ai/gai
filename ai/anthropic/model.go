@@ -135,13 +135,22 @@ func buildMessagesRequest(req ai.AIRequest, model string) (antropic.MessageNewPa
 
 func mapNativeMessages(messages []ai.RequestMessage) ([]antropic.MessageParam, error) {
 	out := make([]antropic.MessageParam, 0, len(messages))
+	toolResults := []antropic.ContentBlockParamUnion{}
+	flushToolResults := func() {
+		if len(toolResults) == 0 {
+			return
+		}
+		out = append(out, antropic.NewUserMessage(toolResults...))
+		toolResults = nil
+	}
 	for _, m := range messages {
-		if m.Role == ai.RequestMessageRoleUser {
-			out = append(out, antropic.NewUserMessage(antropic.NewTextBlock(m.Text)))
+		if m.Role == ai.RequestMessageRoleTool {
+			toolResults = append(toolResults, antropic.NewToolResultBlock(m.ToolResult.ToolCallID, m.ToolResult.Content, m.ToolResult.IsError))
 			continue
 		}
-		if m.Role == ai.RequestMessageRoleTool {
-			out = append(out, antropic.NewUserMessage(antropic.NewToolResultBlock(m.ToolResult.ToolCallID, m.ToolResult.Content, m.ToolResult.IsError)))
+		flushToolResults()
+		if m.Role == ai.RequestMessageRoleUser {
+			out = append(out, antropic.NewUserMessage(antropic.NewTextBlock(m.Text)))
 			continue
 		}
 		blocks := []antropic.ContentBlockParamUnion{}
@@ -157,6 +166,7 @@ func mapNativeMessages(messages []ai.RequestMessage) ([]antropic.MessageParam, e
 		}
 		out = append(out, antropic.NewAssistantMessage(blocks...))
 	}
+	flushToolResults()
 	return out, nil
 }
 
