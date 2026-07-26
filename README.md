@@ -9,10 +9,10 @@
         <img alt="GitHub go.mod Go version" src="https://img.shields.io/github/go-mod/go-version/lace-ai/gai" style="margin: 0 6px;">
     </a>
     <a href="https://github.com/lace-ai/gai/actions">
-        <img alt="CI" src="https://img.shields.io/badge/ci-passing-brightgreen.svg" style="margin: 0 6px;">
+        <img alt="CI" src="https://github.com/lace-ai/gai/actions/workflows/go.yml/badge.svg" style="margin: 0 6px;">
     </a>
     <a href="https://github.com/lace-ai/gai/blob/main/LICENSE">
-        <img alt="License" src="https://img.shields.io/badge/license-LGPL-informational.svg" style="margin: 0 6px;">
+        <img alt="License" src="https://img.shields.io/badge/license-MIT-informational.svg" style="margin: 0 6px;">
     </a>
     <a href="https://pkg.go.dev/github.com/lace-ai/gai"><img src="https://pkg.go.dev/badge/github.com/lace-ai/gai.svg" alt="Go Reference"></a>
 </p>
@@ -34,7 +34,8 @@ The library is organized around four layers:
 - 🤖 `agent` packages a model, tools, prompt factory, tokenizer, loop limits, debug sink, and stream middleware into reusable workflow definitions.
 
 The intended use is to compose application-specific agents without coupling the
-rest of your code to Gemini, Mistral, or any other provider adapter.
+rest of your code to Anthropic, Gemini, Mistral, OpenAI, or any other provider
+adapter.
 
 ## 📋 Requirements
 
@@ -195,7 +196,7 @@ fmt.Println(res.Text)
 
 ```text
 agent/          Reusable agent definitions and built-in components such as the summary agent.
-ai/             Provider, model, tokenizer, request, and response abstractions, plus Gemini and Mistral.
+ai/             Provider, model, tokenizer, request, and response abstractions, plus Anthropic, Gemini, Mistral, and OpenAI.
 context/        Prompt construction, parts, rendering, messages, and conversation interfaces.
 context/history Persisted history sources and optional history summarization.
 loop/           Model/tool execution loop and tool helpers.
@@ -299,9 +300,10 @@ Constructor:
 anthropic.New(apiKey string, debug gai.DebugSink) *anthropic.Provider
 ```
 
-The provider uses Anthropic's Messages API. GAI currently sends the rendered
-prompt as one user message; it does not yet map native multi-turn messages.
-JSON Schema response formats use Anthropic's GA `output_config.format` API.
+The provider uses Anthropic's Messages API. When `AIRequest.Messages` is
+non-empty, GAI maps native user, assistant, and tool-result history; otherwise
+it sends the rendered prompt as one user message. JSON Schema response formats
+use Anthropic's GA `output_config.format` API.
 
 Models are discovered dynamically from Anthropic's Models API by `ListModels()`.
 If discovery is unavailable, it falls back to these bundled current aliases and
@@ -309,6 +311,31 @@ dated/legacy IDs:
 
 - Current: `claude-fable-5`, `claude-mythos-5`, `claude-opus-4-8`, `claude-sonnet-5`, `claude-opus-4-7`, `claude-opus-4-6`, `claude-sonnet-4-6`, `claude-opus-4-5`, `claude-sonnet-4-5`, `claude-haiku-4-5`, and `claude-opus-4-1`
 - Dated: `claude-opus-4-5-20251101`, `claude-sonnet-4-5-20250929`, `claude-haiku-4-5-20251001`, and `claude-opus-4-1-20250805`
+
+</details>
+
+<details>
+
+<summary>
+
+### 🟢 OpenAI
+
+</summary>
+
+Package: `ai/openai`
+
+Constructor:
+
+```go
+openai.New(apiKey string, debug gai.DebugSink) *openai.Provider
+```
+
+The provider uses OpenAI's Chat Completions API. `Model(name)` accepts a
+non-empty chat-completions model ID; `ListModels()` discovers compatible models
+from the Models API and falls back to a bundled catalog when discovery is
+unavailable. Native history, function tools/tool choice, JSON object and JSON
+Schema responses, streaming, and low/medium/high reasoning effort for supported
+reasoning models are available.
 
 </details>
 
@@ -773,6 +800,6 @@ If you add a new provider or tool, document the new constructor, model names, an
 
 ## 📜 Copyright and License
 
-This library is licensed under the GNU LESSER GENERAL PUBLIC LICENSE v2.1. See [LICENSE](LICENSE) for details.
+GAI is available under the [MIT License](LICENSE).
 
-Copyright (c) 2026 lace-ai. All rights reserved.
+Copyright (c) 2026 Samuel Konrad.
