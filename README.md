@@ -735,9 +735,9 @@ Tool calls are expected to arrive as JSON with this shape:
 ```
 
 Tool call IDs are generated internally by the runtime and are not model-controlled.
-When a provider supports native tool calling, the loop sends tool definitions
-through `AIRequest.Tools`. Prompt-rendered JSON tool calls are retained as a
-fallback compatibility protocol.
+Models that implement `ai.NativeToolModel` receive tool definitions through
+`AIRequest.Tools` without the prompt-rendered JSON tool protocol. Models that
+do not implement it retain that text protocol as a compatibility fallback.
 
 </details>
 
