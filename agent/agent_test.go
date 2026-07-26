@@ -28,6 +28,12 @@ type nativeToolWorkflowModel struct {
 
 func (nativeToolWorkflowModel) NativeTools() bool { return true }
 
+type disabledNativeToolWorkflowModel struct {
+	*scriptedWorkflowModel
+}
+
+func (disabledNativeToolWorkflowModel) NativeTools() bool { return false }
+
 func (s testContextSource) Name() string { return s.name }
 func (s testContextSource) Function(context.Context, int) (gaictx.Part, error) {
 	return gaictx.NewTextPart(s.name), nil
@@ -214,6 +220,37 @@ func TestAgentNativeToolModelOmitsPromptToolProtocol(t *testing.T) {
 	}
 	if strings.Contains(requests[0].Prompt, `{"type":"function","name":"<tool-name>","arguments":{...}}`) {
 		t.Fatalf("native tool model request included prompt tool protocol:\n%s", requests[0].Prompt)
+	}
+}
+
+func TestAgentNativeToolModelWithoutSupportAddsPromptToolProtocol(t *testing.T) {
+	t.Parallel()
+
+	builder := gaictx.New(gaictx.Definition{Renderer: &gaictx.SimpleRenderer{}})
+	assistant := agent.New(agent.Definition{
+		Model: disabledNativeToolWorkflowModel{&scriptedWorkflowModel{}},
+		Tools: []loop.Tool{loop.NewEchoTool()},
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return builder, nil
+		},
+	})
+
+	run, err := assistant.NewRun(context.Background(), textRunInput("use echo"))
+	if err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	if len(builder.ContextSources) != 1 || builder.ContextSources[0].Name() != "tool_definitions" {
+		t.Fatalf("disabled native tool model did not add prompt tool protocol: %+v", builder.ContextSources)
+	}
+	if _, err := run.Loop.PromptBuilder.BuildContext(context.Background()); err != nil {
+		t.Fatalf("BuildContext failed: %v", err)
+	}
+	prompt, err := run.Loop.PromptBuilder.BuildPrompt(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("BuildPrompt failed: %v", err)
+	}
+	if !strings.Contains(prompt, `{"type":"function","name":"<tool-name>","arguments":{...}}`) {
+		t.Fatalf("disabled native tool model prompt missing tool protocol:\n%s", prompt)
 	}
 }
 
