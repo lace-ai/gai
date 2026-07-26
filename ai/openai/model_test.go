@@ -174,6 +174,15 @@ func TestBuildChatCompletionParamsRejectsReasoningEffortForNonReasoningModels(t 
 	}
 }
 
+func TestBuildChatCompletionParamsAssumesPrevalidatedRequest(t *testing.T) {
+	if _, err := buildChatCompletionParams(GPT41Mini, ai.AIRequest{
+		Prompt:     "hello",
+		ToolChoice: ai.ToolChoice{Mode: ai.ToolChoiceAuto},
+	}, false); err != nil {
+		t.Fatalf("buildChatCompletionParams returned error: %v", err)
+	}
+}
+
 func TestModelPreflightRejectsUnsupportedBeforeTransport(t *testing.T) {
 	requests := 0
 	ts := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requests++ }))

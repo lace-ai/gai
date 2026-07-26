@@ -167,9 +167,6 @@ func sendStreamToolCalls(ctx context.Context, out chan<- ai.Token, calls map[int
 }
 
 func buildChatCompletionParams(model string, req ai.AIRequest, stream bool) (sdk.ChatCompletionNewParams, error) {
-	if err := req.Validate(); err != nil {
-		return sdk.ChatCompletionNewParams{}, err
-	}
 	params := sdk.ChatCompletionNewParams{Model: shared.ChatModel(model), Messages: []sdk.ChatCompletionMessageParamUnion{sdk.UserMessage(req.Prompt)}}
 	if len(req.Messages) > 0 {
 		messages, err := mapNativeMessages(req.Messages)
