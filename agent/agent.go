@@ -43,10 +43,11 @@ type Definition struct {
 	Name string
 	// Model performs the agent's model calls.
 	Model ai.Model
-	// Tools are available to the model during loop execution. For models that do
-	// not implement ai.NativeToolModel, their definitions and text-based
-	// invocation protocol are added as the first prompt context source unless
-	// its builder already contains a tool_definitions source.
+	// Tools are available to the model during loop execution. Unless the model
+	// implements ai.NativeToolModel and NativeTools returns true, their
+	// definitions and text-based invocation protocol are added as the first
+	// prompt context source unless its builder already contains a
+	// tool_definitions source.
 	Tools []loop.Tool
 	// ToolDefinitionOptions configure the auto-prepended tool-definitions prompt
 	// source used for Tools.
