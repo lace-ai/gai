@@ -48,6 +48,7 @@ func (m *Model) Descriptor() ai.ModelDescriptor {
 		d.ReasoningEffort = ai.FeatureSupportSupported
 		d.ReasoningEfforts = []ai.ReasoningEffort{ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh}
 	} else {
+		d.Reasoning = ai.FeatureSupportUnsupported
 		d.ReasoningEffort = ai.FeatureSupportUnsupported
 	}
 	return d

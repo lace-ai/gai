@@ -164,6 +164,20 @@ func TestGenerateMapsCapabilitiesAndRejectsUnsupportedResponseFormat(t *testing.
 	}
 }
 
+func TestGenerateRejectsReasoningForNonAdaptiveModelBeforeTransport(t *testing.T) {
+	m := testModel(t, func(http.ResponseWriter, *http.Request) { t.Fatal("unexpected request") })
+	m.name = ClaudeFable5
+
+	_, err := m.Generate(context.Background(), ai.AIRequest{
+		Prompt:    "hello",
+		MaxTokens: 4096,
+		Reasoning: ai.ReasoningConfig{Enabled: true, BudgetTokens: 2000},
+	})
+	if !errors.Is(err, ai.ErrUnsupportedCapability) {
+		t.Fatalf("Generate error = %v, want unsupported capability", err)
+	}
+}
+
 func TestGenerateMapsAdaptiveReasoningAndToolChoice(t *testing.T) {
 	tests := []struct {
 		name    string
