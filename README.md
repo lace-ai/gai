@@ -337,6 +337,13 @@ unavailable. Native history, function tools/tool choice, JSON object and JSON
 Schema responses, streaming, and low/medium/high reasoning effort for supported
 reasoning models are available.
 
+Bundled fallback models include:
+
+- `gpt-5.6`, `gpt-5.6-terra`, `gpt-5.6-sol`, `gpt-5.6-luna`
+- `gpt-4.1`, `gpt-4.1-mini`, `gpt-4.1-nano`
+- `gpt-4o`, `gpt-4o-mini`
+- `o3`, `o3-mini`, `o4-mini`
+
 </details>
 
 <details>

@@ -35,6 +35,11 @@ func TestREADMEReflectsLicenseAndBuiltInProviders(t *testing.T) {
 		"### ♊ Gemini",
 		"### 🌀 Mistral",
 		"### 🟢 OpenAI",
+		"Bundled fallback models include:",
+		"`gpt-5.6`, `gpt-5.6-terra`, `gpt-5.6-sol`, `gpt-5.6-luna`",
+		"`gpt-4.1`, `gpt-4.1-mini`, `gpt-4.1-nano`",
+		"`gpt-4o`, `gpt-4o-mini`",
+		"`o3`, `o3-mini`, `o4-mini`",
 	} {
 		if !strings.Contains(readmeText, want) {
 			t.Errorf("README.md is missing %q", want)
