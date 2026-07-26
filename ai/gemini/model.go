@@ -25,6 +25,7 @@ type Model struct {
 }
 
 var _ ai.Model = (*Model)(nil)
+var _ ai.ModelDescriber = (*Model)(nil)
 
 func (m *Model) Name() string {
 	return m.name
@@ -34,6 +35,17 @@ func (m *Model) Tokenizer() ai.Tokenizer {
 	return &Tokenizer{
 		modelName: m.name,
 	}
+}
+
+func (m *Model) Descriptor() ai.ModelDescriptor {
+	return ai.ModelDescriptor{Model: m.name, NativeMessages: ai.FeatureSupportSupported, NativeTools: ai.FeatureSupportSupported,
+		ToolChoiceModes: []ai.ToolChoiceMode{ai.ToolChoiceAuto, ai.ToolChoiceNone, ai.ToolChoiceRequired},
+		Multimodal:      ai.FeatureSupportUnsupported,
+		Usage:           ai.FeatureSupportSupported, FinishReason: ai.FeatureSupportUnsupported, StreamingUsage: ai.FeatureSupportUnsupported,
+		ToolCalling: ai.FeatureSupportSupported,
+		JSONOutput:  ai.FeatureSupportSupported, JSONSchemaOutput: ai.FeatureSupportSupported,
+		Reasoning: ai.FeatureSupportSupported, ReasoningEffort: ai.FeatureSupportSupported, ReasoningEfforts: []ai.ReasoningEffort{ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh},
+		Tokenizer: ai.TokenizerDescriptor{Available: ai.FeatureSupportSupported, Fidelity: ai.TokenizerFidelityExact}}
 }
 
 func (m *Model) Close() error {
@@ -78,6 +90,11 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			gai.EndSpan(span, streamErr)
 		}()
 		defer close(out)
+		if err := ai.ValidateModelRequest(m, req); err != nil {
+			streamErr = err
+			ai.SendToken(ctx, out, ai.Token{Err: err, Type: ai.TokenTypeErr, Text: err.Error()})
+			return
+		}
 
 		client, err := m.getClient(ctx)
 		if err != nil {
@@ -230,6 +247,9 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 		attribute.Int("ai.prompt_length", len(prompt)),
 	)
 	defer func() { gai.EndSpan(span, err) }()
+	if err := ai.ValidateModelRequest(m, req); err != nil {
+		return nil, err
+	}
 	if m.debug != nil && m.debug.IncludeSensitiveData() {
 		m.debug.Emit(ctx, gai.DebugEvent{
 			Name:   "gemini_generate_request",

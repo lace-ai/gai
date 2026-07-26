@@ -28,11 +28,29 @@ type Model struct {
 }
 
 var _ ai.Model = (*Model)(nil)
+var _ ai.ModelDescriber = (*Model)(nil)
 
 func (m *Model) Name() string { return m.name }
 func (m *Model) Close() error { return nil }
 func (m *Model) Tokenizer() ai.Tokenizer {
 	return &Tokenizer{modelName: m.name, client: m.client, debug: m.debug}
+}
+
+func (m *Model) Descriptor() ai.ModelDescriptor {
+	d := ai.ModelDescriptor{Model: m.name, NativeMessages: ai.FeatureSupportSupported, NativeTools: ai.FeatureSupportSupported,
+		ToolChoiceModes: []ai.ToolChoiceMode{ai.ToolChoiceAuto, ai.ToolChoiceNone, ai.ToolChoiceRequired},
+		Multimodal:      ai.FeatureSupportUnsupported,
+		Usage:           ai.FeatureSupportSupported, FinishReason: ai.FeatureSupportSupported, StreamingUsage: ai.FeatureSupportUnsupported,
+		ToolCalling: ai.FeatureSupportSupported,
+		JSONOutput:  ai.FeatureSupportUnsupported, JSONSchemaOutput: ai.FeatureSupportSupported,
+		Tokenizer: ai.TokenizerDescriptor{Available: ai.FeatureSupportSupported, Fidelity: ai.TokenizerFidelityEstimated}}
+	if supportsAdaptiveThinking(m.name) {
+		d.ReasoningEffort = ai.FeatureSupportSupported
+		d.ReasoningEfforts = []ai.ReasoningEffort{ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh}
+	} else {
+		d.ReasoningEffort = ai.FeatureSupportUnsupported
+	}
+	return d
 }
 
 // sdkClient is deliberately created from the provider's fields for each call.
@@ -236,6 +254,9 @@ func mapResponseFormat(format ai.ResponseFormat) (*antropic.OutputConfigParam, e
 func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AIResponse, err error) {
 	ctx, span := gai.StartOperationSpan(ctx, anthropicTracerName, "ai.anthropic", "ai.operation", "model.generate", attribute.String("ai.provider", "anthropic"), attribute.String("ai.model", m.name), attribute.Int("ai.max_tokens", req.MaxTokens), attribute.Int("ai.prompt_length", len(req.Prompt)))
 	defer func() { gai.EndSpan(span, err) }()
+	if err := ai.ValidateModelRequest(m, req); err != nil {
+		return nil, err
+	}
 	payload, err := buildMessagesRequest(req, m.name)
 	if err != nil {
 		return nil, err
@@ -321,6 +342,11 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			}
 			streamErr = ctx.Err()
 			return false
+		}
+		if err := ai.ValidateModelRequest(m, req); err != nil {
+			streamErr = err
+			emit(ai.Token{Type: ai.TokenTypeErr, Err: err, Text: err.Error()})
+			return
 		}
 		payload, err := buildMessagesRequest(req, m.name)
 		if err != nil {

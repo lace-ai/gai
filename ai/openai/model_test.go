@@ -161,16 +161,87 @@ func TestModelGenerateStreamEmitsToolCallsByIndex(t *testing.T) {
 
 func TestBuildChatCompletionParamsRejectsReasoningEffortForNonReasoningModels(t *testing.T) {
 	for _, model := range []string{GPT41, GPT41Mini, GPT41Nano, GPT4o, GPT4oMini} {
-		_, err := buildChatCompletionParams(model, ai.AIRequest{Prompt: "hello", Reasoning: ai.ReasoningConfig{Effort: ai.ReasoningEffortHigh}}, false)
+		err := openAIDescriptor(model).ValidateRequest(ai.AIRequest{Prompt: "hello", Reasoning: ai.ReasoningConfig{Effort: ai.ReasoningEffortHigh}})
 		if !errors.Is(err, ai.ErrUnsupportedCapability) {
 			t.Fatalf("expected unsupported capability error for %q, got %v", model, err)
 		}
 	}
-	if _, err := buildChatCompletionParams(O3, ai.AIRequest{Prompt: "hello", Reasoning: ai.ReasoningConfig{Effort: ai.ReasoningEffortHigh}}, false); err != nil {
+	if err := openAIDescriptor(O3).ValidateRequest(ai.AIRequest{Prompt: "hello", Reasoning: ai.ReasoningConfig{Effort: ai.ReasoningEffortHigh}}); err != nil {
 		t.Fatalf("expected reasoning model to accept effort: %v", err)
 	}
 	if _, err := buildChatCompletionParams(GPT41Mini, ai.AIRequest{Prompt: "hello"}, false); err != nil {
 		t.Fatalf("expected non-reasoning model to accept empty effort: %v", err)
+	}
+}
+
+func TestModelPreflightRejectsUnsupportedBeforeTransport(t *testing.T) {
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requests++ }))
+	defer ts.Close()
+	p := New("test-key", nil)
+	p.baseURL = ts.URL
+	m, err := p.Model(GPT41)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = m.Generate(t.Context(), ai.AIRequest{Reasoning: ai.ReasoningConfig{Effort: ai.ReasoningEffortHigh}})
+	if !errors.Is(err, ai.ErrUnsupportedCapability) || requests != 0 {
+		t.Fatalf("Generate error = %v, requests = %d; want local unsupported error and no request", err, requests)
+	}
+	for token := range m.GenerateStream(t.Context(), ai.AIRequest{Reasoning: ai.ReasoningConfig{Effort: ai.ReasoningEffortHigh}}) {
+		if !errors.Is(token.Err, ai.ErrUnsupportedCapability) {
+			t.Fatalf("stream error = %v, want unsupported capability", token.Err)
+		}
+	}
+	if requests != 0 {
+		t.Fatalf("stream made %d requests, want none", requests)
+	}
+}
+
+func TestModelAllowsUnknownDynamicReasoningEffort(t *testing.T) {
+	var got map[string]any
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}]}`))
+	}))
+	defer ts.Close()
+	p := New("test-key", nil)
+	p.baseURL = ts.URL
+	m, err := p.Model("gpt-dynamic-reasoner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Generate(t.Context(), ai.AIRequest{Reasoning: ai.ReasoningConfig{Effort: ai.ReasoningEffortHigh}}); err != nil {
+		t.Fatalf("dynamic model rejected locally: %v", err)
+	}
+	if got["reasoning_effort"] != "high" {
+		t.Fatalf("reasoning effort not mapped: %#v", got)
+	}
+}
+
+func TestOpenAIDescriptorUsesReasoningFamilyOverlay(t *testing.T) {
+	for _, model := range []string{"o5-pro", "gpt-5.99-preview"} {
+		d := openAIDescriptor(model)
+		if d.ReasoningEffort != ai.FeatureSupportSupported || len(d.ReasoningEfforts) != 3 {
+			t.Fatalf("descriptor for %q = %#v, want supported reasoning efforts", model, d)
+		}
+	}
+	d := openAIDescriptor("future-chat-model")
+	if d.ReasoningEffort != ai.FeatureSupportUnknown || len(d.ReasoningEfforts) != 0 {
+		t.Fatalf("unrelated unknown descriptor = %#v, want unknown reasoning effort", d)
+	}
+}
+
+func TestModelDescriptorDoesNotAdvertiseUnsupportedTokenizer(t *testing.T) {
+	d := openAIDescriptor(GPT41)
+	if d.Tokenizer.Available != ai.FeatureSupportUnsupported || d.Tokenizer.Fidelity != ai.TokenizerFidelityUnknown {
+		t.Fatalf("tokenizer descriptor = %#v, want unsupported/unknown", d.Tokenizer)
+	}
+	if d.NativeMessages != ai.FeatureSupportSupported || d.NativeTools != ai.FeatureSupportSupported || d.Multimodal != ai.FeatureSupportUnsupported || d.Usage != ai.FeatureSupportSupported || d.FinishReason != ai.FeatureSupportUnsupported || d.StreamingUsage != ai.FeatureSupportUnsupported {
+		t.Fatalf("capability descriptor = %#v", d)
 	}
 }
 

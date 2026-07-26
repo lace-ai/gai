@@ -3,6 +3,7 @@ package gemini
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +13,22 @@ import (
 	"github.com/lace-ai/gai/ai"
 	"google.golang.org/genai"
 )
+
+func TestModelDescriptorRejectsUnknownReasoningEffortBeforeTransport(t *testing.T) {
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requests++ }))
+	defer ts.Close()
+	p := New("test-key", nil)
+	p.baseURL = ts.URL
+	m, err := p.Model(Gemini2_5Flash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = m.Generate(t.Context(), ai.AIRequest{Reasoning: ai.ReasoningConfig{Effort: ai.ReasoningEffort("maximum")}})
+	if !errors.Is(err, ai.ErrUnsupportedCapability) || requests != 0 {
+		t.Fatalf("Generate error = %v, requests = %d; want local unsupported error and no request", err, requests)
+	}
+}
 
 func TestMapFunctionCall(t *testing.T) {
 	got, err := mapFunctionCall(&genai.FunctionCall{

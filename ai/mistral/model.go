@@ -25,6 +25,7 @@ type Model struct {
 }
 
 var _ ai.Model = (*Model)(nil)
+var _ ai.ModelDescriber = (*Model)(nil)
 
 func (m *Model) Name() string {
 	return m.name
@@ -36,6 +37,17 @@ func (m *Model) Tokenizer() ai.Tokenizer {
 		client:    m.client,
 		debug:     m.debug,
 	}
+}
+
+func (m *Model) Descriptor() ai.ModelDescriptor {
+	return ai.ModelDescriptor{Model: m.name, NativeMessages: ai.FeatureSupportSupported, NativeTools: ai.FeatureSupportSupported,
+		ToolChoiceModes: []ai.ToolChoiceMode{ai.ToolChoiceAuto, ai.ToolChoiceNone, ai.ToolChoiceRequired},
+		Multimodal:      ai.FeatureSupportUnsupported,
+		Usage:           ai.FeatureSupportSupported, FinishReason: ai.FeatureSupportSupported, StreamingUsage: ai.FeatureSupportUnsupported,
+		ToolCalling: ai.FeatureSupportSupported,
+		JSONOutput:  ai.FeatureSupportSupported, JSONSchemaOutput: ai.FeatureSupportSupported,
+		Reasoning: ai.FeatureSupportUnsupported, ReasoningEffort: ai.FeatureSupportUnsupported,
+		Tokenizer: ai.TokenizerDescriptor{Available: ai.FeatureSupportSupported, Fidelity: ai.TokenizerFidelityEstimated}}
 }
 
 func (m *Model) Close() error {
@@ -95,6 +107,7 @@ type chatCompletionResponse struct {
 			Content   string          `json:"content"`
 			ToolCalls json.RawMessage `json:"tool_calls"`
 		} `json:"message"`
+		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
 	Usage struct {
 		PromptTokens     int `json:"prompt_tokens"`
@@ -499,6 +512,11 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			streamErr = ctx.Err()
 			return false
 		}
+		if err := ai.ValidateModelRequest(m, req); err != nil {
+			streamErr = err
+			emit(ai.Token{Type: ai.TokenTypeErr, Err: err, Text: err.Error()})
+			return
+		}
 
 		payload, err := buildChatCompletionRequest(req, m.name, true)
 		if err != nil {
@@ -849,6 +867,9 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 		attribute.Int("ai.prompt_length", len(prompt)),
 	)
 	defer func() { gai.EndSpan(span, err) }()
+	if err := ai.ValidateModelRequest(m, req); err != nil {
+		return nil, err
+	}
 	if m.debug != nil && m.debug.IncludeSensitiveData() {
 		m.debug.Emit(ctx, gai.DebugEvent{
 			Name:   "mistral_generate_request",
@@ -932,6 +953,7 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 		Text:         parsed.Choices[0].Message.Content,
 		ToolCalls:    toolCalls,
 		Raw:          append([]byte(nil), resBody...),
+		FinishReason: parsed.Choices[0].FinishReason,
 		InputTokens:  parsed.Usage.PromptTokens,
 		OutputTokens: parsed.Usage.CompletionTokens,
 	}, nil

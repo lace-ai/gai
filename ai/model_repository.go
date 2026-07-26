@@ -189,3 +189,43 @@ func (r *ModelRepository) ListModels(ctx context.Context) ([]string, error) {
 	}
 	return models, nil
 }
+
+// ListModelDescriptors returns descriptors for registered models that expose
+// the optional ModelDescriber interface. Models without descriptors are
+// skipped, preserving compatibility with existing Model implementations.
+func (r *ModelRepository) ListModelDescriptors(ctx context.Context) ([]ModelDescriptor, error) {
+	if err := r.Validate(); err != nil {
+		return nil, err
+	}
+
+	var descriptors []ModelDescriptor
+	for _, provider := range r.providers {
+		models, err := provider.ListModels()
+		if err != nil {
+			return nil, err
+		}
+		for _, name := range models {
+			model, err := provider.Model(name)
+			if err != nil {
+				return nil, err
+			}
+			describer, ok := model.(ModelDescriber)
+			if !ok {
+				continue
+			}
+			descriptor := describer.Descriptor().Copy()
+			descriptor.Provider = provider.Name()
+			if descriptor.Model == "" {
+				descriptor.Model = name
+			}
+			descriptors = append(descriptors, descriptor)
+		}
+	}
+	sort.Slice(descriptors, func(i, j int) bool {
+		if descriptors[i].Provider == descriptors[j].Provider {
+			return descriptors[i].Model < descriptors[j].Model
+		}
+		return descriptors[i].Provider < descriptors[j].Provider
+	})
+	return descriptors, nil
+}
