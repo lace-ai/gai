@@ -37,14 +37,28 @@ func (m *Model) Tokenizer() ai.Tokenizer {
 }
 
 func (m *Model) Descriptor() ai.ModelDescriptor {
-	d := ai.ModelDescriptor{Model: m.name, NativeMessages: ai.FeatureSupportSupported, NativeTools: ai.FeatureSupportSupported,
+	if facts, ok := m.client.catalog.Lookup(m.name); ok {
+		return effectiveAnthropicDescriptor(m.name, facts)
+	}
+	return anthropicDescriptorWithoutCatalog(m.name)
+}
+
+func anthropicAdapterDescriptor(model string) ai.ModelDescriptor {
+	return ai.ModelDescriptor{Model: model, NativeMessages: ai.FeatureSupportSupported, NativeTools: ai.FeatureSupportSupported,
 		ToolChoiceModes: []ai.ToolChoiceMode{ai.ToolChoiceAuto, ai.ToolChoiceNone, ai.ToolChoiceRequired},
 		Multimodal:      ai.FeatureSupportUnsupported,
 		Usage:           ai.FeatureSupportSupported, FinishReason: ai.FeatureSupportSupported, StreamingUsage: ai.FeatureSupportUnsupported,
 		ToolCalling: ai.FeatureSupportSupported,
 		JSONOutput:  ai.FeatureSupportUnsupported, JSONSchemaOutput: ai.FeatureSupportSupported,
-		Tokenizer: ai.TokenizerDescriptor{Available: ai.FeatureSupportSupported, Fidelity: ai.TokenizerFidelityEstimated}}
-	if supportsAdaptiveThinking(m.name) {
+		Reasoning: ai.FeatureSupportSupported, ReasoningEffort: ai.FeatureSupportSupported,
+		ReasoningEfforts: []ai.ReasoningEffort{ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh},
+		Tokenizer:        ai.TokenizerDescriptor{Available: ai.FeatureSupportSupported, Fidelity: ai.TokenizerFidelityEstimated}}
+}
+
+func anthropicLocalFacts(model string) ai.ModelDescriptor {
+	d := ai.ModelDescriptor{Model: model}
+	if supportsAdaptiveThinking(model) {
+		d.Reasoning = ai.FeatureSupportSupported
 		d.ReasoningEffort = ai.FeatureSupportSupported
 		d.ReasoningEfforts = []ai.ReasoningEffort{ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh}
 	} else {
@@ -52,6 +66,19 @@ func (m *Model) Descriptor() ai.ModelDescriptor {
 		d.ReasoningEffort = ai.FeatureSupportUnsupported
 	}
 	return d
+}
+
+func anthropicDescriptorWithoutCatalog(model string) ai.ModelDescriptor {
+	facts := anthropicLocalFacts(model)
+	return ai.OverrideModelDescriptor(anthropicAdapterDescriptor(model), facts)
+}
+
+func effectiveAnthropicDescriptor(model string, catalog ai.ModelDescriptor) ai.ModelDescriptor {
+	// Start with maintained facts so sparse provider metadata does not erase
+	// known adapter behavior; the adapter profile remains the hard boundary.
+	baseline := anthropicDescriptorWithoutCatalog(model)
+	facts := ai.OverrideModelDescriptor(baseline, catalog)
+	return ai.IntersectModelDescriptors(baseline, facts)
 }
 
 // sdkClient is deliberately created from the provider's fields for each call.

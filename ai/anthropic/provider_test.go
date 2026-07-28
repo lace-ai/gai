@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -50,6 +51,28 @@ func TestProviderDynamicallyListsModelsAndAcceptsThem(t *testing.T) {
 	}
 	if request.Header.Get("x-api-key") != "test-key" {
 		t.Fatalf("unexpected API key header: %q", request.Header.Get("x-api-key"))
+	}
+}
+
+func TestModelDescriptorUsesCatalogSnapshotWithoutNetwork(t *testing.T) {
+	hits := 0
+	p := New("test-key", nil)
+	p.httpClient = &http.Client{Transport: handlerRoundTripper(func(*http.Request) (*http.Response, error) {
+		hits++
+		return response(http.StatusOK, `{"data":[{"id":"claude-dynamic","type":"model","display_name":"Dynamic","created_at":"2026-01-01T00:00:00Z","max_input_tokens":200000,"max_tokens":8192,"capabilities":{"thinking":{"supported":true},"effort":{"supported":true}}}],"has_more":false,"first_id":"claude-dynamic","last_id":"claude-dynamic"}`), nil
+	})}
+	if _, err := p.ListModelDescriptors(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	model, err := p.Model("claude-dynamic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := model.(ai.ModelDescriber).Descriptor(); got.Reasoning != ai.FeatureSupportUnsupported {
+		t.Fatalf("descriptor = %#v; static non-adaptive model support must remain authoritative", got)
+	}
+	if hits != 1 {
+		t.Fatalf("descriptor caused catalog I/O: got %d requests, want 1", hits)
 	}
 }
 

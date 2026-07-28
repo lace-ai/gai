@@ -40,7 +40,14 @@ func (m *Model) Tokenizer() ai.Tokenizer {
 }
 
 func (m *Model) Descriptor() ai.ModelDescriptor {
-	return ai.ModelDescriptor{Model: m.name, NativeMessages: ai.FeatureSupportSupported, NativeTools: ai.FeatureSupportSupported,
+	if facts, ok := m.client.catalog.Lookup(m.name); ok {
+		return effectiveMistralDescriptor(m.name, facts)
+	}
+	return mistralAdapterDescriptor(m.name)
+}
+
+func mistralAdapterDescriptor(model string) ai.ModelDescriptor {
+	return ai.ModelDescriptor{Model: model, NativeMessages: ai.FeatureSupportSupported, NativeTools: ai.FeatureSupportSupported,
 		ToolChoiceModes: []ai.ToolChoiceMode{ai.ToolChoiceAuto, ai.ToolChoiceNone, ai.ToolChoiceRequired},
 		Multimodal:      ai.FeatureSupportUnsupported,
 		Usage:           ai.FeatureSupportSupported, FinishReason: ai.FeatureSupportSupported, StreamingUsage: ai.FeatureSupportUnsupported,

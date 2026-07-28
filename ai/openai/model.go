@@ -30,7 +30,12 @@ func (m *Model) Close() error { return nil }
 
 func (m *Model) Tokenizer() ai.Tokenizer { return tokenizer{modelName: m.name} }
 
-func (m *Model) Descriptor() ai.ModelDescriptor { return openAIDescriptor(m.name) }
+func (m *Model) Descriptor() ai.ModelDescriptor {
+	if facts, ok := m.provider.catalog.Lookup(m.name); ok {
+		return effectiveOpenAIDescriptor(m.name, facts)
+	}
+	return openAIDescriptor(m.name)
+}
 
 func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (*ai.AIResponse, error) {
 	if err := ai.ValidateModelRequest(m, req); err != nil {

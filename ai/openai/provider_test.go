@@ -86,6 +86,28 @@ func TestProviderAggregatesDynamicReasoningDescriptors(t *testing.T) {
 	}
 }
 
+func TestModelDescriptorUsesCatalogSnapshotWithoutNetwork(t *testing.T) {
+	hits := 0
+	p := New("test-key", nil)
+	p.httpClient = &http.Client{Transport: handlerRoundTripper(func(*http.Request) (*http.Response, error) {
+		hits++
+		return response(http.StatusOK, `{"data":[{"id":"gpt-5.99-preview"}]}`), nil
+	})}
+	if _, err := p.ListModelDescriptors(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	model, err := p.Model("gpt-5.99-preview")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := model.(ai.ModelDescriber).Descriptor(); got.ReasoningEffort != ai.FeatureSupportSupported {
+		t.Fatalf("descriptor = %#v", got)
+	}
+	if hits != 1 {
+		t.Fatalf("descriptor caused catalog I/O: got %d requests, want 1", hits)
+	}
+}
+
 func TestProviderExcludesNonChatModelsFromDiscovery(t *testing.T) {
 	p := New("test-key", nil)
 	p.httpClient = &http.Client{Transport: handlerRoundTripper(func(*http.Request) (*http.Response, error) {

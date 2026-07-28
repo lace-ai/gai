@@ -200,6 +200,21 @@ func (r *ModelRepository) ListModelDescriptors(ctx context.Context) ([]ModelDesc
 
 	var descriptors []ModelDescriptor
 	for _, provider := range r.providers {
+		if catalog, ok := provider.(ModelCatalogProvider); ok {
+			providerDescriptors, err := catalog.ListModelDescriptors(ctx)
+			if err != nil {
+				return nil, err
+			}
+			for _, providerDescriptor := range providerDescriptors {
+				descriptor := providerDescriptor.Copy()
+				if descriptor.Model == "" {
+					continue
+				}
+				descriptor.Provider = provider.Name()
+				descriptors = append(descriptors, descriptor)
+			}
+			continue
+		}
 		models, err := provider.ListModels()
 		if err != nil {
 			return nil, err

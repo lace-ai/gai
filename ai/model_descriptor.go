@@ -1,6 +1,10 @@
 package ai
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+	"sync"
+)
 
 // FeatureSupport describes whether a model supports a feature. The zero value
 // is Unknown, so descriptors can safely omit information they do not know.
@@ -75,6 +79,192 @@ func (d ModelDescriptor) Copy() ModelDescriptor {
 // compatibility.
 type ModelDescriber interface {
 	Descriptor() ModelDescriptor
+}
+
+// ModelCatalogProvider is an optional context-aware extension to Provider.
+// Implementations may perform discovery while building the snapshot. Returned
+// descriptors must be independent copies, and model request paths must not call
+// this method.
+type ModelCatalogProvider interface {
+	ListModelDescriptors(context.Context) ([]ModelDescriptor, error)
+}
+
+// ModelCatalogCache stores the last successful provider catalog snapshot.
+// Replacement and reads deep-copy descriptors so callers cannot mutate the
+// cached snapshot. Its zero value is ready for use.
+type ModelCatalogCache struct {
+	mu          sync.RWMutex
+	loaded      bool
+	descriptors map[string]ModelDescriptor
+}
+
+// Replace atomically replaces the cache with descriptors, including an empty
+// successful snapshot.
+func (c *ModelCatalogCache) Replace(descriptors []ModelDescriptor) {
+	snapshot := make(map[string]ModelDescriptor, len(descriptors))
+	for _, descriptor := range descriptors {
+		if descriptor.Model == "" {
+			continue
+		}
+		snapshot[descriptor.Model] = descriptor.Copy()
+	}
+	c.mu.Lock()
+	c.descriptors = snapshot
+	c.loaded = true
+	c.mu.Unlock()
+}
+
+// Load returns an independent copy of the cached snapshot.
+func (c *ModelCatalogCache) Load() ([]ModelDescriptor, bool) {
+	c.mu.RLock()
+	if !c.loaded {
+		c.mu.RUnlock()
+		return nil, false
+	}
+	descriptors := make([]ModelDescriptor, 0, len(c.descriptors))
+	for _, descriptor := range c.descriptors {
+		descriptors = append(descriptors, descriptor.Copy())
+	}
+	c.mu.RUnlock()
+	return descriptors, true
+}
+
+// Lookup returns an independent copy of the cached descriptor for model.
+func (c *ModelCatalogCache) Lookup(model string) (ModelDescriptor, bool) {
+	c.mu.RLock()
+	descriptor, ok := c.descriptors[model]
+	c.mu.RUnlock()
+	return descriptor.Copy(), ok
+}
+
+// IntersectModelDescriptors returns the capabilities supported by both the
+// adapter and the provider catalog. Unsupported dominates, Supported requires
+// agreement from both inputs, and all other combinations remain Unknown.
+func IntersectModelDescriptors(adapter, catalog ModelDescriptor) ModelDescriptor {
+	result := ModelDescriptor{
+		Provider:         firstDescriptorIdentity(adapter.Provider, catalog.Provider),
+		Model:            firstDescriptorIdentity(adapter.Model, catalog.Model),
+		NativeMessages:   intersectFeatureSupport(adapter.NativeMessages, catalog.NativeMessages),
+		NativeTools:      intersectFeatureSupport(adapter.NativeTools, catalog.NativeTools),
+		Multimodal:       intersectFeatureSupport(adapter.Multimodal, catalog.Multimodal),
+		Usage:            intersectFeatureSupport(adapter.Usage, catalog.Usage),
+		FinishReason:     intersectFeatureSupport(adapter.FinishReason, catalog.FinishReason),
+		StreamingUsage:   intersectFeatureSupport(adapter.StreamingUsage, catalog.StreamingUsage),
+		ToolCalling:      intersectFeatureSupport(adapter.ToolCalling, catalog.ToolCalling),
+		JSONOutput:       intersectFeatureSupport(adapter.JSONOutput, catalog.JSONOutput),
+		JSONSchemaOutput: intersectFeatureSupport(adapter.JSONSchemaOutput, catalog.JSONSchemaOutput),
+		Reasoning:        intersectFeatureSupport(adapter.Reasoning, catalog.Reasoning),
+		ReasoningEffort:  intersectFeatureSupport(adapter.ReasoningEffort, catalog.ReasoningEffort),
+	}
+	result.Tokenizer.Available = intersectFeatureSupport(adapter.Tokenizer.Available, catalog.Tokenizer.Available)
+	if result.Tokenizer.Available == FeatureSupportSupported {
+		result.Tokenizer.Fidelity = intersectTokenizerFidelity(adapter.Tokenizer.Fidelity, catalog.Tokenizer.Fidelity)
+	}
+	if result.ToolCalling == FeatureSupportSupported && result.NativeTools == FeatureSupportSupported {
+		result.ToolChoiceModes = intersectKnownValues(adapter.ToolChoiceModes, catalog.ToolChoiceModes)
+	}
+	if result.ReasoningEffort == FeatureSupportSupported {
+		result.ReasoningEfforts = intersectKnownValues(adapter.ReasoningEfforts, catalog.ReasoningEfforts)
+	}
+	return result
+}
+
+// OverrideModelDescriptor replaces facts explicitly supplied by override.
+// Unknown values and empty lists leave the corresponding base facts unchanged.
+// Intersect the result with an adapter descriptor before enforcing it so an
+// override cannot enable behavior the adapter does not implement.
+func OverrideModelDescriptor(base, override ModelDescriptor) ModelDescriptor {
+	result := base.Copy()
+	if override.Provider != "" {
+		result.Provider = override.Provider
+	}
+	if override.Model != "" {
+		result.Model = override.Model
+	}
+	overrideFeatureSupport(&result.NativeMessages, override.NativeMessages)
+	overrideFeatureSupport(&result.NativeTools, override.NativeTools)
+	overrideFeatureSupport(&result.Multimodal, override.Multimodal)
+	overrideFeatureSupport(&result.Usage, override.Usage)
+	overrideFeatureSupport(&result.FinishReason, override.FinishReason)
+	overrideFeatureSupport(&result.StreamingUsage, override.StreamingUsage)
+	overrideFeatureSupport(&result.ToolCalling, override.ToolCalling)
+	overrideFeatureSupport(&result.JSONOutput, override.JSONOutput)
+	overrideFeatureSupport(&result.JSONSchemaOutput, override.JSONSchemaOutput)
+	overrideFeatureSupport(&result.Reasoning, override.Reasoning)
+	overrideFeatureSupport(&result.ReasoningEffort, override.ReasoningEffort)
+	overrideFeatureSupport(&result.Tokenizer.Available, override.Tokenizer.Available)
+	if override.Tokenizer.Fidelity != TokenizerFidelityUnknown {
+		result.Tokenizer.Fidelity = override.Tokenizer.Fidelity
+	}
+	if len(override.ToolChoiceModes) > 0 {
+		result.ToolChoiceModes = append([]ToolChoiceMode(nil), override.ToolChoiceModes...)
+	}
+	if len(override.ReasoningEfforts) > 0 {
+		result.ReasoningEfforts = append([]ReasoningEffort(nil), override.ReasoningEfforts...)
+	}
+	return result
+}
+
+func intersectFeatureSupport(left, right FeatureSupport) FeatureSupport {
+	if left == FeatureSupportUnsupported || right == FeatureSupportUnsupported {
+		return FeatureSupportUnsupported
+	}
+	if left == FeatureSupportSupported && right == FeatureSupportSupported {
+		return FeatureSupportSupported
+	}
+	return FeatureSupportUnknown
+}
+
+func intersectTokenizerFidelity(left, right TokenizerFidelity) TokenizerFidelity {
+	if left == TokenizerFidelityUnknown {
+		return right
+	}
+	if right == TokenizerFidelityUnknown {
+		return left
+	}
+	if left == right {
+		return left
+	}
+	return TokenizerFidelityUnknown
+}
+
+func intersectKnownValues[T comparable](left, right []T) []T {
+	if len(left) == 0 {
+		return append([]T(nil), right...)
+	}
+	if len(right) == 0 {
+		return append([]T(nil), left...)
+	}
+	available := make(map[T]struct{}, len(right))
+	for _, value := range right {
+		available[value] = struct{}{}
+	}
+	result := make([]T, 0)
+	seen := make(map[T]struct{}, len(left))
+	for _, value := range left {
+		if _, ok := available[value]; !ok {
+			continue
+		}
+		if _, duplicate := seen[value]; duplicate {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
+func overrideFeatureSupport(target *FeatureSupport, override FeatureSupport) {
+	if override != FeatureSupportUnknown {
+		*target = override
+	}
+}
+
+func firstDescriptorIdentity(primary, secondary string) string {
+	if primary != "" {
+		return primary
+	}
+	return secondary
 }
 
 // UnsupportedCapabilityError reports a request feature known to be unsupported
