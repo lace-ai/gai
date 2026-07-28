@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/lace-ai/gai"
@@ -21,7 +20,7 @@ type Provider struct {
 	newClient  func(context.Context, *genai.ClientConfig) (*genai.Client, error)
 	debug      gai.DebugSink
 	catalog    ai.ModelCatalogCache
-	catalogMu  sync.Mutex
+	catalogMu  ai.ContextMutex
 }
 
 var _ ai.Provider = (*Provider)(nil)
@@ -81,7 +80,9 @@ func (p *Provider) ListModelDescriptors(ctx context.Context) ([]ai.ModelDescript
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
-	p.catalogMu.Lock()
+	if err := p.catalogMu.Lock(ctx); err != nil {
+		return nil, err
+	}
 	defer p.catalogMu.Unlock()
 	if cached, ok := p.catalog.Load(); ok {
 		return p.effectiveDescriptors(cached), nil
@@ -90,6 +91,9 @@ func (p *Provider) ListModelDescriptors(ctx context.Context) ([]ai.ModelDescript
 	defer cancel()
 	discovered, err := p.listModelCatalog(ctx)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return p.fallbackDescriptors(), nil
 	}
 	p.catalog.Replace(discovered)

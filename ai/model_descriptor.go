@@ -89,6 +89,31 @@ type ModelCatalogProvider interface {
 	ListModelDescriptors(context.Context) ([]ModelDescriptor, error)
 }
 
+// ContextMutex is a zero-value-ready mutex that honors context cancellation
+// while waiting for ownership. It is useful for serialized, optional discovery
+// paths where a canceled caller must not wait behind network I/O.
+type ContextMutex struct {
+	once sync.Once
+	ch   chan struct{}
+}
+
+func (m *ContextMutex) Lock(ctx context.Context) error {
+	m.once.Do(func() {
+		m.ch = make(chan struct{}, 1)
+		m.ch <- struct{}{}
+	})
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-m.ch:
+		return nil
+	}
+}
+
+func (m *ContextMutex) Unlock() {
+	m.ch <- struct{}{}
+}
+
 // ModelCatalogCache stores the last successful provider catalog snapshot.
 // Replacement and reads deep-copy descriptors so callers cannot mutate the
 // cached snapshot. Its zero value is ready for use.
@@ -96,20 +121,25 @@ type ModelCatalogCache struct {
 	mu          sync.RWMutex
 	loaded      bool
 	descriptors map[string]ModelDescriptor
+	ordered     []ModelDescriptor
 }
 
 // Replace atomically replaces the cache with descriptors, including an empty
 // successful snapshot.
 func (c *ModelCatalogCache) Replace(descriptors []ModelDescriptor) {
 	snapshot := make(map[string]ModelDescriptor, len(descriptors))
+	ordered := make([]ModelDescriptor, 0, len(descriptors))
 	for _, descriptor := range descriptors {
 		if descriptor.Model == "" {
 			continue
 		}
-		snapshot[descriptor.Model] = descriptor.Copy()
+		copy := descriptor.Copy()
+		snapshot[copy.Model] = copy
+		ordered = append(ordered, copy)
 	}
 	c.mu.Lock()
 	c.descriptors = snapshot
+	c.ordered = ordered
 	c.loaded = true
 	c.mu.Unlock()
 }
@@ -121,9 +151,9 @@ func (c *ModelCatalogCache) Load() ([]ModelDescriptor, bool) {
 		c.mu.RUnlock()
 		return nil, false
 	}
-	descriptors := make([]ModelDescriptor, 0, len(c.descriptors))
-	for _, descriptor := range c.descriptors {
-		descriptors = append(descriptors, descriptor.Copy())
+	descriptors := make([]ModelDescriptor, len(c.ordered))
+	for i, descriptor := range c.ordered {
+		descriptors[i] = descriptor.Copy()
 	}
 	c.mu.RUnlock()
 	return descriptors, true

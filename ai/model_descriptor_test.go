@@ -130,6 +130,30 @@ func TestModelCatalogCacheSnapshotsAreImmutable(t *testing.T) {
 	}
 }
 
+func TestModelCatalogCachePreservesSnapshotOrder(t *testing.T) {
+	var cache ModelCatalogCache
+	cache.Replace([]ModelDescriptor{{Model: "z"}, {Model: "a"}, {Model: "m"}})
+	for i := 0; i < 10; i++ {
+		got, ok := cache.Load()
+		if !ok || len(got) != 3 || got[0].Model != "z" || got[1].Model != "a" || got[2].Model != "m" {
+			t.Fatalf("load %d order = %#v, %v", i, got, ok)
+		}
+	}
+}
+
+func TestContextMutexHonorsCanceledContext(t *testing.T) {
+	var mu ContextMutex
+	if err := mu.Lock(context.Background()); err != nil {
+		t.Fatalf("first lock: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := mu.Lock(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled lock error = %v, want context.Canceled", err)
+	}
+	mu.Unlock()
+}
+
 func TestModelDescriptorRejectsUnsupportedWithTypedError(t *testing.T) {
 	err := (ModelDescriptor{Model: "test", ReasoningEffort: FeatureSupportUnsupported}).ValidateRequest(AIRequest{Reasoning: ReasoningConfig{Effort: ReasoningEffortHigh}})
 	if !errors.Is(err, ErrUnsupportedCapability) {
