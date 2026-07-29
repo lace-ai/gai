@@ -63,6 +63,11 @@ func TestProviderDynamicallyListsModelsAndAcceptsThem(t *testing.T) {
 }
 
 func TestProviderFallsBackWhenModelDiscoveryFails(t *testing.T) {
+	got := effectiveGeminiDescriptor("gemini-dynamic", ai.ModelDescriptor{Model: "gemini-dynamic"})
+	if got.Reasoning != ai.FeatureSupportUnknown || got.ReasoningEffort != ai.FeatureSupportUnknown {
+		t.Fatalf("descriptor = %#v; absent catalog thinking facts must remain unknown", got)
+	}
+
 	p := New("test-key", nil)
 	p.httpClient = &http.Client{Transport: handlerRoundTripper(func(*http.Request) (*http.Response, error) {
 		return response(http.StatusServiceUnavailable, "unavailable"), nil

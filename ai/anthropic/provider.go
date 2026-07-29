@@ -117,7 +117,7 @@ func (p *Provider) listModelCatalog(ctx context.Context) ([]ai.ModelDescriptor, 
 func (p *Provider) fallbackDescriptors() []ai.ModelDescriptor {
 	descriptors := make([]ai.ModelDescriptor, 0, len(models))
 	for _, model := range models {
-		descriptors = append(descriptors, anthropicDescriptorWithoutCatalog(model))
+		descriptors = append(descriptors, effectiveAnthropicDescriptor(model, ai.ModelDescriptor{Model: model}))
 	}
 	return descriptors
 }

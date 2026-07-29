@@ -68,8 +68,8 @@ func TestModelDescriptorUsesCatalogSnapshotWithoutNetwork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := model.(ai.ModelDescriber).Descriptor(); got.Reasoning != ai.FeatureSupportUnsupported {
-		t.Fatalf("descriptor = %#v; static non-adaptive model support must remain authoritative", got)
+	if got := model.(ai.ModelDescriber).Descriptor(); got.Reasoning != ai.FeatureSupportSupported || got.ReasoningEffort != ai.FeatureSupportSupported {
+		t.Fatalf("descriptor = %#v; catalog thinking and effort facts must enable the dynamic model", got)
 	}
 	if hits != 1 {
 		t.Fatalf("descriptor caused catalog I/O: got %d requests, want 1", hits)
@@ -106,6 +106,13 @@ func TestProviderValidationAndModels(t *testing.T) {
 		if err != nil || model.Name() != name {
 			t.Fatalf("Model(%q) = %v, %v", name, model, err)
 		}
+	}
+}
+
+func TestAnthropicDescriptorKeepsUnknownModelFactsUnknown(t *testing.T) {
+	got := (&Model{name: "claude-unfamiliar", client: New("test-key", nil)}).Descriptor()
+	if got.Reasoning != ai.FeatureSupportUnknown || got.ReasoningEffort != ai.FeatureSupportUnknown {
+		t.Fatalf("descriptor = %#v; unfamiliar model facts must remain unknown", got)
 	}
 }
 

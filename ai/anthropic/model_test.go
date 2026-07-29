@@ -164,8 +164,13 @@ func TestGenerateMapsCapabilitiesAndRejectsUnsupportedResponseFormat(t *testing.
 	}
 }
 
-func TestGenerateRejectsReasoningForNonAdaptiveModelBeforeTransport(t *testing.T) {
-	m := testModel(t, func(http.ResponseWriter, *http.Request) { t.Fatal("unexpected request") })
+func TestGenerateMapsBudgetThinkingForKnownBudgetOnlyModel(t *testing.T) {
+	var got map[string]any
+	m := testModel(t, func(w http.ResponseWriter, r *http.Request) {
+		got = decodeRequest(t, r)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"content":[],"usage":{}}`))
+	})
 	m.name = ClaudeFable5
 
 	_, err := m.Generate(context.Background(), ai.AIRequest{
@@ -173,8 +178,30 @@ func TestGenerateRejectsReasoningForNonAdaptiveModelBeforeTransport(t *testing.T
 		MaxTokens: 4096,
 		Reasoning: ai.ReasoningConfig{Enabled: true, BudgetTokens: 2000},
 	})
-	if !errors.Is(err, ai.ErrUnsupportedCapability) {
-		t.Fatalf("Generate error = %v, want unsupported capability", err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if thinking := object(t, got["thinking"]); thinking["type"] != "enabled" || thinking["budget_tokens"] != float64(2000) {
+		t.Fatalf("thinking = %#v, want enabled budget thinking", thinking)
+	}
+}
+
+func TestGenerateMapsAdaptiveThinkingForCatalogModel(t *testing.T) {
+	var got map[string]any
+	m := testModel(t, func(w http.ResponseWriter, r *http.Request) {
+		got = decodeRequest(t, r)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"content":[],"usage":{}}`))
+	})
+	m.name = "claude-dynamic"
+	m.client.catalog.Replace([]ai.ModelDescriptor{{Model: m.name, Reasoning: ai.FeatureSupportSupported, ReasoningEffort: ai.FeatureSupportSupported, ReasoningEfforts: []ai.ReasoningEffort{ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh}}})
+
+	_, err := m.Generate(context.Background(), ai.AIRequest{Prompt: "hello", Reasoning: ai.ReasoningConfig{Enabled: true, Effort: ai.ReasoningEffortHigh}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if thinking := object(t, got["thinking"]); thinking["type"] != "adaptive" {
+		t.Fatalf("thinking = %#v, want adaptive thinking", thinking)
 	}
 }
 

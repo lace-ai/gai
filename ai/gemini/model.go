@@ -41,7 +41,7 @@ func (m *Model) Descriptor() ai.ModelDescriptor {
 	if facts, ok := m.client.catalog.Lookup(m.name); ok {
 		return effectiveGeminiDescriptor(m.name, facts)
 	}
-	return geminiAdapterDescriptor(m.name)
+	return effectiveGeminiDescriptor(m.name, ai.ModelDescriptor{Model: m.name})
 }
 
 func geminiAdapterDescriptor(model string) ai.ModelDescriptor {

@@ -22,6 +22,15 @@ func supportsAdaptiveThinking(model string) bool {
 	return model == ClaudeOpus4_6 || model == ClaudeSonnet4_6
 }
 
+func isKnownModel(model string) bool {
+	for _, known := range models {
+		if model == known {
+			return true
+		}
+	}
+	return false
+}
+
 // models is the maintained Anthropic Messages API catalog. It includes current
 // aliases and still-supported dated/legacy IDs so callers can pin a model
 // version deliberately.

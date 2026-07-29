@@ -139,7 +139,7 @@ func (p *Provider) listModelCatalog(ctx context.Context) ([]ai.ModelDescriptor, 
 func (p *Provider) fallbackDescriptors() []ai.ModelDescriptor {
 	descriptors := make([]ai.ModelDescriptor, 0, len(models))
 	for _, model := range models {
-		descriptors = append(descriptors, geminiAdapterDescriptor(model))
+		descriptors = append(descriptors, effectiveGeminiDescriptor(model, ai.ModelDescriptor{Model: model}))
 	}
 	return descriptors
 }
@@ -154,7 +154,20 @@ func (p *Provider) effectiveDescriptors(facts []ai.ModelDescriptor) []ai.ModelDe
 
 func effectiveGeminiDescriptor(model string, catalog ai.ModelDescriptor) ai.ModelDescriptor {
 	adapter := geminiAdapterDescriptor(model)
-	return ai.IntersectModelDescriptors(adapter, ai.OverrideModelDescriptor(adapter, catalog))
+	facts := geminiProviderDefaults(model)
+	facts = ai.OverrideModelDescriptor(facts, catalog)
+	effective := ai.IntersectModelDescriptors(adapter, facts)
+	if effective.ReasoningEffort == ai.FeatureSupportUnknown {
+		effective.ReasoningEfforts = append([]ai.ReasoningEffort(nil), adapter.ReasoningEfforts...)
+	}
+	return effective
+}
+
+func geminiProviderDefaults(model string) ai.ModelDescriptor {
+	d := geminiAdapterDescriptor(model)
+	d.Reasoning = ai.FeatureSupportUnknown
+	d.ReasoningEffort = ai.FeatureSupportUnknown
+	return d
 }
 
 func (p *Provider) getClient(ctx context.Context) (*genai.Client, error) {
