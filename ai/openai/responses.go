@@ -51,6 +51,7 @@ func (m *Model) generateResponsesStream(ctx context.Context, out chan<- ai.Token
 			})
 		}
 	}()
+	var reasoningItems []json.RawMessage
 	for stream.Next() {
 		event := stream.Current()
 		switch event.Type {
@@ -59,6 +60,10 @@ func (m *Model) generateResponsesStream(ctx context.Context, out chan<- ai.Token
 				return
 			}
 		case "response.output_item.done":
+			if event.Item.Type == "reasoning" {
+				reasoningItems = append(reasoningItems, json.RawMessage(event.Item.RawJSON()))
+				continue
+			}
 			if event.Item.Type != "function_call" {
 				continue
 			}
@@ -68,7 +73,16 @@ func (m *Model) generateResponsesStream(ctx context.Context, out chan<- ai.Token
 				ai.SendToken(ctx, out, ai.Token{Type: ai.TokenTypeErr, Err: err, Text: err.Error()})
 				return
 			}
-			call := &ai.ToolCall{ID: event.Item.CallID, Type: "function", Name: event.Item.Name, Args: args}
+			var thoughtSignature []byte
+			if len(reasoningItems) > 0 {
+				thoughtSignature, err = json.Marshal(reasoningItems)
+				if err != nil {
+					err = fmt.Errorf("encode OpenAI reasoning items: %w", err)
+					ai.SendToken(ctx, out, ai.Token{Type: ai.TokenTypeErr, Err: err, Text: err.Error()})
+					return
+				}
+			}
+			call := &ai.ToolCall{ID: event.Item.CallID, Type: "function", Name: event.Item.Name, Args: args, ThoughtSignature: append([]byte(nil), thoughtSignature...)}
 			if !ai.SendToken(ctx, out, ai.Token{Type: ai.TokenTypeToolCall, Data: []byte(args), ToolCall: call}) {
 				return
 			}
