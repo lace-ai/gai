@@ -299,7 +299,7 @@ func (w *Workflow) capturePrimary(ctx context.Context, upstream Stream, obs *wor
 			Messages:        cloneMessages(w.Loop.Messages()),
 			Iterations:      cloneIterations(w.Loop.Iterations),
 			Usage:           iterationUsage(w.Loop.Iterations),
-			BilledUsage:     tokenUsage(captured.Tokens),
+			BilledUsage:     statusUsage(captured.Statuses),
 			Errors:          append([]error(nil), captured.Errors...),
 			Canceled:        canceled,
 			CancellationErr: cancellationErr,
@@ -614,12 +614,10 @@ func cloneMessages(messages []gaictx.Message) []gaictx.Message {
 	return cloned
 }
 
-func tokenUsage(tokens []ai.Token) ai.Usage {
+func statusUsage(statuses []loop.IterationInformation) ai.Usage {
 	var usage ai.Usage
-	for _, token := range tokens {
-		if token.Type == ai.TokenTypeCompletion && token.Completion != nil {
-			usage.Add(token.Completion.Usage)
-		}
+	for _, status := range statuses {
+		usage.Add(status.Iteration.Usage)
 	}
 	return usage
 }

@@ -154,7 +154,7 @@ func (i *Iteration) AppendToken(t ai.Token) {
 		if t.Completion == nil {
 			return
 		}
-		i.Usage.Add(t.Completion.Usage)
+		i.Usage = t.Completion.Usage
 		if last != nil && last.Type == IterationTypeResponse {
 			last.Response.AppendToken(t)
 		} else {
