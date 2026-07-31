@@ -735,11 +735,18 @@ Tool calls are expected to arrive as JSON with this shape:
 ```
 
 Tool call IDs are generated internally by the runtime and are not model-controlled.
-Models whose `ai.NativeToolModel.NativeTools()` method returns `true` receive
-tool definitions through `AIRequest.Tools` without the prompt-rendered JSON
-tool protocol. Models that do not report native support retain that text
-protocol as a compatibility fallback. A prompt builder with an existing
-`tool_definitions` source also explicitly preserves the text protocol.
+`Loop.Tools` always holds executable runtime tools. `Loop.ToolTransport` controls
+only whether those tools are serialized into provider-native `AIRequest.Tools`;
+direct `loop.New` defaults to `loop.ToolTransportNative`, while
+`loop.ToolTransportText` retains executable tools but omits provider-native
+definitions for a prompt-rendered protocol.
+
+For `agent.Definition`, a model descriptor is authoritative: native transport is
+used only when `Descriptor().NativeTools` is supported. Models without a
+descriptor use the deprecated `ai.NativeToolModel` compatibility fallback.
+Text transport adds the prompt-rendered JSON tool protocol unless the prompt
+builder already has a `tool_definitions` source; an existing source can also
+intentionally add textual instructions to a native model.
 
 </details>
 

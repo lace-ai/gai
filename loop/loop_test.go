@@ -989,6 +989,39 @@ func TestLoopFallsBackToBuildPromptEveryIteration(t *testing.T) {
 	}
 }
 
+func TestLoopToolTransportControlsProviderToolDefinitions(t *testing.T) {
+	tests := []struct {
+		name      string
+		transport loop.ToolTransportMode
+		wantTools bool
+	}{
+		{name: "default native transport", wantTools: true},
+		{name: "text transport", transport: loop.ToolTransportText},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			model := &scriptedStreamModel{sequences: [][]ai.Token{{{Type: ai.TokenTypeText, Text: "done"}}}}
+			l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
+			l.ToolTransport = tt.transport
+
+			if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
+				t.Fatalf("unexpected loop error: %v", err)
+			}
+			requests := model.Requests()
+			if len(requests) != 1 {
+				t.Fatalf("requests = %d, want 1", len(requests))
+			}
+			if got := len(requests[0].Tools) > 0; got != tt.wantTools {
+				t.Fatalf("request tools = %#v, want present=%t", requests[0].Tools, tt.wantTools)
+			}
+			if len(l.Tools) != 1 || l.Tools[0].Name() != "echo" {
+				t.Fatalf("loop lost executable tools: %#v", l.Tools)
+			}
+		})
+	}
+}
+
 func TestLoopNativeHistoryIncludesBaseRequestWithoutRenderedHistory(t *testing.T) {
 	t.Parallel()
 

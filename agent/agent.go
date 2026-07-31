@@ -144,7 +144,8 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 		return nil, loop.ErrPromptNotConfigured
 	}
 	promptBuilder.SetInput(input.Prompt)
-	if len(a.def.Tools) > 0 && !usesNativeTools(a.def.Model) && !hasContextSource(promptBuilder, "tool_definitions") {
+	nativeTools := usesNativeTools(a.def.Model)
+	if len(a.def.Tools) > 0 && !nativeTools && !hasContextSource(promptBuilder, "tool_definitions") {
 		toolSource, err := tooldefinitions.New(nil, a.def.Tools, a.def.DebugSink, a.def.ToolDefinitionOptions...)
 		if err != nil {
 			return nil, err
@@ -164,6 +165,9 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 	}
 
 	l := loop.New(a.def.Model, a.def.Tools, promptBuilder, a.def.ToolResponseProcessor)
+	if !nativeTools {
+		l.ToolTransport = loop.ToolTransportText
+	}
 	if a.def.Limits.MaxLoopIterations > 0 {
 		l.MaxLoopIterations = a.def.Limits.MaxLoopIterations
 	}
