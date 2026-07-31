@@ -137,7 +137,10 @@ func TestModelResponsesTransportDisablesResponseStorage(t *testing.T) {
 	if _, err := m.Generate(t.Context(), ai.AIRequest{Prompt: "sync"}); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
-	for range m.GenerateStream(t.Context(), ai.AIRequest{Prompt: "stream"}) {
+	for token := range m.GenerateStream(t.Context(), ai.AIRequest{Prompt: "stream"}) {
+		if token.Type == ai.TokenTypeErr {
+			t.Fatalf("GenerateStream token error: %v", token.Err)
+		}
 	}
 	for _, path := range []string{"synchronous", "streaming"} {
 		request := <-requests
