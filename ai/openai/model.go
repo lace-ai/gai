@@ -128,7 +128,8 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 						CachedTokens:    int(chunk.Usage.PromptTokensDetails.CachedTokens),
 					}
 					completion.Raw = append(completion.Raw[:0], []byte(chunk.RawJSON())...)
-					if !ai.SendToken(ctx, out, ai.Token{Type: ai.TokenTypeCompletion, Completion: &completion}) {
+					snapshot := completion
+					if !ai.SendToken(ctx, out, ai.Token{Type: ai.TokenTypeCompletion, Completion: &snapshot}) {
 						return
 					}
 				}
