@@ -146,6 +146,29 @@ func TestProviderFallsBackWhenModelDiscoveryFails(t *testing.T) {
 	}
 }
 
+func TestProviderFallsBackWhenModelDiscoveryTimesOut(t *testing.T) {
+	p := New("test-key", nil)
+	p.httpClient = &http.Client{Transport: handlerRoundTripper(func(r *http.Request) (*http.Response, error) {
+		<-r.Context().Done()
+		return nil, r.Context().Err()
+	})}
+
+	descriptors, err := p.ListModelDescriptors(context.Background())
+	if err != nil {
+		t.Fatalf("ListModelDescriptors returned error: %v", err)
+	}
+	found := false
+	for _, descriptor := range descriptors {
+		if descriptor.Model == GPT56Sol {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected hard-coded fallback descriptors, got %#v", descriptors)
+	}
+}
+
 func TestProviderBoundsModelDiscovery(t *testing.T) {
 	p := New("test-key", nil)
 	var hasDeadline bool

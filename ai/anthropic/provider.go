@@ -85,9 +85,9 @@ func (p *Provider) ListModelDescriptors(ctx context.Context) ([]ai.ModelDescript
 	if cached, ok := p.catalog.Load(); ok {
 		return p.effectiveDescriptors(cached), nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, modelDiscoveryTimeout)
+	discoveryCtx, cancel := context.WithTimeout(ctx, modelDiscoveryTimeout)
 	defer cancel()
-	discovered, err := p.listModelCatalog(ctx)
+	discovered, err := p.listModelCatalog(discoveryCtx)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()

@@ -135,6 +135,22 @@ func TestProviderFallsBackWhenModelDiscoveryFails(t *testing.T) {
 	}
 }
 
+func TestProviderFallsBackWhenModelDiscoveryTimesOut(t *testing.T) {
+	p := New("test-key", nil)
+	p.httpClient = &http.Client{Transport: handlerRoundTripper(func(r *http.Request) (*http.Response, error) {
+		<-r.Context().Done()
+		return nil, r.Context().Err()
+	})}
+
+	descriptors, err := p.ListModelDescriptors(context.Background())
+	if err != nil {
+		t.Fatalf("ListModelDescriptors returned error: %v", err)
+	}
+	if len(descriptors) == 0 || descriptors[0].Model != models[0] {
+		t.Fatalf("expected hard-coded fallback descriptors, got %#v", descriptors)
+	}
+}
+
 func TestProviderDiscoveryUsesDeadlineAndRejectsInvalidKey(t *testing.T) {
 	var deadline time.Time
 	p := New("test-key", nil)
