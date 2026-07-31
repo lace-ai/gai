@@ -20,3 +20,13 @@ type Model interface {
 	// Tokenizer returns the tokenizer associated with the model.
 	Tokenizer() Tokenizer
 }
+
+// NativeToolModel is optionally implemented by models that send tool
+// definitions through their provider's native tool-calling API. Agent avoids
+// adding the text-based tool protocol only when NativeTools returns true.
+//
+// It is deliberately separate from Model so existing custom Model
+// implementations retain the text-based compatibility protocol by default.
+type NativeToolModel interface {
+	NativeTools() bool
+}

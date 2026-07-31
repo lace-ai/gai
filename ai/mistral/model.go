@@ -26,10 +26,13 @@ type Model struct {
 
 var _ ai.Model = (*Model)(nil)
 var _ ai.ModelDescriber = (*Model)(nil)
+var _ ai.NativeToolModel = (*Model)(nil)
 
 func (m *Model) Name() string {
 	return m.name
 }
+
+func (m *Model) NativeTools() bool { return true }
 
 func (m *Model) Tokenizer() ai.Tokenizer {
 	return &Tokenizer{

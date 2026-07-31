@@ -3,13 +3,13 @@ module github.com/lace-ai/gai
 go 1.26.1
 
 require (
-	github.com/anthropics/anthropic-sdk-go v1.60.0
+	github.com/anthropics/anthropic-sdk-go v1.61.0
 	github.com/openai/openai-go v1.12.0
 	go.opentelemetry.io/otel v1.44.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.44.0
 	go.opentelemetry.io/otel/sdk v1.44.0
 	go.opentelemetry.io/otel/trace v1.44.0
-	google.golang.org/genai v1.64.0
+	google.golang.org/genai v1.65.0
 )
 
 require (
