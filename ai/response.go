@@ -25,6 +25,32 @@ type AIResponse struct {
 	ReasoningTokens int
 }
 
+// Usage is normalized provider token accounting for one completed request.
+type Usage struct {
+	InputTokens     int
+	OutputTokens    int
+	ReasoningTokens int
+	CachedTokens    int
+}
+
+// Add accumulates another provider usage record.
+func (u *Usage) Add(other Usage) {
+	u.InputTokens += other.InputTokens
+	u.OutputTokens += other.OutputTokens
+	u.ReasoningTokens += other.ReasoningTokens
+	u.CachedTokens += other.CachedTokens
+}
+
+// Completion is terminal metadata emitted by a streaming provider request.
+type Completion struct {
+	Usage        Usage
+	FinishReason string
+	RequestID    string
+	Provider     string
+	Model        string
+	Raw          json.RawMessage
+}
+
 // TokenType identifies the semantic kind of a streamed token.
 type TokenType string
 
@@ -37,6 +63,8 @@ var (
 	TokenTypeToolCall TokenType = "tool_call"
 	// TokenTypeErr identifies an error emitted through the token stream.
 	TokenTypeErr TokenType = "error"
+	// TokenTypeCompletion identifies terminal provider metadata for a completed stream.
+	TokenTypeCompletion TokenType = "completion"
 )
 
 // Token is one event emitted by Model.GenerateStream.
@@ -58,6 +86,8 @@ type Token struct {
 	Text string
 	// Err contains the stream error for TokenTypeErr.
 	Err error
+	// Completion contains terminal provider metadata for TokenTypeCompletion.
+	Completion *Completion
 }
 
 // String returns the token's raw Data as a string.
@@ -106,6 +136,15 @@ func (r *AIResponse) AppendToken(t Token) {
 			tc.ThoughtSignature = append([]byte(nil), t.ToolCall.ThoughtSignature...)
 			r.ToolCalls = append(r.ToolCalls, tc)
 		}
+	case TokenTypeCompletion:
+		if t.Completion != nil {
+			r.InputTokens += t.Completion.Usage.InputTokens
+			r.OutputTokens = t.Completion.Usage.OutputTokens
+			r.ReasoningTokens = t.Completion.Usage.ReasoningTokens
+			r.FinishReason = t.Completion.FinishReason
+			r.Raw = append(r.Raw[:0], t.Completion.Raw...)
+		}
+		return
 	}
 
 	r.OutputTokens += t.TokenUsage

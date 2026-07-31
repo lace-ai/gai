@@ -116,12 +116,31 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			}
 		}()
 		calls := map[int64]*streamToolCall{}
+		var completion ai.Completion
 		for stream.Next() {
 			chunk := stream.Current()
 			if len(chunk.Choices) == 0 {
+				if chunk.JSON.Usage.Valid() {
+					completion.Usage = ai.Usage{
+						InputTokens:     int(chunk.Usage.PromptTokens),
+						OutputTokens:    int(chunk.Usage.CompletionTokens),
+						ReasoningTokens: int(chunk.Usage.CompletionTokensDetails.ReasoningTokens),
+						CachedTokens:    int(chunk.Usage.PromptTokensDetails.CachedTokens),
+					}
+					completion.Raw = append(completion.Raw[:0], []byte(chunk.RawJSON())...)
+					if !ai.SendToken(ctx, out, ai.Token{Type: ai.TokenTypeCompletion, Completion: &completion}) {
+						return
+					}
+				}
 				continue
 			}
+			completion.RequestID = chunk.ID
+			completion.Provider = "openai"
+			completion.Model = chunk.Model
 			choice := chunk.Choices[0]
+			if choice.FinishReason != "" {
+				completion.FinishReason = string(choice.FinishReason)
+			}
 			if text := choice.Delta.Content; text != "" {
 				if !ai.SendToken(ctx, out, ai.Token{Type: ai.TokenTypeText, Data: []byte(text), Text: text}) {
 					return
@@ -252,7 +271,7 @@ func openAIDescriptor(model string) ai.ModelDescriptor {
 		Model: model, NativeMessages: ai.FeatureSupportSupported, NativeTools: ai.FeatureSupportSupported,
 		ToolChoiceModes: []ai.ToolChoiceMode{ai.ToolChoiceAuto, ai.ToolChoiceNone, ai.ToolChoiceRequired},
 		Multimodal:      ai.FeatureSupportUnsupported,
-		Usage:           ai.FeatureSupportSupported, FinishReason: ai.FeatureSupportUnsupported, StreamingUsage: ai.FeatureSupportUnsupported,
+		Usage:           ai.FeatureSupportSupported, FinishReason: ai.FeatureSupportSupported, StreamingUsage: ai.FeatureSupportSupported,
 		ToolCalling: ai.FeatureSupportSupported,
 		JSONOutput:  ai.FeatureSupportSupported, JSONSchemaOutput: ai.FeatureSupportSupported,
 		Tokenizer: ai.TokenizerDescriptor{Available: ai.FeatureSupportUnsupported},

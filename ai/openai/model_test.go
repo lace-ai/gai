@@ -506,6 +506,34 @@ func TestModelGenerateStreamMapsTextAndToolCalls(t *testing.T) {
 	}
 }
 
+func TestModelGenerateStreamPreservesUsageOnlyTerminalChunk(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_1\",\"model\":\"gpt-4.1-mini\",\"choices\":[{\"delta\":{\"content\":\"hello\"},\"finish_reason\":\"stop\"}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_1\",\"model\":\"gpt-4.1-mini\",\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":7,\"completion_tokens_details\":{\"reasoning_tokens\":3},\"prompt_tokens_details\":{\"cached_tokens\":2}}}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer ts.Close()
+
+	p := New("test-key", nil)
+	p.baseURL = ts.URL
+	m, err := p.Model(GPT41Mini)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tokens []ai.Token
+	for token := range m.GenerateStream(t.Context(), ai.AIRequest{Prompt: "hello"}) {
+		tokens = append(tokens, token)
+	}
+	if len(tokens) != 2 || tokens[1].Type != ai.TokenTypeCompletion {
+		t.Fatalf("tokens = %#v", tokens)
+	}
+	completion := tokens[1].Completion
+	if completion == nil || completion.Usage.InputTokens != 11 || completion.Usage.OutputTokens != 7 || completion.Usage.ReasoningTokens != 3 || completion.Usage.CachedTokens != 2 || completion.FinishReason != "stop" || completion.RequestID != "chatcmpl_1" || completion.Provider != "openai" || completion.Model != GPT41Mini {
+		t.Fatalf("completion = %#v", completion)
+	}
+}
+
 func TestModelGenerateStreamEmitsToolCallsByIndex(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -715,7 +743,7 @@ func TestModelDescriptorDoesNotAdvertiseUnsupportedTokenizer(t *testing.T) {
 	if d.Tokenizer.Available != ai.FeatureSupportUnsupported || d.Tokenizer.Fidelity != ai.TokenizerFidelityUnknown {
 		t.Fatalf("tokenizer descriptor = %#v, want unsupported/unknown", d.Tokenizer)
 	}
-	if d.NativeMessages != ai.FeatureSupportSupported || d.NativeTools != ai.FeatureSupportSupported || d.Multimodal != ai.FeatureSupportUnsupported || d.Usage != ai.FeatureSupportSupported || d.FinishReason != ai.FeatureSupportUnsupported || d.StreamingUsage != ai.FeatureSupportUnsupported {
+	if d.NativeMessages != ai.FeatureSupportSupported || d.NativeTools != ai.FeatureSupportSupported || d.Multimodal != ai.FeatureSupportUnsupported || d.Usage != ai.FeatureSupportSupported || d.FinishReason != ai.FeatureSupportSupported || d.StreamingUsage != ai.FeatureSupportSupported {
 		t.Fatalf("capability descriptor = %#v", d)
 	}
 }
