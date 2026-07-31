@@ -306,7 +306,11 @@ func (b *Builder) BuildPrompt(ctx context.Context, conv Conversation) (prompt st
 		obs.RenderFailed(ctx, stats, err)
 		return "", err
 	}
-	obs.RenderFinished(ctx, stats, promptDebugFields(ctx, parts, prompt))
+	var legacySensitiveFields map[string]any
+	if _, hasPolicy := gai.ContentCapturePolicyFromContext(ctx); !hasPolicy {
+		legacySensitiveFields = promptDebugFields(ctx, parts, prompt)
+	}
+	obs.RenderFinished(ctx, stats, prompt, legacySensitiveFields)
 	return prompt, nil
 }
 

@@ -236,9 +236,7 @@ func (o *historyObserver) SummaryIncluded(ctx context.Context, summary *Summary)
 		"summary_start_count": summary.StartTurnCount,
 		"summary_end_count":   summary.EndTurnCount,
 	}
-	if o.debug != nil && o.debug.IncludeSensitiveData() {
-		fields["summary_content"] = summary.Content.String()
-	}
+	gai.AddDebugContent(ctx, o.debug, fields, "summary_content", gai.ContentKindMemory, summary.Content.String())
 	o.emit(ctx, "history_source_summary_included", fields, nil)
 }
 
@@ -254,9 +252,7 @@ func (o *historyObserver) SummaryTokenCountFailed(ctx context.Context, summary *
 		"summary_start_count": summary.StartTurnCount,
 		"summary_end_count":   summary.EndTurnCount,
 	}
-	if o.debug != nil && o.debug.IncludeSensitiveData() {
-		fields["summary_content"] = summary.Content.String()
-	}
+	gai.AddDebugContent(ctx, o.debug, fields, "summary_content", gai.ContentKindMemory, summary.Content.String())
 	o.emit(ctx, "history_source_summary_token_count_failed", fields, err)
 }
 
@@ -310,9 +306,9 @@ func (o *historyObserver) BuildFinished(ctx context.Context, part *Part, tokenCo
 		"message_count": messageCount,
 		"content_count": o.contentCount,
 	}
-	if o.debug != nil && o.debug.IncludeSensitiveData() && part != nil {
+	if part != nil && gai.DebugContentEnabled(ctx, o.debug, gai.ContentKindMemory) {
 		if rendered, err := (gaictx.XMLRenderer{}).Render(ctx, []gaictx.Part{part}); err == nil {
-			fields["history_content"] = rendered
+			gai.AddDebugContent(ctx, o.debug, fields, "history_content", gai.ContentKindMemory, rendered)
 		}
 	}
 	o.emit(ctx, "history_source_build_finished", fields, nil)
@@ -342,9 +338,7 @@ func (o *historyObserver) SummaryGenerated(ctx context.Context, summary *Summary
 		"summary_end_count":      summary.EndTurnCount,
 		"previous_summary_found": previousSummaryFound,
 	}
-	if o.debug != nil && o.debug.IncludeSensitiveData() {
-		fields["summary_content"] = summary.Content.String()
-	}
+	gai.AddDebugContent(ctx, o.debug, fields, "summary_content", gai.ContentKindMemory, summary.Content.String())
 	o.emit(ctx, "history_source_summary_generated", fields, nil)
 }
 

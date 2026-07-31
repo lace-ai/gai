@@ -615,6 +615,45 @@ contain run IDs, metadata key counts, model/tool names, counts, usage, and error
 by default; prompts, completions, tool arguments/results, reasoning, and metadata
 values are never exported unless an application adds them deliberately.
 
+#### Content capture policy
+
+Sensitive content capture is opt-in per request and per category. Install a
+vendor-neutral policy on the request context and pass that same context through
+`Agent.NewRun` and `Workflow.Run`/`RunEvents`, or directly to `Loop.Run` or a
+model/tool call. The context carries one policy through agents, prompt builders,
+providers, loops, and tools.
+
+```go
+ctx = gai.WithContentCapturePolicy(ctx, gai.ContentCapturePolicy{
+  Prompt:     gai.CaptureEnabled,
+  Completion: gai.CaptureEnabled,
+  ToolInput:  gai.CaptureEnabled,
+  ToolOutput: gai.CaptureEnabled,
+  MaxBytes:   16 * 1024,
+  Redact: func(_ context.Context, kind gai.ContentKind, value []byte) ([]byte, error) {
+    return redactApplicationSecrets(kind, value), nil
+  },
+})
+```
+
+The zero value captures nothing. `Prompt`, `Completion`, `Reasoning`,
+`ToolInput`, `ToolOutput`, and `Memory` can be enabled independently. A missing
+or non-positive `MaxBytes` uses the finite 16 KiB default, and values above 1
+MiB are clamped. Redaction runs before deterministic truncation and before any
+library-managed debug field or OpenTelemetry attribute is created. If a
+redactor returns an error or panics, that value is omitted and agent execution
+continues. Redactors must be concurrency-safe.
+
+`SensitiveDebugSinkFunc` and `DebugSink.IncludeSensitiveData` remain compatible
+as the legacy raw, unbounded, all-or-nothing path when no context policy is
+installed. An explicit policy always overrides that legacy boolean. New code
+should use `DebugSinkFunc` with a context policy.
+
+Category selection is not a substitute for redaction: a rendered prompt may
+itself contain conversation history or earlier tool results. GAI never treats
+credentials, authorization values, API keys, HTTP headers, or opaque provider
+state as capturable content.
+
 #### Langfuse (optional)
 
 GAI's observability boundary is OpenTelemetry, so it can use any compatible

@@ -44,11 +44,9 @@ func (o *renderObserver) partRendered(ctx context.Context, index int, part Part,
 		"rendered_chars": len(rendered),
 	}
 	if node != nil {
-		fields["node"] = rendererNodeStructure(*node, o.previewSize, o.includeSensitiveData())
+		fields["node"] = rendererNodeStructure(ctx, o.debug, *node, o.previewSize)
 	}
-	if o.includeSensitiveData() {
-		addRendererPreview(fields, "rendered", rendered, o.previewSize)
-	}
+	addRendererCapturedContent(ctx, o.debug, fields, "rendered", rendered, o.previewSize)
 	o.parts = append(o.parts, fields)
 	o.emit(ctx, "renderer_part_rendered", fields, nil)
 }
@@ -75,14 +73,8 @@ func (o *renderObserver) finished(ctx context.Context, err error, prompt string)
 		"prompt_chars": len(prompt),
 		"structure":    o.parts,
 	}
-	if o.includeSensitiveData() {
-		addRendererPreview(fields, "prompt", prompt, o.previewSize)
-	}
+	addRendererCapturedContent(ctx, o.debug, fields, "prompt", prompt, o.previewSize)
 	o.emit(ctx, "renderer_render_finished", fields, err)
-}
-
-func (o *renderObserver) includeSensitiveData() bool {
-	return o.enabled() && o.debug.IncludeSensitiveData()
 }
 
 func (o *renderObserver) enabled() bool {
@@ -115,7 +107,7 @@ func renderPartName(part Part) string {
 	return part.Name()
 }
 
-func rendererNodeStructure(node RenderNode, previewSize int, includeContent bool) map[string]any {
+func rendererNodeStructure(ctx context.Context, debug gai.DebugSink, node RenderNode, previewSize int) map[string]any {
 	structure := map[string]any{
 		"type":        node.Type,
 		"value_chars": len(node.Value),
@@ -125,24 +117,32 @@ func rendererNodeStructure(node RenderNode, previewSize int, includeContent bool
 		fields := make([]map[string]any, 0, len(node.Fields))
 		for _, field := range node.Fields {
 			entry := map[string]any{"key": field.Key, "value_chars": len(field.Value)}
-			if includeContent {
-				addRendererPreview(entry, "value", field.Value, previewSize)
-			}
+			addRendererCapturedContent(ctx, debug, entry, "value", field.Value, previewSize)
 			fields = append(fields, entry)
 		}
 		structure["fields"] = fields
 	}
-	if includeContent && node.Value != "" {
-		addRendererPreview(structure, "value", node.Value, previewSize)
+	if node.Value != "" {
+		addRendererCapturedContent(ctx, debug, structure, "value", node.Value, previewSize)
 	}
 	if len(node.Children) > 0 {
 		children := make([]map[string]any, 0, len(node.Children))
 		for _, child := range node.Children {
-			children = append(children, rendererNodeStructure(child, previewSize, includeContent))
+			children = append(children, rendererNodeStructure(ctx, debug, child, previewSize))
 		}
 		structure["children"] = children
 	}
 	return structure
+}
+
+func addRendererCapturedContent(ctx context.Context, debug gai.DebugSink, fields map[string]any, key, content string, previewSize int) {
+	if _, hasPolicy := gai.ContentCapturePolicyFromContext(ctx); hasPolicy {
+		gai.AddDebugContent(ctx, debug, fields, key, gai.ContentKindPrompt, content)
+		return
+	}
+	if debug != nil && debug.IncludeSensitiveData() {
+		addRendererPreview(fields, key, content, previewSize)
+	}
 }
 
 func addRendererPreview(fields map[string]any, key, content string, previewSize int) {

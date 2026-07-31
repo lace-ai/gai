@@ -93,11 +93,11 @@ func newRunCreationObserver(ctx context.Context, agent *Agent, input RunInput) (
 }
 
 func (o *runCreationObserver) Created(ctx context.Context) {
-	o.emit(ctx, "agent_run_created", o.fields(), nil)
+	o.emit(ctx, "agent_run_created", o.fields(ctx), nil)
 }
 
 func (o *runCreationObserver) Failed(ctx context.Context, stage string, err error) {
-	fields := o.fields()
+	fields := o.fields(ctx)
 	fields["stage"] = stage
 	o.emit(ctx, "agent_run_creation_failed", fields, err)
 }
@@ -109,7 +109,7 @@ func (o *runCreationObserver) Finish(err error) {
 	gai.EndSpan(o.span, err)
 }
 
-func (o *runCreationObserver) fields() map[string]any {
+func (o *runCreationObserver) fields(ctx context.Context) map[string]any {
 	fields := map[string]any{}
 	if o == nil {
 		return fields
@@ -125,10 +125,8 @@ func (o *runCreationObserver) fields() map[string]any {
 	if o.input.ID != "" {
 		fields["run_id"] = o.input.ID
 	}
-	if o.debug != nil && o.debug.IncludeSensitiveData() {
-		if o.input.Prompt.User != nil {
-			fields["user_input"] = o.input.Prompt.User.String()
-		}
+	if o.input.Prompt.User != nil {
+		gai.AddDebugContent(ctx, o.debug, fields, "user_input", gai.ContentKindPrompt, o.input.Prompt.User.String())
 	}
 	return fields
 }
@@ -180,9 +178,8 @@ func (o *workflowObserver) Started(ctx context.Context) {
 func (o *workflowObserver) PrimaryFinished(ctx context.Context, result AgentResult) {
 	fields := agentResultFields(result)
 	fields["agent_name"] = o.agentName
-	if o.debug != nil && o.debug.IncludeSensitiveData() {
-		fields["output_text"] = result.Text
-	}
+	gai.AddDebugContent(ctx, o.debug, fields, "output_text", gai.ContentKindCompletion, result.Text)
+	gai.AddDebugContent(ctx, o.debug, fields, "reasoning", gai.ContentKindReasoning, result.Reasoning)
 	o.emit(ctx, "agent_primary_finished", fields, errors.Join(result.Errors...))
 }
 
@@ -207,9 +204,8 @@ func (o *workflowObserver) Finished(ctx context.Context, result WorkflowResult) 
 			attribute.Int("agent.error_count", len(result.Errors)),
 		)
 	}
-	if o.debug != nil && o.debug.IncludeSensitiveData() {
-		fields["output_text"] = result.Text
-	}
+	gai.AddDebugContent(ctx, o.debug, fields, "output_text", gai.ContentKindCompletion, result.Text)
+	gai.AddDebugContent(ctx, o.debug, fields, "reasoning", gai.ContentKindReasoning, result.Reasoning)
 	err := errors.Join(result.Errors...)
 	o.emit(ctx, "agent_workflow_finished", fields, err)
 	if o != nil && o.span != nil {
@@ -286,9 +282,8 @@ func (o *middlewareObserver) Finished(ctx context.Context, result AgentResult, a
 			attribute.Bool("agent.middleware.output_applied", applied),
 		)
 	}
-	if o.debug != nil && o.debug.IncludeSensitiveData() {
-		fields["output_text"] = result.Text
-	}
+	gai.AddDebugContent(ctx, o.debug, fields, "output_text", gai.ContentKindCompletion, result.Text)
+	gai.AddDebugContent(ctx, o.debug, fields, "reasoning", gai.ContentKindReasoning, result.Reasoning)
 	err := errors.Join(result.Errors...)
 	name := "agent_middleware_finished"
 	if err != nil {

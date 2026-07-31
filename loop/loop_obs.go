@@ -2,6 +2,7 @@ package loop
 
 import (
 	"context"
+	"errors"
 
 	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
@@ -10,6 +11,8 @@ import (
 )
 
 const loopTracerName = "github.com/lace-ai/gai/loop"
+
+var errObservedToolExecution = errors.New("tool execution failed")
 
 type loopRunState struct {
 	obs        *loopObserver
@@ -255,17 +258,43 @@ func startToolSpan(ctx context.Context, call ai.ToolCall) (context.Context, func
 		attribute.String("tool.name", call.Name),
 		attribute.String("tool.call_id", call.ID),
 	)
+	if captured, ok := gai.CaptureContent(ctx, gai.ContentKindToolInput, call.Args); ok {
+		setCapturedToolContent(span, "tool.input", captured)
+	}
 	return ctx, func(response *ToolResponse) {
 		status := "success"
-		var err error
+		var executionErr error
+		var output string
 		if response == nil {
 			status = "error"
-			err = ErrToolErrorMissing
+			executionErr = ErrToolErrorMissing
 		} else if responseErr := response.ErrorValue(); responseErr != nil {
 			status = "error"
-			err = responseErr
+			executionErr = responseErr
+			output = responseErr.Error()
+		} else {
+			output = response.TextValue()
+		}
+		if response != nil {
+			if captured, ok := gai.CaptureContent(ctx, gai.ContentKindToolOutput, []byte(output)); ok {
+				setCapturedToolContent(span, "tool.output", captured)
+			}
 		}
 		span.SetAttributes(attribute.String("tool.status", status))
-		gai.EndSpan(span, err)
+		if executionErr != nil {
+			gai.EndSpan(span, errObservedToolExecution)
+			return
+		}
+		gai.EndSpan(span, nil)
 	}
+}
+
+func setCapturedToolContent(span trace.Span, prefix string, captured gai.CapturedContent) {
+	span.SetAttributes(
+		attribute.String(prefix, string(captured.Value)),
+		attribute.Int(prefix+".original_bytes", captured.OriginalBytes),
+		attribute.Int(prefix+".captured_bytes", captured.CapturedBytes),
+		attribute.Bool(prefix+".truncated", captured.Truncated),
+		attribute.Bool(prefix+".redaction_applied", captured.RedactionApplied),
+	)
 }
