@@ -350,6 +350,33 @@ func TestModelPreflightRejectsReasoningToolsOnChatCompletionsBeforeTransport(t *
 	}
 }
 
+func TestModelPreflightRejectsNoneReasoningToolsOnChatCompletionsBeforeTransport(t *testing.T) {
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requests++ }))
+	defer ts.Close()
+	p := New("test-key", nil)
+	p.baseURL = ts.URL
+	m, err := p.Model("gpt-5.6-terra")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := ai.AIRequest{
+		Tools:     []ai.ToolDefinition{{Type: "function", Name: "search", Description: "Search", Parameters: json.RawMessage(`{"type":"object"}`)}},
+		Reasoning: ai.ReasoningConfig{Effort: ai.ReasoningEffortNone},
+	}
+	if _, err := m.Generate(t.Context(), req); !errors.Is(err, ai.ErrUnsupportedCapability) || requests != 0 {
+		t.Fatalf("Generate error = %v, requests = %d; want local unsupported error and no request", err, requests)
+	}
+	for token := range m.GenerateStream(t.Context(), req) {
+		if !errors.Is(token.Err, ai.ErrUnsupportedCapability) {
+			t.Fatalf("stream error = %v, want unsupported capability", token.Err)
+		}
+	}
+	if requests != 0 {
+		t.Fatalf("stream made %d requests, want none", requests)
+	}
+}
+
 func TestModelAllowsUnknownDynamicReasoningEffort(t *testing.T) {
 	var got map[string]any
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

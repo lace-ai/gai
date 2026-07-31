@@ -269,8 +269,8 @@ func openAIDescriptor(model string) ai.ModelDescriptor {
 // validateTransport rejects known endpoint/model combinations before opening an
 // HTTP stream. Responses transport is the supported path for these requests.
 func (m *Model) validateTransport(req ai.AIRequest) error {
-	if m.provider.transport == TransportChatCompletions && isGPT5ReasoningFamily(m.name) && len(req.Tools) > 0 && req.Reasoning.Effort != "" && req.Reasoning.Effort != ai.ReasoningEffortNone {
-		return fmt.Errorf("%w: OpenAI reasoning models with function tools and reasoning effort require the Responses transport or reasoning_effort none", ai.ErrUnsupportedCapability)
+	if m.provider.transport == TransportChatCompletions && isGPT5ReasoningFamily(m.name) && len(req.Tools) > 0 && req.Reasoning.Effort != "" {
+		return fmt.Errorf("%w: OpenAI GPT-5 models with function tools and an explicit reasoning effort require the Responses transport", ai.ErrUnsupportedCapability)
 	}
 	return nil
 }
