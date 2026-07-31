@@ -281,10 +281,10 @@ func isGPT5ReasoningFamily(model string) bool {
 }
 
 func isOpenAIReasoningFamily(model string) bool {
-	name := strings.ToLower(strings.TrimSpace(model))
-	if strings.HasPrefix(name, "gpt-5") && (len(name) == len("gpt-5") || name[len("gpt-5")] == '.' || name[len("gpt-5")] == '-') {
+	if isGPT5ReasoningFamily(model) {
 		return true
 	}
+	name := strings.ToLower(strings.TrimSpace(model))
 	if len(name) < 2 || name[0] != 'o' {
 		return false
 	}
