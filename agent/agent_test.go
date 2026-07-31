@@ -269,11 +269,12 @@ func TestAgentModelDescriberControlsPromptToolProtocol(t *testing.T) {
 	tests := []struct {
 		name               string
 		nativeTools        ai.FeatureSupport
+		legacyNativeTools  bool
 		wantPromptProtocol bool
 	}{
-		{name: "supported", nativeTools: ai.FeatureSupportSupported},
-		{name: "unknown falls back", nativeTools: ai.FeatureSupportUnknown, wantPromptProtocol: true},
-		{name: "unsupported falls back", nativeTools: ai.FeatureSupportUnsupported, wantPromptProtocol: true},
+		{name: "supported overrides legacy false", nativeTools: ai.FeatureSupportSupported},
+		{name: "unknown falls back", nativeTools: ai.FeatureSupportUnknown, legacyNativeTools: true, wantPromptProtocol: true},
+		{name: "unsupported falls back", nativeTools: ai.FeatureSupportUnsupported, legacyNativeTools: true, wantPromptProtocol: true},
 	}
 
 	for _, tt := range tests {
@@ -283,7 +284,7 @@ func TestAgentModelDescriberControlsPromptToolProtocol(t *testing.T) {
 				Model: describedToolWorkflowModel{
 					scriptedWorkflowModel: &scriptedWorkflowModel{},
 					descriptor:            ai.ModelDescriptor{NativeTools: tt.nativeTools},
-					legacyNativeTools:     true,
+					legacyNativeTools:     tt.legacyNativeTools,
 				},
 				Tools: []loop.Tool{loop.NewEchoTool()},
 				Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
