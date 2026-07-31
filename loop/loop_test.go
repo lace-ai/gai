@@ -1281,13 +1281,13 @@ func TestLoopToolErrorDoesNotLeakIntoSpan(t *testing.T) {
 				observed.WriteString(span.Status().Description)
 				for _, attr := range span.Attributes() {
 					observed.WriteString(string(attr.Key))
-					observed.WriteString(attr.Value.Emit())
+					observed.WriteString(attr.Value.String())
 				}
 				for _, event := range span.Events() {
 					observed.WriteString(event.Name)
 					for _, attr := range event.Attributes {
 						observed.WriteString(string(attr.Key))
-						observed.WriteString(attr.Value.Emit())
+						observed.WriteString(attr.Value.String())
 					}
 				}
 			}

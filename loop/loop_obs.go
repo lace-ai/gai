@@ -281,6 +281,10 @@ func startToolSpan(ctx context.Context, call ai.ToolCall) (context.Context, func
 			}
 		}
 		span.SetAttributes(attribute.String("tool.status", status))
+		if response == nil {
+			gai.EndSpan(span, ErrToolErrorMissing)
+			return
+		}
 		if executionErr != nil {
 			gai.EndSpan(span, errObservedToolExecution)
 			return

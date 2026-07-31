@@ -73,10 +73,14 @@ func AddDebugContent(ctx context.Context, sink DebugSink, fields map[string]any,
 	if sink == nil || fields == nil || field == "" {
 		return
 	}
-	if _, hasPolicy := ContentCapturePolicyFromContext(ctx); !hasPolicy {
-		if DebugContentEnabled(ctx, sink, kind) {
+	policy, hasPolicy := ContentCapturePolicyFromContext(ctx)
+	if !hasPolicy {
+		if sink.IncludeSensitiveData() {
 			fields[field] = value
 		}
+		return
+	}
+	if policy.captureMode(kind) != CaptureEnabled {
 		return
 	}
 

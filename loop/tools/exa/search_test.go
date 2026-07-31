@@ -223,7 +223,7 @@ func TestSearchToolTracing(t *testing.T) {
 	}
 	for _, event := range searchSpan.Events() {
 		for _, attr := range event.Attributes {
-			if strings.Contains(attr.Value.Emit(), "rate limited") {
+			if strings.Contains(attr.Value.String(), "rate limited") {
 				t.Fatalf("span event leaked provider response content: %#v", event)
 			}
 		}

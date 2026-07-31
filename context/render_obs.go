@@ -43,10 +43,15 @@ func (o *renderObserver) partRendered(ctx context.Context, index int, part Part,
 		"part_name":      renderPartName(part),
 		"rendered_chars": len(rendered),
 	}
+	var contentKinds map[gai.ContentKind]struct{}
 	if node != nil {
-		fields["node"] = rendererNodeStructure(ctx, o.debug, *node, o.previewSize)
+		fields["node"], contentKinds = rendererNodeStructure(ctx, o.debug, *node, o.previewSize, gai.ContentKindPrompt)
 	}
-	addRendererCapturedContent(ctx, o.debug, fields, "rendered", rendered, o.previewSize)
+	if kind, ok := singleRendererContentKind(contentKinds); ok {
+		addRendererCapturedContent(ctx, o.debug, fields, "rendered", rendered, o.previewSize, kind)
+	} else if _, hasPolicy := gai.ContentCapturePolicyFromContext(ctx); !hasPolicy {
+		addRendererCapturedContent(ctx, o.debug, fields, "rendered", rendered, o.previewSize, gai.ContentKindPrompt)
+	}
 	o.parts = append(o.parts, fields)
 	o.emit(ctx, "renderer_part_rendered", fields, nil)
 }
@@ -73,7 +78,7 @@ func (o *renderObserver) finished(ctx context.Context, err error, prompt string)
 		"prompt_chars": len(prompt),
 		"structure":    o.parts,
 	}
-	addRendererCapturedContent(ctx, o.debug, fields, "prompt", prompt, o.previewSize)
+	addRendererCapturedContent(ctx, o.debug, fields, "prompt", prompt, o.previewSize, gai.ContentKindPrompt)
 	o.emit(ctx, "renderer_render_finished", fields, err)
 }
 
@@ -107,37 +112,68 @@ func renderPartName(part Part) string {
 	return part.Name()
 }
 
-func rendererNodeStructure(ctx context.Context, debug gai.DebugSink, node RenderNode, previewSize int) map[string]any {
+func rendererNodeStructure(ctx context.Context, debug gai.DebugSink, node RenderNode, previewSize int, inheritedKind gai.ContentKind) (map[string]any, map[gai.ContentKind]struct{}) {
 	structure := map[string]any{
 		"type":        node.Type,
 		"value_chars": len(node.Value),
 		"child_count": len(node.Children),
 	}
+	kind := rendererNodeContentKind(node.Type, inheritedKind)
+	contentKinds := map[gai.ContentKind]struct{}{}
 	if len(node.Fields) > 0 {
 		fields := make([]map[string]any, 0, len(node.Fields))
 		for _, field := range node.Fields {
 			entry := map[string]any{"key": field.Key, "value_chars": len(field.Value)}
-			addRendererCapturedContent(ctx, debug, entry, "value", field.Value, previewSize)
+			addRendererCapturedContent(ctx, debug, entry, "value", field.Value, previewSize, kind)
+			contentKinds[kind] = struct{}{}
 			fields = append(fields, entry)
 		}
 		structure["fields"] = fields
 	}
 	if node.Value != "" {
-		addRendererCapturedContent(ctx, debug, structure, "value", node.Value, previewSize)
+		addRendererCapturedContent(ctx, debug, structure, "value", node.Value, previewSize, kind)
+		contentKinds[kind] = struct{}{}
 	}
 	if len(node.Children) > 0 {
 		children := make([]map[string]any, 0, len(node.Children))
 		for _, child := range node.Children {
-			children = append(children, rendererNodeStructure(ctx, debug, child, previewSize))
+			childStructure, childKinds := rendererNodeStructure(ctx, debug, child, previewSize, kind)
+			children = append(children, childStructure)
+			for childKind := range childKinds {
+				contentKinds[childKind] = struct{}{}
+			}
 		}
 		structure["children"] = children
 	}
-	return structure
+	return structure, contentKinds
 }
 
-func addRendererCapturedContent(ctx context.Context, debug gai.DebugSink, fields map[string]any, key, content string, previewSize int) {
+func rendererNodeContentKind(nodeType string, inherited gai.ContentKind) gai.ContentKind {
+	switch nodeType {
+	case "history":
+		return gai.ContentKindMemory
+	case ContentTypeToolCall:
+		return gai.ContentKindToolInput
+	case ContentTypeToolResult, ContentTypeToolResultErr, string(RoleTool):
+		return gai.ContentKindToolOutput
+	default:
+		return inherited
+	}
+}
+
+func singleRendererContentKind(kinds map[gai.ContentKind]struct{}) (gai.ContentKind, bool) {
+	if len(kinds) != 1 {
+		return "", false
+	}
+	for kind := range kinds {
+		return kind, true
+	}
+	return "", false
+}
+
+func addRendererCapturedContent(ctx context.Context, debug gai.DebugSink, fields map[string]any, key, content string, previewSize int, kind gai.ContentKind) {
 	if _, hasPolicy := gai.ContentCapturePolicyFromContext(ctx); hasPolicy {
-		gai.AddDebugContent(ctx, debug, fields, key, gai.ContentKindPrompt, content)
+		gai.AddDebugContent(ctx, debug, fields, key, kind, content)
 		return
 	}
 	if debug != nil && debug.IncludeSensitiveData() {

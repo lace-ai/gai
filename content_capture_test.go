@@ -164,12 +164,29 @@ type panickingJSONMarshaler struct{}
 
 func (panickingJSONMarshaler) MarshalJSON() ([]byte, error) { panic("marshal panic") }
 
+type countingJSONMarshaler struct{ calls *int }
+
+func (m countingJSONMarshaler) MarshalJSON() ([]byte, error) {
+	(*m.calls)++
+	return []byte(`{"value":"serialized"}`), nil
+}
+
 func TestAddDebugContentSerializationPanicFailsClosed(t *testing.T) {
 	ctx := WithContentCapturePolicy(t.Context(), ContentCapturePolicy{Prompt: CaptureEnabled})
 	fields := map[string]any{}
 	AddDebugContent(ctx, &capturePolicyTestSink{}, fields, "prompt", ContentKindPrompt, panickingJSONMarshaler{})
 	if len(fields) != 0 {
 		t.Fatalf("panicking serializer emitted fields: %#v", fields)
+	}
+}
+
+func TestAddDebugContentDisabledCategorySkipsSerialization(t *testing.T) {
+	calls := 0
+	ctx := WithContentCapturePolicy(t.Context(), ContentCapturePolicy{Completion: CaptureEnabled})
+	fields := map[string]any{}
+	AddDebugContent(ctx, &capturePolicyTestSink{}, fields, "prompt", ContentKindPrompt, countingJSONMarshaler{calls: &calls})
+	if calls != 0 || len(fields) != 0 {
+		t.Fatalf("disabled category serialized content: calls=%d fields=%#v", calls, fields)
 	}
 }
 
@@ -228,7 +245,7 @@ func TestRedactedOrDisabledContentNeverReachesOTelEvent(t *testing.T) {
 		for _, event := range ended.Events() {
 			for _, attr := range event.Attributes {
 				exported.WriteString(string(attr.Key))
-				exported.WriteString(attr.Value.Emit())
+				exported.WriteString(attr.Value.String())
 			}
 		}
 	}
@@ -245,7 +262,7 @@ func TestRedactedOrDisabledContentNeverReachesOTelEvent(t *testing.T) {
 
 func containsAttribute(attrs []attribute.KeyValue, key, value string) bool {
 	for _, attr := range attrs {
-		if string(attr.Key) == key && attr.Value.Emit() == value {
+		if string(attr.Key) == key && attr.Value.String() == value {
 			return true
 		}
 	}
