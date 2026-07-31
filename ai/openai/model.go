@@ -135,6 +135,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 					}
 					completion.Raw = append(completion.Raw[:0], []byte(chunk.RawJSON())...)
 					snapshot := completion
+					snapshot.Raw = append(json.RawMessage(nil), completion.Raw...)
 					if !ai.SendToken(ctx, out, ai.Token{Type: ai.TokenTypeCompletion, Completion: &snapshot}) {
 						return
 					}

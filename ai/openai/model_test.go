@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/lace-ai/gai/ai"
@@ -586,6 +587,35 @@ func TestModelGenerateStreamSnapshotsUsageOnlyCompletion(t *testing.T) {
 	completion := tokens[0].Completion
 	if completion == nil || completion.Usage.InputTokens != 11 || completion.Usage.OutputTokens != 7 || completion.RequestID != "" || completion.Model != "" || completion.FinishReason != "" {
 		t.Fatalf("completion must be a snapshot of the usage-only chunk, got %#v", completion)
+	}
+}
+
+func TestModelGenerateStreamSnapshotsRawForEachUsageOnlyCompletion(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":7}}\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":13,\"completion_tokens\":9}}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer ts.Close()
+
+	p := New("test-key", nil)
+	p.baseURL = ts.URL
+	m, err := p.Model(GPT41Mini)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var completions []*ai.Completion
+	for token := range m.GenerateStream(t.Context(), ai.AIRequest{Prompt: "hello"}) {
+		if token.Type == ai.TokenTypeCompletion {
+			completions = append(completions, token.Completion)
+		}
+	}
+	if len(completions) != 2 {
+		t.Fatalf("completion count = %d, want 2", len(completions))
+	}
+	if !strings.Contains(string(completions[0].Raw), `"prompt_tokens":11`) || !strings.Contains(string(completions[1].Raw), `"prompt_tokens":13`) {
+		t.Fatalf("completion raw values must remain distinct: first=%s second=%s", completions[0].Raw, completions[1].Raw)
 	}
 }
 
