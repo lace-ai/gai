@@ -211,7 +211,7 @@ func buildChatCompletionParams(model string, req ai.AIRequest, stream bool) (sdk
 	}
 	switch req.Reasoning.Effort {
 	case "":
-	case ai.ReasoningEffortNone, ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh:
+	case ai.ReasoningEffortNone, ai.ReasoningEffortMinimal, ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh, ai.ReasoningEffortXHigh, ai.ReasoningEffortMax:
 		params.ReasoningEffort = shared.ReasoningEffort(req.Reasoning.Effort)
 	default:
 		return sdk.ChatCompletionNewParams{}, fmt.Errorf("%w: OpenAI reasoning effort %q", ai.ErrUnsupportedCapability, req.Reasoning.Effort)
@@ -259,7 +259,7 @@ func openAIDescriptor(model string) ai.ModelDescriptor {
 	}
 	if isOpenAIReasoningFamily(model) {
 		d.ReasoningEffort = ai.FeatureSupportSupported
-		d.ReasoningEfforts = []ai.ReasoningEffort{ai.ReasoningEffortNone, ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh}
+		d.ReasoningEfforts = []ai.ReasoningEffort{ai.ReasoningEffortNone, ai.ReasoningEffortMinimal, ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh, ai.ReasoningEffortXHigh, ai.ReasoningEffortMax}
 	} else if isKnownNonReasoningModel(model) {
 		d.Reasoning, d.ReasoningEffort = ai.FeatureSupportUnsupported, ai.FeatureSupportUnsupported
 	}

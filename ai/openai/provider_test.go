@@ -78,7 +78,7 @@ func TestProviderAggregatesDynamicReasoningDescriptors(t *testing.T) {
 	if len(descriptors) != 2 || descriptors[0].Provider != "openai" || descriptors[0].Model != "future-chat-model" {
 		t.Fatalf("descriptors = %#v", descriptors)
 	}
-	if descriptors[1].Model != "gpt-5.99-preview" || descriptors[1].ReasoningEffort != ai.FeatureSupportSupported || len(descriptors[1].ReasoningEfforts) != 4 || descriptors[1].ReasoningEfforts[0] != ai.ReasoningEffortNone {
+	if descriptors[1].Model != "gpt-5.99-preview" || descriptors[1].ReasoningEffort != ai.FeatureSupportSupported || len(descriptors[1].ReasoningEfforts) != 7 || descriptors[1].ReasoningEfforts[0] != ai.ReasoningEffortNone || descriptors[1].ReasoningEfforts[6] != ai.ReasoningEffortMax {
 		t.Fatalf("dynamic reasoning descriptor = %#v", descriptors[1])
 	}
 	if descriptors[0].ReasoningEffort != ai.FeatureSupportUnknown {

@@ -324,6 +324,23 @@ func TestBuildChatCompletionParamsAssumesPrevalidatedRequest(t *testing.T) {
 	}
 }
 
+func TestOpenAIMapsExtendedReasoningEfforts(t *testing.T) {
+	for _, effort := range []ai.ReasoningEffort{ai.ReasoningEffortMinimal, ai.ReasoningEffortXHigh, ai.ReasoningEffortMax} {
+		t.Run(string(effort), func(t *testing.T) {
+			req := ai.AIRequest{Prompt: "hello", Reasoning: ai.ReasoningConfig{Effort: effort}}
+			if _, err := buildChatCompletionParams(O3, req, false); err != nil {
+				t.Fatalf("buildChatCompletionParams(%q): %v", effort, err)
+			}
+			if _, err := buildResponsesParams(O3, req); err != nil {
+				t.Fatalf("buildResponsesParams(%q): %v", effort, err)
+			}
+			if err := openAIDescriptor(O3).ValidateRequest(req); err != nil {
+				t.Fatalf("descriptor rejected %q: %v", effort, err)
+			}
+		})
+	}
+}
+
 func TestModelPreflightRejectsUnsupportedBeforeTransport(t *testing.T) {
 	requests := 0
 	ts := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requests++ }))
@@ -429,7 +446,7 @@ func TestModelAllowsUnknownDynamicReasoningEffort(t *testing.T) {
 func TestOpenAIDescriptorUsesReasoningFamilyOverlay(t *testing.T) {
 	for _, model := range []string{"o5-pro", "gpt-5.99-preview"} {
 		d := openAIDescriptor(model)
-		if d.ReasoningEffort != ai.FeatureSupportSupported || len(d.ReasoningEfforts) != 4 || d.ReasoningEfforts[0] != ai.ReasoningEffortNone {
+		if d.ReasoningEffort != ai.FeatureSupportSupported || len(d.ReasoningEfforts) != 7 || d.ReasoningEfforts[0] != ai.ReasoningEffortNone || d.ReasoningEfforts[6] != ai.ReasoningEffortMax {
 			t.Fatalf("descriptor for %q = %#v, want supported reasoning efforts", model, d)
 		}
 	}

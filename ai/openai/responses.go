@@ -115,7 +115,7 @@ func buildResponsesParams(model string, req ai.AIRequest) (responses.ResponseNew
 	}
 	if req.Reasoning.Effort != "" {
 		switch req.Reasoning.Effort {
-		case ai.ReasoningEffortNone, ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh:
+		case ai.ReasoningEffortNone, ai.ReasoningEffortMinimal, ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh, ai.ReasoningEffortXHigh, ai.ReasoningEffortMax:
 			params.Reasoning.Effort = shared.ReasoningEffort(req.Reasoning.Effort)
 		default:
 			return responses.ResponseNewParams{}, fmt.Errorf("%w: OpenAI reasoning effort %q", ai.ErrUnsupportedCapability, req.Reasoning.Effort)
