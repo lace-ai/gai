@@ -1,0 +1,62 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"testing"
+
+	"github.com/lace-ai/gai/ai"
+)
+
+func TestLookupOrderToolReturnsKnownOrder(t *testing.T) {
+	t.Parallel()
+
+	response := newLookupOrderTool().Function(context.Background(), &ai.ToolCall{
+		ID:   "call_test",
+		Type: "function",
+		Name: "lookup_order",
+		Args: json.RawMessage(`{"order_id":"lace-1042"}`),
+	})
+	if err := response.ErrorValue(); err != nil {
+		t.Fatalf("lookup order: %v", err)
+	}
+
+	var result orderLookupResult
+	if err := json.Unmarshal([]byte(response.TextValue()), &result); err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	if !result.Found {
+		t.Fatal("expected order to be found")
+	}
+	if result.OrderID != "LACE-1042" {
+		t.Fatalf("unexpected order ID %q", result.OrderID)
+	}
+	if result.Status != "in_transit" {
+		t.Fatalf("unexpected status %q", result.Status)
+	}
+}
+
+func TestLookupOrderToolReturnsStructuredMiss(t *testing.T) {
+	t.Parallel()
+
+	response := newLookupOrderTool().Function(context.Background(), &ai.ToolCall{
+		ID:   "call_test",
+		Type: "function",
+		Name: "lookup_order",
+		Args: json.RawMessage(`{"order_id":"lace-9999"}`),
+	})
+	if err := response.ErrorValue(); err != nil {
+		t.Fatalf("lookup order: %v", err)
+	}
+
+	var result orderLookupResult
+	if err := json.Unmarshal([]byte(response.TextValue()), &result); err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	if result.Found {
+		t.Fatal("expected order not to be found")
+	}
+	if result.OrderID != "LACE-9999" {
+		t.Fatalf("unexpected order ID %q", result.OrderID)
+	}
+}

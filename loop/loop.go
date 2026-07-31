@@ -255,7 +255,13 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 					return
 				}
 
-				prompt, err := l.PromptBuilder.BuildPrompt(iterCtx, l)
+				var prompt string
+				var nativeMessages []ai.RequestMessage
+				if builder, ok := l.PromptBuilder.(gaictx.NativeMessageBuilder); ok {
+					prompt, nativeMessages, err = builder.BuildRequest(iterCtx, l)
+				} else {
+					prompt, err = l.PromptBuilder.BuildPrompt(iterCtx, l)
+				}
 				if err != nil {
 					if cancelErr := cancellationError(iterCtx, err); cancelErr != nil {
 						sendAttemptCanceled(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, cancelErr)
@@ -272,23 +278,7 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 				}
 
 				request := renderedPromptRequest(prompt, l.MaxTokens, toolDefinitions, l.ResponseFormat, l.Reasoning)
-				if builder, ok := l.PromptBuilder.(gaictx.NativeMessageBuilder); ok {
-					request.Messages, err = builder.BuildMessages(iterCtx, l)
-					if err != nil {
-						if cancelErr := cancellationError(iterCtx, err); cancelErr != nil {
-							sendAttemptCanceled(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, cancelErr)
-							cancel()
-							iterState.markCanceled(cancelErr)
-							iterState.finish(nil)
-							return
-						}
-						iterationErr = fmt.Errorf("%w: %w", ErrBuildPrompt, err)
-						sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, iterationErr)
-						cancel()
-						iterState.finish(iterationErr)
-						return
-					}
-				}
+				request.Messages = nativeMessages
 
 				tokens := l.Model.GenerateStream(iterCtx, request)
 

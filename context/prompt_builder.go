@@ -39,11 +39,11 @@ type PromptBuilder interface {
 	SetInput(input PromptInput)
 }
 
-// NativeMessageBuilder optionally exposes provider-neutral request messages.
-// PromptBuilder implementations that do not provide it continue to use the
-// rendered prompt as their request input.
+// NativeMessageBuilder optionally constructs both representations of a model
+// request. PromptBuilder implementations that do not provide it continue to
+// use the rendered prompt as their request input.
 type NativeMessageBuilder interface {
-	BuildMessages(ctx context.Context, conv Conversation) ([]ai.RequestMessage, error)
+	BuildRequest(ctx context.Context, conv Conversation) (string, []ai.RequestMessage, error)
 }
 
 // NativeConversation exposes provider-neutral conversation history alongside
@@ -318,19 +318,29 @@ type basePromptConversation struct{}
 
 func (basePromptConversation) Messages() []Message { return nil }
 
-// BuildMessages builds the provider-neutral request messages for conv. The
-// initial user message is the prompt without rendered conversation history;
-// native conversation entries follow when conv provides them.
-func (b *Builder) BuildMessages(ctx context.Context, conv Conversation) ([]ai.RequestMessage, error) {
+// BuildRequest builds both the compatibility prompt and provider-neutral
+// messages for conv. With no native history, the native user message reuses the
+// compatibility prompt so render callbacks fire only once. Once native history
+// exists, the native user message remains the history-free base prompt.
+func (b *Builder) BuildRequest(ctx context.Context, conv Conversation) (string, []ai.RequestMessage, error) {
+	prompt, err := b.BuildPrompt(ctx, conv)
+	if err != nil {
+		return "", nil, err
+	}
+	var nativeMessages []ai.RequestMessage
+	if native, ok := conv.(NativeConversation); ok {
+		nativeMessages = native.NativeMessages()
+	}
+	if len(nativeMessages) == 0 {
+		return prompt, []ai.RequestMessage{{Role: ai.RequestMessageRoleUser, Text: prompt}}, nil
+	}
 	basePrompt, err := b.BuildPrompt(ctx, basePromptConversation{})
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	messages := []ai.RequestMessage{{Role: ai.RequestMessageRoleUser, Text: basePrompt}}
-	if native, ok := conv.(NativeConversation); ok {
-		messages = append(messages, native.NativeMessages()...)
-	}
-	return messages, nil
+	messages = append(messages, nativeMessages...)
+	return prompt, messages, nil
 }
 
 func (b *Builder) Input() PromptInput {

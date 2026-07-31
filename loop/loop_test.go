@@ -154,23 +154,36 @@ func (b *stubPromptBuilder) BuildPrompt(ctx context.Context, conv gaictx.Convers
 	return prompt.String(), nil
 }
 
-func (b *stubPromptBuilder) BuildMessages(ctx context.Context, conv gaictx.Conversation) ([]ai.RequestMessage, error) {
-	return testNativeMessages(ctx, b, conv)
+func (b *stubPromptBuilder) BuildRequest(ctx context.Context, conv gaictx.Conversation) (string, []ai.RequestMessage, error) {
+	prompt, err := b.BuildPrompt(ctx, conv)
+	if err != nil {
+		return "", nil, err
+	}
+	messages, err := testNativeMessages(ctx, b, conv, prompt)
+	if err != nil {
+		return "", nil, err
+	}
+	return prompt, messages, nil
 }
 
 type emptyPromptConversation struct{}
 
 func (emptyPromptConversation) Messages() []gaictx.Message { return nil }
 
-func testNativeMessages(ctx context.Context, builder gaictx.PromptBuilder, conv gaictx.Conversation) ([]ai.RequestMessage, error) {
+func testNativeMessages(ctx context.Context, builder gaictx.PromptBuilder, conv gaictx.Conversation, prompt string) ([]ai.RequestMessage, error) {
+	var nativeMessages []ai.RequestMessage
+	if native, ok := conv.(gaictx.NativeConversation); ok {
+		nativeMessages = native.NativeMessages()
+	}
+	if len(nativeMessages) == 0 {
+		return []ai.RequestMessage{{Role: ai.RequestMessageRoleUser, Text: prompt}}, nil
+	}
 	base, err := builder.BuildPrompt(ctx, emptyPromptConversation{})
 	if err != nil {
 		return nil, err
 	}
 	messages := []ai.RequestMessage{{Role: ai.RequestMessageRoleUser, Text: base}}
-	if native, ok := conv.(gaictx.NativeConversation); ok {
-		messages = append(messages, native.NativeMessages()...)
-	}
+	messages = append(messages, nativeMessages...)
 	return messages, nil
 }
 
@@ -1068,6 +1081,46 @@ func TestLoopNativeHistoryIncludesBaseRequestWithoutRenderedHistory(t *testing.T
 	}
 	if !strings.Contains(second.Prompt, "payload") {
 		t.Fatalf("complete rendered fallback omitted tool history: %q", second.Prompt)
+	}
+}
+
+func TestLoopNativeRequestRendersInitialPromptOnce(t *testing.T) {
+	t.Parallel()
+
+	model := &scriptedStreamModel{sequences: [][]ai.Token{
+		{{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-1", Type: "function", Name: "echo", Args: json.RawMessage(`{"text":"payload"}`)}}},
+		{{Type: ai.TokenTypeText, Data: []byte("done")}},
+	}}
+	renderer := &gaictx.SimpleRenderer{}
+	var rendered []string
+	if err := renderer.SetRenderResultCallback(context.Background(), func(_ []gaictx.Part, prompt string) {
+		rendered = append(rendered, prompt)
+	}); err != nil {
+		t.Fatalf("SetRenderResultCallback failed: %v", err)
+	}
+	promptBuilder := gaictx.New(gaictx.Definition{
+		Renderer:           renderer,
+		SystemInstructions: []gaictx.Part{gaictx.NewTextPart("system")},
+		PromptInput:        gaictx.PromptInput{User: gaictx.NewTextContent("user")},
+	})
+	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, promptBuilder, nil)
+	l.MaxLoopIterations = 3
+
+	if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+	if len(rendered) != 3 {
+		t.Fatalf("render callbacks = %d, want one initial render and two distinct follow-up renders: %#v", len(rendered), rendered)
+	}
+	if rendered[0] != model.Requests()[0].Prompt {
+		t.Fatalf("initial callback prompt = %q, want request prompt %q", rendered[0], model.Requests()[0].Prompt)
+	}
+	requests := model.Requests()
+	if len(requests) != 2 || len(requests[0].Messages) != 1 || requests[0].Messages[0].Text != requests[0].Prompt {
+		t.Fatalf("initial native request = %#v, want its sole native message to reuse the compatibility prompt", requests)
+	}
+	if !strings.Contains(requests[1].Prompt, "payload") || strings.Contains(requests[1].Messages[0].Text, "payload") {
+		t.Fatalf("follow-up request must retain rendered fallback history and separate native base: %#v", requests[1])
 	}
 }
 

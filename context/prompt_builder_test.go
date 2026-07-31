@@ -106,18 +106,21 @@ func (c nativeMessageConversation) NativeMessages() []ai.RequestMessage {
 	return c.nativeMessages
 }
 
-func TestBuildMessagesCombinesBasePromptAndNativeConversation(t *testing.T) {
+func TestBuildRequestCombinesPromptAndNativeConversation(t *testing.T) {
 	t.Parallel()
 
 	builder := New(Definition{
 		SystemInstructions: []Part{NewTextPart("system")},
 		PromptInput:        PromptInput{User: NewTextContent("question")},
 	})
-	messages, err := builder.BuildMessages(context.Background(), nativeMessageConversation{
+	prompt, messages, err := builder.BuildRequest(context.Background(), nativeMessageConversation{
 		nativeMessages: []ai.RequestMessage{{Role: ai.RequestMessageRoleAssistant, Text: "answer"}},
 	})
 	if err != nil {
-		t.Fatalf("BuildMessages failed: %v", err)
+		t.Fatalf("BuildRequest failed: %v", err)
+	}
+	if !strings.Contains(prompt, "system") || !strings.Contains(prompt, "question") {
+		t.Fatalf("compatibility prompt = %q", prompt)
 	}
 	if len(messages) != 2 {
 		t.Fatalf("messages = %#v, want base user and native assistant messages", messages)
