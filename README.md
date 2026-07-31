@@ -358,7 +358,8 @@ defer func() {
   if err := provider.Shutdown(context.Background()); err != nil {
     log.Printf("flush Langfuse traces: %v", err)
   }
-}()otel.SetTracerProvider(provider)
+}()
+otel.SetTracerProvider(provider)
 ```
 
 The caller owns provider shutdown so the final batch can be flushed and any export error can be observed.
