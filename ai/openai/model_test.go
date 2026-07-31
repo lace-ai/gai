@@ -108,6 +108,52 @@ func TestModelGenerateWithResponsesTransportMapsToolContinuationAndNoneEffort(t 
 	}
 }
 
+func TestModelGenerateWithResponsesTransportPreservesReasoningItemsAcrossToolContinuation(t *testing.T) {
+	var continuation map[string]any
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/responses" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		if requests == 1 {
+			_, _ = w.Write([]byte(`{"id":"resp_1","status":"completed","output":[{"id":"rs_1","type":"reasoning","encrypted_content":"opaque-reasoning","summary":[],"status":"completed"},{"type":"function_call","call_id":"call_1","name":"search","arguments":"{\"q\":\"go\"}","status":"completed"}],"usage":{"input_tokens":1,"output_tokens":1}}`))
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&continuation); err != nil {
+			t.Fatalf("decode continuation: %v", err)
+		}
+		_, _ = w.Write([]byte(`{"id":"resp_2","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer ts.Close()
+
+	p := New("test-key", nil, WithResponsesTransport())
+	p.baseURL = ts.URL
+	m, err := p.Model("gpt-5.6-terra")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := m.Generate(t.Context(), ai.AIRequest{Prompt: "find go", Tools: []ai.ToolDefinition{{Type: "function", Name: "search", Description: "Search", Parameters: json.RawMessage(`{"type":"object"}`)}}})
+	if err != nil {
+		t.Fatalf("first Generate: %v", err)
+	}
+	if len(first.ToolCalls) != 1 || string(first.ToolCalls[0].ThoughtSignature) == "" {
+		t.Fatalf("first tool calls = %#v, want reasoning signature", first.ToolCalls)
+	}
+	_, err = m.Generate(t.Context(), ai.AIRequest{Messages: []ai.RequestMessage{
+		{Role: ai.RequestMessageRoleAssistant, ToolCalls: []ai.RequestToolCall{{ID: first.ToolCalls[0].ID, Name: first.ToolCalls[0].Name, Arguments: first.ToolCalls[0].Args, ThoughtSignature: first.ToolCalls[0].ThoughtSignature}}},
+		{Role: ai.RequestMessageRoleTool, ToolResult: &ai.RequestToolResult{ToolCallID: first.ToolCalls[0].ID, Name: first.ToolCalls[0].Name, Content: "result"}},
+	}})
+	if err != nil {
+		t.Fatalf("continuation Generate: %v", err)
+	}
+	input := continuation["input"].([]any)
+	if len(input) != 3 || input[0].(map[string]any)["type"] != "reasoning" || input[0].(map[string]any)["encrypted_content"] != "opaque-reasoning" || input[1].(map[string]any)["type"] != "function_call" || input[2].(map[string]any)["type"] != "function_call_output" {
+		t.Fatalf("continuation input = %#v", input)
+	}
+}
+
 func TestModelGenerateWithResponsesTransportRejectsInvalidToolCallArguments(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/responses" {

@@ -177,7 +177,22 @@ func mapResponsesMessages(messages []ai.RequestMessage) (responses.ResponseInput
 			if message.Text != "" {
 				input = append(input, responses.ResponseInputItemParamOfMessage(message.Text, responses.EasyInputMessageRoleAssistant))
 			}
+			seenSignatures := map[string]struct{}{}
 			for _, call := range message.ToolCalls {
+				if len(call.ThoughtSignature) > 0 {
+					signature := string(call.ThoughtSignature)
+					if _, seen := seenSignatures[signature]; !seen {
+						var reasoningItems []responses.ResponseReasoningItem
+						if err := json.Unmarshal(call.ThoughtSignature, &reasoningItems); err != nil {
+							return nil, fmt.Errorf("decode OpenAI reasoning items: %w", err)
+						}
+						for _, item := range reasoningItems {
+							params := item.ToParam()
+							input = append(input, responses.ResponseInputItemUnionParam{OfReasoning: &params})
+						}
+						seenSignatures[signature] = struct{}{}
+					}
+				}
 				input = append(input, responses.ResponseInputItemParamOfFunctionCall(string(call.Arguments), call.ID, call.Name))
 			}
 		case ai.RequestMessageRoleTool:
@@ -199,6 +214,20 @@ func responseFromResponses(response *responses.Response) (*ai.AIResponse, error)
 		Raw: json.RawMessage(response.RawJSON()), Text: response.OutputText(), FinishReason: string(response.Status),
 		InputTokens: int(response.Usage.InputTokens), OutputTokens: int(response.Usage.OutputTokens), ReasoningTokens: int(response.Usage.OutputTokensDetails.ReasoningTokens),
 	}
+	var reasoningItems []json.RawMessage
+	for _, output := range response.Output {
+		if output.Type == "reasoning" {
+			reasoningItems = append(reasoningItems, json.RawMessage(output.RawJSON()))
+		}
+	}
+	var thoughtSignature []byte
+	if len(reasoningItems) > 0 {
+		var err error
+		thoughtSignature, err = json.Marshal(reasoningItems)
+		if err != nil {
+			return nil, fmt.Errorf("encode OpenAI reasoning items: %w", err)
+		}
+	}
 	for _, output := range response.Output {
 		if output.Type != "function_call" {
 			continue
@@ -207,7 +236,7 @@ func responseFromResponses(response *responses.Response) (*ai.AIResponse, error)
 		if !json.Valid(args) {
 			return nil, fmt.Errorf("invalid JSON arguments for tool %q", output.Name)
 		}
-		result.ToolCalls = append(result.ToolCalls, ai.ToolCall{ID: output.CallID, Type: "function", Name: output.Name, Args: args})
+		result.ToolCalls = append(result.ToolCalls, ai.ToolCall{ID: output.CallID, Type: "function", Name: output.Name, Args: args, ThoughtSignature: append([]byte(nil), thoughtSignature...)})
 	}
 	return result, nil
 }
