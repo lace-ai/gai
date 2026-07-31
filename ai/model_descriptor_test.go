@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 )
@@ -181,6 +182,27 @@ func TestModelDescriptorRejectsUnsupportedNativeCapabilities(t *testing.T) {
 	toolErr := (ModelDescriptor{Model: "test", NativeTools: FeatureSupportUnsupported}).ValidateRequest(AIRequest{Tools: []ToolDefinition{{Type: "function", Name: "search", Description: "Search", Parameters: []byte(`{"type":"object"}`)}}})
 	if !errors.Is(toolErr, ErrUnsupportedCapability) {
 		t.Fatalf("native tool error = %v, want unsupported capability", toolErr)
+	}
+}
+
+func TestModelDescriptorRejectsToolHistoryWithoutNativeTools(t *testing.T) {
+	d := ModelDescriptor{
+		Model:          "test",
+		NativeMessages: FeatureSupportSupported,
+		NativeTools:    FeatureSupportUnsupported,
+	}
+	req := AIRequest{Messages: []RequestMessage{
+		{Role: RequestMessageRoleAssistant, ToolCalls: []RequestToolCall{{ID: "call_1", Name: "search", Arguments: json.RawMessage(`{"q":"x"}`)}}},
+		{Role: RequestMessageRoleTool, ToolResult: &RequestToolResult{ToolCallID: "call_1", Name: "search", Content: "ok"}},
+	}}
+
+	err := d.ValidateRequest(req)
+	if !errors.Is(err, ErrUnsupportedCapability) {
+		t.Fatalf("tool history error = %v, want unsupported capability", err)
+	}
+	var unsupported *UnsupportedCapabilityError
+	if !errors.As(err, &unsupported) || unsupported.Capability != "native tools" {
+		t.Fatalf("error = %#v, want native tools capability error", err)
 	}
 }
 

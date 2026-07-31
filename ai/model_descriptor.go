@@ -322,8 +322,18 @@ func (d ModelDescriptor) ValidateRequest(req AIRequest) error {
 	if len(req.Messages) > 0 && d.NativeMessages == FeatureSupportUnsupported {
 		return d.unsupported("native messages")
 	}
-	if len(req.Tools) > 0 && (d.ToolCalling == FeatureSupportUnsupported || d.NativeTools == FeatureSupportUnsupported) {
+	usesToolHistory := false
+	for _, message := range req.Messages {
+		if len(message.ToolCalls) > 0 || message.ToolResult != nil {
+			usesToolHistory = true
+			break
+		}
+	}
+	if len(req.Tools) > 0 && d.ToolCalling == FeatureSupportUnsupported {
 		return d.unsupported("tool calling")
+	}
+	if (len(req.Tools) > 0 || usesToolHistory) && d.NativeTools == FeatureSupportUnsupported {
+		return d.unsupported("native tools")
 	}
 	if len(req.Tools) > 0 && req.ToolChoice.Mode != "" && len(d.ToolChoiceModes) > 0 && !containsToolChoiceMode(d.ToolChoiceModes, req.ToolChoice.Mode) {
 		return d.unsupported("tool choice mode " + string(req.ToolChoice.Mode))
