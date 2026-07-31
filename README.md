@@ -14,7 +14,7 @@
   </p>
 </div>
 
-GAI gives Go applications typed model and tool contracts, provider-neutral requests, ordered streaming events, prompt and history management, workflow middleware, and OpenTelemetry instrumentation. Provider adapters still expose native capabilities such as function tools, structured output, reasoning controls, and native conversation history when the provider supports them.
+GAI is a composable Go runtime for model calls, tools, streaming, context, history, and observability. Shared APIs keep application code provider-neutral, while built-in adapters preserve native tools, structured output, reasoning controls, and message history where supported.
 
 > **Project status:** GAI is pre-v1. It is already usable, but public APIs may still change before the first stable release.
 
@@ -56,7 +56,7 @@ GAI is aimed at Go teams that want a small runtime they can compose into an appl
 - **Typed application boundaries.** Models, messages, tools, structured outputs, workflow inputs, and results use Go types.
 - **Provider-neutral without flattening everything.** Built-in adapters preserve native tools, native messages, structured output, usage, and reasoning where available.
 - **Causally ordered streaming.** Tokens, attempts, retries, completed iterations, errors, cancellation, and completion arrive through one stream.
-- **Composable production primitives.** Token budgets, persisted history, optional summarization, middleware stages, debug events, and OpenTelemetry are available without forcing a hosting model.
+- **Composable runtime primitives.** Token budgets, persisted history, optional summarization, middleware stages, debug events, and OpenTelemetry are available without forcing a hosting model.
 
 ## Requirements
 
@@ -354,8 +354,11 @@ provider, err := langfuse.NewTracerProvider(ctx, langfuse.Config{
 if err != nil {
   return err
 }
-defer provider.Shutdown(context.Background())
-otel.SetTracerProvider(provider)
+defer func() {
+  if err := provider.Shutdown(context.Background()); err != nil {
+    log.Printf("flush Langfuse traces: %v", err)
+  }
+}()otel.SetTracerProvider(provider)
 ```
 
 The caller owns provider shutdown so the final batch can be flushed and any export error can be observed.
