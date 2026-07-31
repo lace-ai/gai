@@ -257,9 +257,12 @@ func openAIDescriptor(model string) ai.ModelDescriptor {
 		JSONOutput:  ai.FeatureSupportSupported, JSONSchemaOutput: ai.FeatureSupportSupported,
 		Tokenizer: ai.TokenizerDescriptor{Available: ai.FeatureSupportUnsupported},
 	}
-	if isOpenAIReasoningFamily(model) {
+	if isGPT5ReasoningFamily(model) {
 		d.ReasoningEffort = ai.FeatureSupportSupported
 		d.ReasoningEfforts = []ai.ReasoningEffort{ai.ReasoningEffortNone, ai.ReasoningEffortMinimal, ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh, ai.ReasoningEffortXHigh, ai.ReasoningEffortMax}
+	} else if isOpenAIReasoningFamily(model) {
+		d.ReasoningEffort = ai.FeatureSupportSupported
+		d.ReasoningEfforts = []ai.ReasoningEffort{ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh}
 	} else if isKnownNonReasoningModel(model) {
 		d.Reasoning, d.ReasoningEffort = ai.FeatureSupportUnsupported, ai.FeatureSupportUnsupported
 	}

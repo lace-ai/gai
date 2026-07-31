@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/lace-ai/gai/ai"
@@ -366,13 +367,13 @@ func TestOpenAIMapsExtendedReasoningEfforts(t *testing.T) {
 	for _, effort := range []ai.ReasoningEffort{ai.ReasoningEffortMinimal, ai.ReasoningEffortXHigh, ai.ReasoningEffortMax} {
 		t.Run(string(effort), func(t *testing.T) {
 			req := ai.AIRequest{Prompt: "hello", Reasoning: ai.ReasoningConfig{Effort: effort}}
-			if _, err := buildChatCompletionParams(O3, req, false); err != nil {
+			if _, err := buildChatCompletionParams("gpt-5.6-terra", req, false); err != nil {
 				t.Fatalf("buildChatCompletionParams(%q): %v", effort, err)
 			}
-			if _, err := buildResponsesParams(O3, req); err != nil {
+			if _, err := buildResponsesParams("gpt-5.6-terra", req); err != nil {
 				t.Fatalf("buildResponsesParams(%q): %v", effort, err)
 			}
-			if err := openAIDescriptor(O3).ValidateRequest(req); err != nil {
+			if err := openAIDescriptor("gpt-5.6-terra").ValidateRequest(req); err != nil {
 				t.Fatalf("descriptor rejected %q: %v", effort, err)
 			}
 		})
@@ -482,10 +483,17 @@ func TestModelAllowsUnknownDynamicReasoningEffort(t *testing.T) {
 }
 
 func TestOpenAIDescriptorUsesReasoningFamilyOverlay(t *testing.T) {
-	for _, model := range []string{"o5-pro", "gpt-5.99-preview"} {
-		d := openAIDescriptor(model)
-		if d.ReasoningEffort != ai.FeatureSupportSupported || len(d.ReasoningEfforts) != 7 || d.ReasoningEfforts[0] != ai.ReasoningEffortNone || d.ReasoningEfforts[6] != ai.ReasoningEffortMax {
-			t.Fatalf("descriptor for %q = %#v, want supported reasoning efforts", model, d)
+	tests := []struct {
+		model   string
+		efforts []ai.ReasoningEffort
+	}{
+		{"o5-pro", []ai.ReasoningEffort{ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh}},
+		{"gpt-5.99-preview", []ai.ReasoningEffort{ai.ReasoningEffortNone, ai.ReasoningEffortMinimal, ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh, ai.ReasoningEffortXHigh, ai.ReasoningEffortMax}},
+	}
+	for _, tt := range tests {
+		d := openAIDescriptor(tt.model)
+		if d.ReasoningEffort != ai.FeatureSupportSupported || !slices.Equal(d.ReasoningEfforts, tt.efforts) {
+			t.Fatalf("descriptor for %q = %#v, want efforts %#v", tt.model, d, tt.efforts)
 		}
 	}
 	d := openAIDescriptor("future-chat-model")
