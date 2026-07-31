@@ -142,7 +142,7 @@ func buildResponsesParams(model string, req ai.AIRequest) (responses.ResponseNew
 			}
 			params.ToolChoice.OfToolChoiceMode = param.NewOpt(responses.ToolChoiceOptionsRequired)
 		default:
-			return responses.ResponseNewParams{}, fmt.Errorf("unsupported OpenAI tool choice mode %q", req.ToolChoice.Mode)
+			return responses.ResponseNewParams{}, fmt.Errorf("%w: unsupported OpenAI tool choice mode %q", ai.ErrUnsupportedCapability, req.ToolChoice.Mode)
 		}
 	}
 	return params, nil
