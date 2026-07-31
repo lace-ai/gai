@@ -16,6 +16,26 @@ func TestModelDescriptorZeroValueIsUnknownAndPermitsRequests(t *testing.T) {
 	}
 }
 
+func TestModelDescriptorSupportsNativeTools(t *testing.T) {
+	tests := []struct {
+		name    string
+		support FeatureSupport
+		want    bool
+	}{
+		{name: "supported", support: FeatureSupportSupported, want: true},
+		{name: "unknown", support: FeatureSupportUnknown},
+		{name: "unsupported", support: FeatureSupportUnsupported},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := (ModelDescriptor{NativeTools: tt.support}).SupportsNativeTools(); got != tt.want {
+				t.Fatalf("SupportsNativeTools() = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestModelDescriptorCopy(t *testing.T) {
 	d := ModelDescriptor{Model: "test", ToolCalling: FeatureSupportSupported, NativeMessages: FeatureSupportSupported, ToolChoiceModes: []ToolChoiceMode{ToolChoiceAuto}, ReasoningEfforts: []ReasoningEffort{ReasoningEffortLow}, Tokenizer: TokenizerDescriptor{Available: FeatureSupportSupported, Fidelity: TokenizerFidelityExact}}
 	copy := d.Copy()

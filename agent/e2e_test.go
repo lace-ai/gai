@@ -167,15 +167,18 @@ func TestAgentWorkflowEndToEndWithToolCall(t *testing.T) {
 	if len(requests) != 2 {
 		t.Fatalf("expected two model requests, got %d", len(requests))
 	}
-	if requests[0].MaxTokens != 64 || len(requests[0].Tools) != 1 || requests[0].Tools[0].Name != "echo" {
-		t.Fatalf("first request did not include limits and tools: %+v", requests[0])
+	if requests[0].MaxTokens != 64 || len(requests[0].Tools) != 0 {
+		t.Fatalf("first request did not preserve limits or text tool transport: %+v", requests[0])
+	}
+	if !strings.Contains(requests[0].Prompt, `{"type":"function","name":"<tool-name>","arguments":{...}}`) {
+		t.Fatalf("first request did not include the text tool protocol:\n%s", requests[0].Prompt)
 	}
 	for index, request := range requests {
 		if request.ResponseFormat.Type != ai.ResponseFormatJSONSchema || request.ResponseFormat.Name != "answer" || string(request.ResponseFormat.Schema) != expectedSchema {
 			t.Fatalf("request %d did not preserve response format: %+v", index, request.ResponseFormat)
 		}
-		if len(request.Tools) != 1 || request.Tools[0].Name != "echo" {
-			t.Fatalf("request %d did not preserve native tools: %+v", index, request.Tools)
+		if len(request.Tools) != 0 {
+			t.Fatalf("request %d sent provider-native tools during text transport: %+v", index, request.Tools)
 		}
 	}
 	if !strings.Contains(requests[1].Prompt, "tool res: tool says hi") {

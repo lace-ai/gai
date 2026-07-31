@@ -43,11 +43,12 @@ type Definition struct {
 	Name string
 	// Model performs the agent's model calls.
 	Model ai.Model
-	// Tools are available to the model during loop execution. Unless the model
-	// implements ai.NativeToolModel and NativeTools returns true, their
-	// definitions and text-based invocation protocol are added as the first
-	// prompt context source unless its builder already contains a
-	// tool_definitions source.
+	// Tools are available to the model during loop execution. When the model's
+	// ai.ModelDescriber descriptor reports native tools are supported, their
+	// definitions and text-based invocation protocol are not added to the
+	// prompt. Models without a descriptor use ai.NativeToolModel as a legacy
+	// fallback. Otherwise, the protocol is added as the first prompt context
+	// source unless its builder already contains a tool_definitions source.
 	Tools []loop.Tool
 	// ToolDefinitionOptions configure the auto-prepended tool-definitions prompt
 	// source used for Tools.
@@ -143,7 +144,8 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 		return nil, loop.ErrPromptNotConfigured
 	}
 	promptBuilder.SetInput(input.Prompt)
-	if len(a.def.Tools) > 0 && !usesNativeTools(a.def.Model) && !hasContextSource(promptBuilder, "tool_definitions") {
+	nativeTools := usesNativeTools(a.def.Model)
+	if len(a.def.Tools) > 0 && !nativeTools && !hasContextSource(promptBuilder, "tool_definitions") {
 		toolSource, err := tooldefinitions.New(nil, a.def.Tools, a.def.DebugSink, a.def.ToolDefinitionOptions...)
 		if err != nil {
 			return nil, err
@@ -163,6 +165,9 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 	}
 
 	l := loop.New(a.def.Model, a.def.Tools, promptBuilder, a.def.ToolResponseProcessor)
+	if !nativeTools {
+		l.ToolTransport = loop.ToolTransportText
+	}
 	if a.def.Limits.MaxLoopIterations > 0 {
 		l.MaxLoopIterations = a.def.Limits.MaxLoopIterations
 	}
@@ -180,6 +185,9 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 }
 
 func usesNativeTools(model ai.Model) bool {
+	if describer, ok := model.(ai.ModelDescriber); ok {
+		return describer.Descriptor().SupportsNativeTools()
+	}
 	native, ok := model.(ai.NativeToolModel)
 	return ok && native.NativeTools()
 }

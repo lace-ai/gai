@@ -34,6 +34,24 @@ type disabledNativeToolWorkflowModel struct {
 
 func (disabledNativeToolWorkflowModel) NativeTools() bool { return false }
 
+type describedToolWorkflowModel struct {
+	*scriptedWorkflowModel
+	descriptor        ai.ModelDescriptor
+	legacyNativeTools bool
+}
+
+func (m describedToolWorkflowModel) Descriptor() ai.ModelDescriptor { return m.descriptor }
+func (m describedToolWorkflowModel) NativeTools() bool              { return m.legacyNativeTools }
+func (m describedToolWorkflowModel) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.Token {
+	if err := m.descriptor.ValidateRequest(req); err != nil {
+		out := make(chan ai.Token, 1)
+		out <- ai.Token{Type: ai.TokenTypeErr, Err: err}
+		close(out)
+		return out
+	}
+	return m.scriptedWorkflowModel.GenerateStream(ctx, req)
+}
+
 func (s testContextSource) Name() string { return s.name }
 func (s testContextSource) Function(context.Context, int) (gaictx.Part, error) {
 	return gaictx.NewTextPart(s.name), nil
@@ -63,8 +81,8 @@ func (b *testPromptBuilder) BuildPrompt(ctx context.Context, conv gaictx.Convers
 	return b.prompt, nil
 }
 
-func (b *testPromptBuilder) BuildMessages(ctx context.Context, conv gaictx.Conversation) ([]ai.RequestMessage, error) {
-	return []ai.RequestMessage{{Role: ai.RequestMessageRoleUser, Text: b.prompt}}, nil
+func (b *testPromptBuilder) BuildRequest(ctx context.Context, conv gaictx.Conversation) (string, []ai.RequestMessage, error) {
+	return b.prompt, []ai.RequestMessage{{Role: ai.RequestMessageRoleUser, Text: b.prompt}}, nil
 }
 
 func (b *testPromptBuilder) Input() gaictx.PromptInput {
@@ -251,6 +269,109 @@ func TestAgentNativeToolModelWithoutSupportAddsPromptToolProtocol(t *testing.T) 
 	}
 	if !strings.Contains(prompt, `{"type":"function","name":"<tool-name>","arguments":{...}}`) {
 		t.Fatalf("disabled native tool model prompt missing tool protocol:\n%s", prompt)
+	}
+}
+
+func TestAgentModelDescriberControlsPromptToolProtocol(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name               string
+		nativeTools        ai.FeatureSupport
+		legacyNativeTools  bool
+		wantPromptProtocol bool
+	}{
+		{name: "supported overrides legacy false", nativeTools: ai.FeatureSupportSupported},
+		{name: "unknown ignores legacy support", nativeTools: ai.FeatureSupportUnknown, legacyNativeTools: true, wantPromptProtocol: true},
+		{name: "unsupported ignores legacy support", nativeTools: ai.FeatureSupportUnsupported, legacyNativeTools: true, wantPromptProtocol: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			builder := gaictx.New(gaictx.Definition{Renderer: &gaictx.SimpleRenderer{}})
+			assistant := agent.New(agent.Definition{
+				Model: describedToolWorkflowModel{
+					scriptedWorkflowModel: &scriptedWorkflowModel{},
+					descriptor:            ai.ModelDescriptor{NativeTools: tt.nativeTools},
+					legacyNativeTools:     tt.legacyNativeTools,
+				},
+				Tools: []loop.Tool{loop.NewEchoTool()},
+				Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+					return builder, nil
+				},
+			})
+
+			if _, err := assistant.NewRun(context.Background(), textRunInput("use echo")); err != nil {
+				t.Fatalf("NewRun failed: %v", err)
+			}
+			hasPromptProtocol := len(builder.ContextSources) == 1 && builder.ContextSources[0].Name() == "tool_definitions"
+			if hasPromptProtocol != tt.wantPromptProtocol {
+				t.Fatalf("prompt protocol = %t, want %t; sources: %+v", hasPromptProtocol, tt.wantPromptProtocol, builder.ContextSources)
+			}
+		})
+	}
+}
+
+func TestAgentResolvesToolTransportForPromptAndRequest(t *testing.T) {
+	tests := []struct {
+		name               string
+		described          bool
+		nativeTools        ai.FeatureSupport
+		legacyNativeTools  bool
+		wantPromptProtocol bool
+		wantRequestTools   bool
+	}{
+		{name: "descriptor supported", described: true, nativeTools: ai.FeatureSupportSupported, wantRequestTools: true},
+		{name: "descriptor unknown", described: true, nativeTools: ai.FeatureSupportUnknown, legacyNativeTools: true, wantPromptProtocol: true},
+		{name: "descriptor unsupported", described: true, nativeTools: ai.FeatureSupportUnsupported, legacyNativeTools: true, wantPromptProtocol: true},
+		{name: "legacy native model", legacyNativeTools: true, wantRequestTools: true},
+		{name: "legacy text model", wantPromptProtocol: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			builder := gaictx.New(gaictx.Definition{Renderer: &gaictx.SimpleRenderer{}})
+			model := &scriptedWorkflowModel{scripts: [][]ai.Token{{}}}
+			var configuredModel ai.Model = model
+			if tt.described {
+				configuredModel = describedToolWorkflowModel{
+					scriptedWorkflowModel: model,
+					descriptor:            ai.ModelDescriptor{NativeTools: tt.nativeTools},
+					legacyNativeTools:     tt.legacyNativeTools,
+				}
+			} else if tt.legacyNativeTools {
+				configuredModel = nativeToolWorkflowModel{model}
+			}
+
+			assistant := agent.New(agent.Definition{
+				Model: configuredModel,
+				Tools: []loop.Tool{loop.NewEchoTool()},
+				Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+					return builder, nil
+				},
+			})
+			workflow, err := assistant.NewRun(context.Background(), textRunInput("use echo"))
+			if err != nil {
+				t.Fatalf("NewRun failed: %v", err)
+			}
+			consumed := consumeWorkflow(t, workflow)
+			if len(consumed.errs) != 0 {
+				t.Fatalf("workflow errors: %v", consumed.errs)
+			}
+			if got := len(builder.ContextSources) == 1 && builder.ContextSources[0].Name() == "tool_definitions"; got != tt.wantPromptProtocol {
+				t.Fatalf("prompt protocol = %t, want %t; sources: %+v", got, tt.wantPromptProtocol, builder.ContextSources)
+			}
+			requests := model.Requests()
+			if len(requests) != 1 {
+				t.Fatalf("requests = %d, want 1", len(requests))
+			}
+			if got := len(requests[0].Tools) > 0; got != tt.wantRequestTools {
+				t.Fatalf("request tools = %#v, want present=%t", requests[0].Tools, tt.wantRequestTools)
+			}
+			if len(workflow.Loop.Tools) != 1 || workflow.Loop.Tools[0].Name() != "echo" {
+				t.Fatalf("loop lost executable tools: %#v", workflow.Loop.Tools)
+			}
+		})
 	}
 }
 
