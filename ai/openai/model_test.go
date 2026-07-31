@@ -107,6 +107,28 @@ func TestModelGenerateWithResponsesTransportMapsToolContinuationAndNoneEffort(t 
 	}
 }
 
+func TestModelGenerateWithResponsesTransportRejectsInvalidToolCallArguments(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/responses" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_1","status":"completed","output":[{"type":"function_call","call_id":"call_1","name":"search","arguments":"not-json","status":"completed"}],"usage":{"input_tokens":11,"output_tokens":7}}`))
+	}))
+	defer ts.Close()
+
+	p := New("test-key", nil, WithResponsesTransport())
+	p.baseURL = ts.URL
+	m, err := p.Model("gpt-5.6-terra")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = m.Generate(t.Context(), ai.AIRequest{Prompt: "hello"})
+	if err == nil || err.Error() != `invalid JSON arguments for tool "search"` {
+		t.Fatalf("Generate error = %v, want invalid tool arguments error", err)
+	}
+}
+
 func TestBuildResponsesParamsWrapsUnsupportedToolChoiceMode(t *testing.T) {
 	_, err := buildResponsesParams("gpt-5.6-terra", ai.AIRequest{
 		Prompt: "hello",

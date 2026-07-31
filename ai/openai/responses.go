@@ -24,7 +24,7 @@ func (m *Model) generateResponses(ctx context.Context, req ai.AIRequest) (*ai.AI
 	if response.Error.Message != "" {
 		return nil, fmt.Errorf("OpenAI Responses API: %s", response.Error.Message)
 	}
-	return responseFromResponses(response), nil
+	return responseFromResponses(response)
 }
 
 func (m *Model) generateResponsesStream(ctx context.Context, out chan<- ai.Token, req ai.AIRequest) {
@@ -175,7 +175,7 @@ func mapResponsesMessages(messages []ai.RequestMessage) (responses.ResponseInput
 	return input, nil
 }
 
-func responseFromResponses(response *responses.Response) *ai.AIResponse {
+func responseFromResponses(response *responses.Response) (*ai.AIResponse, error) {
 	result := &ai.AIResponse{
 		Raw: json.RawMessage(response.RawJSON()), Text: response.OutputText(), FinishReason: string(response.Status),
 		InputTokens: int(response.Usage.InputTokens), OutputTokens: int(response.Usage.OutputTokens), ReasoningTokens: int(response.Usage.OutputTokensDetails.ReasoningTokens),
@@ -186,9 +186,9 @@ func responseFromResponses(response *responses.Response) *ai.AIResponse {
 		}
 		args := json.RawMessage(output.Arguments)
 		if !json.Valid(args) {
-			continue
+			return nil, fmt.Errorf("invalid JSON arguments for tool %q", output.Name)
 		}
 		result.ToolCalls = append(result.ToolCalls, ai.ToolCall{ID: output.CallID, Type: "function", Name: output.Name, Args: args})
 	}
-	return result
+	return result, nil
 }
