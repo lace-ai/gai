@@ -69,7 +69,14 @@ func (m *Model) generateResponsesStream(ctx context.Context, out chan<- ai.Token
 			ai.SendToken(ctx, out, ai.Token{Type: ai.TokenTypeErr, Err: err, Text: err.Error()})
 			return
 		case "response.failed":
-			err := fmt.Errorf("OpenAI Responses API: %s", event.Response.Error.Message)
+			message := event.Response.Error.Message
+			if message == "" {
+				message = string(event.Response.Error.Code)
+			}
+			if message == "" {
+				message = "response failed"
+			}
+			err := fmt.Errorf("OpenAI Responses API: %s", message)
 			ai.SendToken(ctx, out, ai.Token{Type: ai.TokenTypeErr, Err: err, Text: err.Error()})
 			return
 		}

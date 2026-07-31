@@ -178,6 +178,31 @@ func TestModelGenerateStreamWithResponsesTransportMapsTextToolCallsAndTerminalEr
 	}
 }
 
+func TestModelGenerateStreamWithResponsesTransportFallsBackForEmptyFailedResponseError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"type\":\"response.failed\",\"response\":{}}\n\n"))
+	}))
+	defer ts.Close()
+
+	p := New("test-key", nil, WithResponsesTransport())
+	p.baseURL = ts.URL
+	m, err := p.Model("gpt-5.6-terra")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tokens []ai.Token
+	for token := range m.GenerateStream(t.Context(), ai.AIRequest{Prompt: "hello"}) {
+		tokens = append(tokens, token)
+	}
+	if len(tokens) != 1 || tokens[0].Type != ai.TokenTypeErr || tokens[0].Err == nil || tokens[0].Err.Error() != "OpenAI Responses API: response failed" {
+		t.Fatalf("tokens = %#v", tokens)
+	}
+}
+
 func TestNativeMessagesMapUserPayload(t *testing.T) {
 	messages, err := mapNativeMessages([]ai.RequestMessage{{Role: ai.RequestMessageRoleUser, Text: "initial request"}})
 	if err != nil {
