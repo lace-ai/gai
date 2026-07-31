@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
@@ -53,7 +54,7 @@ func (m *Model) generateResponsesStream(ctx context.Context, out chan<- ai.Token
 	for stream.Next() {
 		event := stream.Current()
 		switch event.Type {
-		case "response.output_text.delta":
+		case "response.output_text.delta", "response.refusal.delta":
 			if text := event.Delta.OfString; text != "" && !ai.SendToken(ctx, out, ai.Token{Type: ai.TokenTypeText, Data: []byte(text), Text: text}) {
 				return
 			}
@@ -211,7 +212,7 @@ func mapResponsesMessages(messages []ai.RequestMessage) (responses.ResponseInput
 
 func responseFromResponses(response *responses.Response) (*ai.AIResponse, error) {
 	result := &ai.AIResponse{
-		Raw: json.RawMessage(response.RawJSON()), Text: response.OutputText(), FinishReason: string(response.Status),
+		Raw: json.RawMessage(response.RawJSON()), Text: responseText(response), FinishReason: string(response.Status),
 		InputTokens: int(response.Usage.InputTokens), OutputTokens: int(response.Usage.OutputTokens), ReasoningTokens: int(response.Usage.OutputTokensDetails.ReasoningTokens),
 	}
 	var reasoningItems []json.RawMessage
@@ -239,4 +240,22 @@ func responseFromResponses(response *responses.Response) (*ai.AIResponse, error)
 		result.ToolCalls = append(result.ToolCalls, ai.ToolCall{ID: output.CallID, Type: "function", Name: output.Name, Args: args, ThoughtSignature: append([]byte(nil), thoughtSignature...)})
 	}
 	return result, nil
+}
+
+func responseText(response *responses.Response) string {
+	var text strings.Builder
+	for _, output := range response.Output {
+		if output.Type != "message" {
+			continue
+		}
+		for _, content := range output.Content {
+			switch content.Type {
+			case "output_text":
+				text.WriteString(content.Text)
+			case "refusal":
+				text.WriteString(content.Refusal)
+			}
+		}
+	}
+	return text.String()
 }

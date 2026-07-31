@@ -198,6 +198,31 @@ func TestModelGenerateWithResponsesTransportRejectsFailedResponseWithoutErrorMes
 	}
 }
 
+func TestModelGenerateWithResponsesTransportReturnsRefusalText(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/responses" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_1","status":"completed","output":[{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"refusal","refusal":"I can't help with that."}],"status":"completed"}],"usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer ts.Close()
+
+	p := New("test-key", nil, WithResponsesTransport())
+	p.baseURL = ts.URL
+	m, err := p.Model("gpt-5.6-terra")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := m.Generate(t.Context(), ai.AIRequest{Prompt: "hello"})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if res.Text != "I can't help with that." {
+		t.Fatalf("response text = %q, want refusal text", res.Text)
+	}
+}
+
 func TestBuildResponsesParamsWrapsUnsupportedToolChoiceMode(t *testing.T) {
 	_, err := buildResponsesParams("gpt-5.6-terra", ai.AIRequest{
 		Prompt: "hello",
@@ -285,6 +310,31 @@ func TestModelGenerateStreamWithResponsesTransportFallsBackForEmptyFailedRespons
 	}
 	if len(tokens) != 1 || tokens[0].Type != ai.TokenTypeErr || tokens[0].Err == nil || tokens[0].Err.Error() != "OpenAI Responses API: response failed" {
 		t.Fatalf("tokens = %#v", tokens)
+	}
+}
+
+func TestModelGenerateStreamWithResponsesTransportReturnsRefusalText(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"type\":\"response.refusal.delta\",\"delta\":\"I can't help with that.\"}\n\n"))
+	}))
+	defer ts.Close()
+
+	p := New("test-key", nil, WithResponsesTransport())
+	p.baseURL = ts.URL
+	m, err := p.Model("gpt-5.6-terra")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tokens []ai.Token
+	for token := range m.GenerateStream(t.Context(), ai.AIRequest{Prompt: "hello"}) {
+		tokens = append(tokens, token)
+	}
+	if len(tokens) != 1 || tokens[0].Type != ai.TokenTypeText || tokens[0].Text != "I can't help with that." {
+		t.Fatalf("tokens = %#v, want refusal text token", tokens)
 	}
 }
 
