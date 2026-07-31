@@ -86,17 +86,27 @@ import (
   "github.com/lace-ai/gai/ai/openai"
   gaictx "github.com/lace-ai/gai/context"
   "github.com/lace-ai/gai/loop"
+  "github.com/lace-ai/gai/ai"
 )
 
 func main() {
-  ctx := context.Background()
-
-  provider := openai.New(os.Getenv("OPENAI_API_KEY"), nil)
-  model, err := provider.Model("gpt-4.1-mini")
-  if err != nil {
+  if err := run(context.Background()); err != nil {
     log.Fatal(err)
   }
-  defer model.Close()
+}
+
+func run(ctx context.Context) error {
+  provider := openai.New(os.Getenv("OPENAI_API_KEY"), nil)
+
+  model, err := provider.Model("gpt-4.1-mini")
+  if err != nil {
+    return err
+  }
+  defer func() {
+    if err := model.Close(); err != nil {
+      log.Printf("close model: %v", err)
+    }
+  }()
 
   assistant := agent.New(agent.Definition{
     Name:  "assistant",
@@ -119,17 +129,25 @@ func main() {
     log.Fatal(err)
   }
 
+  var runErr error
   for event := range workflow.RunEvents(ctx) {
     switch event.Type {
     case loop.EventToken:
-      if event.Token != nil {
-        fmt.Print(event.Token.Text)
+      if event.Token != nil && event.Token.Type == ai.TokenTypeText {
+        if event.Token.Text != "" {
+          fmt.Print(event.Token.Text)
+        } else {
+          fmt.Print(event.Token.String())
+        }
       }
+
     case loop.EventError, loop.EventCanceled:
-      log.Fatal(event.Err)
+      runErr = event.Err
     }
   }
+
   fmt.Println()
+  return runErr
 }
 ```
 
