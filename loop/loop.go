@@ -15,6 +15,19 @@ const (
 	defaultRetryCount        = 3
 )
 
+// ToolTransportMode controls whether a loop sends tool definitions through the
+// provider-native AIRequest.Tools field. It does not affect Loop.Tools, which
+// always remains available to resolve and execute tool calls.
+type ToolTransportMode uint8
+
+const (
+	// ToolTransportNative sends Loop.Tools as AIRequest.Tools. This is the
+	// default to preserve direct loop.New compatibility.
+	ToolTransportNative ToolTransportMode = iota
+	// ToolTransportText omits AIRequest.Tools for prompt-rendered tool protocols.
+	ToolTransportText
+)
+
 // ToolResponseProcessor can inspect or modify a tool response before the loop
 // records it and builds the next prompt. Implementations must be safe for
 // concurrent use.
@@ -35,6 +48,9 @@ type Loop struct {
 	Model ai.Model
 	// Tools contains the functions available to the model.
 	Tools []Tool
+	// ToolTransport controls whether Tools are serialized into AIRequest.Tools.
+	// The default is ToolTransportNative; Tools remain executable in either mode.
+	ToolTransport ToolTransportMode
 	// MaxLoopIterations limits model/tool interaction rounds.
 	MaxLoopIterations int
 	// MaxTokens limits model output for each generation request.
@@ -174,14 +190,20 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 			return
 		}
 
-		toolDefinitions, err := ToolDefinitions(l.Tools)
-		if err != nil {
-			if cancelErr := cancellationError(ctx, err); cancelErr != nil {
-				sendLoopCanceled(ctx, events, runState, cancelErr)
+		var (
+			toolDefinitions []ai.ToolDefinition
+			err             error
+		)
+		if l.ToolTransport == ToolTransportNative {
+			toolDefinitions, err = ToolDefinitions(l.Tools)
+			if err != nil {
+				if cancelErr := cancellationError(ctx, err); cancelErr != nil {
+					sendLoopCanceled(ctx, events, runState, cancelErr)
+					return
+				}
+				sendLoopError(ctx, events, runState, err)
 				return
 			}
-			sendLoopError(ctx, events, runState, err)
-			return
 		}
 
 		_, err = l.PromptBuilder.BuildContext(ctx)
@@ -233,7 +255,13 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 					return
 				}
 
-				prompt, err := l.PromptBuilder.BuildPrompt(iterCtx, l)
+				var prompt string
+				var nativeMessages []ai.RequestMessage
+				if builder, ok := l.PromptBuilder.(gaictx.NativeMessageBuilder); ok {
+					prompt, nativeMessages, err = builder.BuildRequest(iterCtx, l)
+				} else {
+					prompt, err = l.PromptBuilder.BuildPrompt(iterCtx, l)
+				}
 				if err != nil {
 					if cancelErr := cancellationError(iterCtx, err); cancelErr != nil {
 						sendAttemptCanceled(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, cancelErr)
@@ -250,23 +278,7 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 				}
 
 				request := renderedPromptRequest(prompt, l.MaxTokens, toolDefinitions, l.ResponseFormat, l.Reasoning)
-				if builder, ok := l.PromptBuilder.(gaictx.NativeMessageBuilder); ok {
-					request.Messages, err = builder.BuildMessages(iterCtx, l)
-					if err != nil {
-						if cancelErr := cancellationError(iterCtx, err); cancelErr != nil {
-							sendAttemptCanceled(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, cancelErr)
-							cancel()
-							iterState.markCanceled(cancelErr)
-							iterState.finish(nil)
-							return
-						}
-						iterationErr = fmt.Errorf("%w: %w", ErrBuildPrompt, err)
-						sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, iterationErr)
-						cancel()
-						iterState.finish(iterationErr)
-						return
-					}
-				}
+				request.Messages = nativeMessages
 
 				tokens := l.Model.GenerateStream(iterCtx, request)
 
