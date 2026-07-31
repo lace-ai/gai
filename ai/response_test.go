@@ -50,6 +50,21 @@ func TestAIResponseAppendTokenSeparatesThoughtsAndToolCalls(t *testing.T) {
 	}
 }
 
+func TestAIResponseAppendTokenCompletionUsesLatestUsage(t *testing.T) {
+	var response ai.AIResponse
+
+	response.AppendToken(ai.Token{Type: ai.TokenTypeCompletion, Completion: &ai.Completion{
+		Usage: ai.Usage{InputTokens: 10, OutputTokens: 4, ReasoningTokens: 2},
+	}})
+	response.AppendToken(ai.Token{Type: ai.TokenTypeCompletion, Completion: &ai.Completion{
+		Usage: ai.Usage{InputTokens: 12, OutputTokens: 6, ReasoningTokens: 3},
+	}})
+
+	if response.InputTokens != 12 || response.OutputTokens != 6 || response.ReasoningTokens != 3 {
+		t.Fatalf("completion usage should use the latest provider values, got %#v", response)
+	}
+}
+
 type expectedWrapToken struct {
 	typ          ai.TokenType
 	data         string
