@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
 	"github.com/openai/openai-go/packages/param"
 	"github.com/openai/openai-go/responses"
@@ -33,7 +34,15 @@ func (m *Model) generateResponsesStream(ctx context.Context, out chan<- ai.Token
 		return
 	}
 	stream := m.client(true).Responses.NewStreaming(ctx, params)
-	defer stream.Close()
+	defer func() {
+		if err := stream.Close(); err != nil && m.provider.debug != nil {
+			m.provider.debug.Emit(ctx, gai.DebugEvent{
+				Name:   "stream_close_failed",
+				Source: "ai:openai.Model.generateResponsesStream",
+				Err:    err,
+			})
+		}
+	}()
 	for stream.Next() {
 		event := stream.Current()
 		switch event.Type {
