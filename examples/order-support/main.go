@@ -166,8 +166,8 @@ func run(ctx context.Context) error {
 	for event := range workflow.RunEvents(ctx) {
 		switch event.Type {
 		case loop.EventToken:
-			if event.Token != nil {
-				fmt.Print(event.Token.Text)
+			if text := visibleText(event.Token); text != "" {
+				fmt.Print(text)
 			}
 		case loop.EventError, loop.EventCanceled:
 			runErr = event.Err
@@ -179,6 +179,16 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("run workflow: %w", runErr)
 	}
 	return nil
+}
+
+func visibleText(token *ai.Token) string {
+	if token == nil || token.Type != ai.TokenTypeText {
+		return ""
+	}
+	if token.Text != "" {
+		return token.Text
+	}
+	return token.String()
 }
 
 func promptFromArgs(args []string) string {
