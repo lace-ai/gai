@@ -62,6 +62,84 @@ func TestModelGenerateMapsCapabilitiesAndResponse(t *testing.T) {
 	}
 }
 
+func TestModelGenerateWithResponsesTransportMapsToolContinuationAndNoneEffort(t *testing.T) {
+	var got map[string]any
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/responses" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_1","status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"done"}]},{"type":"function_call","call_id":"call_2","name":"search","arguments":"{\"q\":\"go\"}","status":"completed"}],"usage":{"input_tokens":11,"output_tokens":7,"output_tokens_details":{"reasoning_tokens":3}}}`))
+	}))
+	defer ts.Close()
+
+	p := New("test-key", nil, WithResponsesTransport())
+	p.baseURL = ts.URL
+	m, err := p.Model("gpt-5.6-terra")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := m.Generate(t.Context(), ai.AIRequest{
+		Messages: []ai.RequestMessage{
+			{Role: ai.RequestMessageRoleAssistant, ToolCalls: []ai.RequestToolCall{{ID: "call_1", Name: "search", Arguments: json.RawMessage(`{"q":"first"}`)}}},
+			{Role: ai.RequestMessageRoleTool, ToolResult: &ai.RequestToolResult{ToolCallID: "call_1", Name: "search", Content: "first result"}},
+			{Role: ai.RequestMessageRoleUser, Text: "continue"},
+		},
+		Tools:      []ai.ToolDefinition{{Type: "function", Name: "search", Description: "Search", Parameters: json.RawMessage(`{"type":"object"}`)}},
+		ToolChoice: ai.ToolChoice{Mode: ai.ToolChoiceRequired, Names: []string{"search"}},
+		Reasoning:  ai.ReasoningConfig{Effort: ai.ReasoningEffortNone},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["model"] != "gpt-5.6-terra" || got["reasoning"].(map[string]any)["effort"] != "none" || got["tool_choice"].(map[string]any)["name"] != "search" {
+		t.Fatalf("unexpected Responses request: %#v", got)
+	}
+	input := got["input"].([]any)
+	if len(input) != 3 || input[0].(map[string]any)["type"] != "function_call" || input[1].(map[string]any)["type"] != "function_call_output" {
+		t.Fatalf("native tool continuation = %#v", input)
+	}
+	if res.Text != "done" || len(res.ToolCalls) != 1 || res.ToolCalls[0].ID != "call_2" || res.InputTokens != 11 || res.OutputTokens != 7 || res.ReasoningTokens != 3 {
+		t.Fatalf("response = %#v", res)
+	}
+}
+
+func TestModelGenerateStreamWithResponsesTransportMapsTextToolCallsAndTerminalErrors(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello \"}\n\n"))
+		_, _ = w.Write([]byte("data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"search\",\"arguments\":\"{\\\"q\\\":\\\"go\\\"}\",\"status\":\"completed\"}}\n\n"))
+		_, _ = w.Write([]byte("data: {\"type\":\"error\",\"code\":\"server_error\",\"message\":\"provider failed\"}\n\n"))
+	}))
+	defer ts.Close()
+
+	p := New("test-key", nil, WithResponsesTransport())
+	p.baseURL = ts.URL
+	m, err := p.Model("gpt-5.6-terra")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tokens []ai.Token
+	for token := range m.GenerateStream(t.Context(), ai.AIRequest{Prompt: "hello", Tools: []ai.ToolDefinition{{Type: "function", Name: "search", Description: "Search", Parameters: json.RawMessage(`{"type":"object"}`)}}}) {
+		tokens = append(tokens, token)
+	}
+	if len(tokens) != 3 || tokens[0].Type != ai.TokenTypeText || tokens[0].Text != "hello " {
+		t.Fatalf("tokens = %#v", tokens)
+	}
+	if call := tokens[1].ToolCall; tokens[1].Type != ai.TokenTypeToolCall || call == nil || call.ID != "call_1" || call.Name != "search" || string(call.Args) != `{"q":"go"}` {
+		t.Fatalf("tool token = %#v", tokens[1])
+	}
+	if tokens[2].Type != ai.TokenTypeErr || tokens[2].Err == nil || tokens[2].Err.Error() != "OpenAI Responses API: provider failed" {
+		t.Fatalf("error token = %#v", tokens[2])
+	}
+}
+
 func TestNativeMessagesMapUserPayload(t *testing.T) {
 	messages, err := mapNativeMessages([]ai.RequestMessage{{Role: ai.RequestMessageRoleUser, Text: "initial request"}})
 	if err != nil {
@@ -207,6 +285,33 @@ func TestModelPreflightRejectsUnsupportedBeforeTransport(t *testing.T) {
 	}
 }
 
+func TestModelPreflightRejectsReasoningToolsOnChatCompletionsBeforeTransport(t *testing.T) {
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requests++ }))
+	defer ts.Close()
+	p := New("test-key", nil)
+	p.baseURL = ts.URL
+	m, err := p.Model("gpt-5.6-terra")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := ai.AIRequest{
+		Tools:     []ai.ToolDefinition{{Type: "function", Name: "search", Description: "Search", Parameters: json.RawMessage(`{"type":"object"}`)}},
+		Reasoning: ai.ReasoningConfig{Effort: ai.ReasoningEffortHigh},
+	}
+	if _, err := m.Generate(t.Context(), req); !errors.Is(err, ai.ErrUnsupportedCapability) || requests != 0 {
+		t.Fatalf("Generate error = %v, requests = %d; want local unsupported error and no request", err, requests)
+	}
+	for token := range m.GenerateStream(t.Context(), req) {
+		if !errors.Is(token.Err, ai.ErrUnsupportedCapability) {
+			t.Fatalf("stream error = %v, want unsupported capability", token.Err)
+		}
+	}
+	if requests != 0 {
+		t.Fatalf("stream made %d requests, want none", requests)
+	}
+}
+
 func TestModelAllowsUnknownDynamicReasoningEffort(t *testing.T) {
 	var got map[string]any
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -234,7 +339,7 @@ func TestModelAllowsUnknownDynamicReasoningEffort(t *testing.T) {
 func TestOpenAIDescriptorUsesReasoningFamilyOverlay(t *testing.T) {
 	for _, model := range []string{"o5-pro", "gpt-5.99-preview"} {
 		d := openAIDescriptor(model)
-		if d.ReasoningEffort != ai.FeatureSupportSupported || len(d.ReasoningEfforts) != 3 {
+		if d.ReasoningEffort != ai.FeatureSupportSupported || len(d.ReasoningEfforts) != 4 || d.ReasoningEfforts[0] != ai.ReasoningEffortNone {
 			t.Fatalf("descriptor for %q = %#v, want supported reasoning efforts", model, d)
 		}
 	}

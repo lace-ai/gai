@@ -44,6 +44,12 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (*ai.AIResponse,
 	if err := ai.ValidateModelRequest(m, req); err != nil {
 		return nil, err
 	}
+	if err := m.validateTransport(req); err != nil {
+		return nil, err
+	}
+	if m.provider.transport == TransportResponses {
+		return m.generateResponses(ctx, req)
+	}
 	params, err := buildChatCompletionParams(m.name, req, false)
 	if err != nil {
 		return nil, err
@@ -84,6 +90,14 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 		defer close(out)
 		if err := ai.ValidateModelRequest(m, req); err != nil {
 			ai.SendToken(ctx, out, ai.Token{Type: ai.TokenTypeErr, Err: err, Text: err.Error()})
+			return
+		}
+		if err := m.validateTransport(req); err != nil {
+			ai.SendToken(ctx, out, ai.Token{Type: ai.TokenTypeErr, Err: err, Text: err.Error()})
+			return
+		}
+		if m.provider.transport == TransportResponses {
+			m.generateResponsesStream(ctx, out, req)
 			return
 		}
 		params, err := buildChatCompletionParams(m.name, req, true)
@@ -196,7 +210,8 @@ func buildChatCompletionParams(model string, req ai.AIRequest, stream bool) (sdk
 		return sdk.ChatCompletionNewParams{}, err
 	}
 	switch req.Reasoning.Effort {
-	case "", ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh:
+	case "":
+	case ai.ReasoningEffortNone, ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh:
 		params.ReasoningEffort = shared.ReasoningEffort(req.Reasoning.Effort)
 	default:
 		return sdk.ChatCompletionNewParams{}, fmt.Errorf("%w: OpenAI reasoning effort %q", ai.ErrUnsupportedCapability, req.Reasoning.Effort)
@@ -244,11 +259,25 @@ func openAIDescriptor(model string) ai.ModelDescriptor {
 	}
 	if isOpenAIReasoningFamily(model) {
 		d.ReasoningEffort = ai.FeatureSupportSupported
-		d.ReasoningEfforts = []ai.ReasoningEffort{ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh}
+		d.ReasoningEfforts = []ai.ReasoningEffort{ai.ReasoningEffortNone, ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh}
 	} else if isKnownNonReasoningModel(model) {
 		d.Reasoning, d.ReasoningEffort = ai.FeatureSupportUnsupported, ai.FeatureSupportUnsupported
 	}
 	return d
+}
+
+// validateTransport rejects known endpoint/model combinations before opening an
+// HTTP stream. Responses transport is the supported path for these requests.
+func (m *Model) validateTransport(req ai.AIRequest) error {
+	if m.provider.transport == TransportChatCompletions && isGPT5ReasoningFamily(m.name) && len(req.Tools) > 0 && req.Reasoning.Effort != "" && req.Reasoning.Effort != ai.ReasoningEffortNone {
+		return fmt.Errorf("%w: OpenAI reasoning models with function tools and reasoning effort require the Responses transport or reasoning_effort none", ai.ErrUnsupportedCapability)
+	}
+	return nil
+}
+
+func isGPT5ReasoningFamily(model string) bool {
+	name := strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(name, "gpt-5") && (len(name) == len("gpt-5") || name[len("gpt-5")] == '.' || name[len("gpt-5")] == '-')
 }
 
 func isOpenAIReasoningFamily(model string) bool {

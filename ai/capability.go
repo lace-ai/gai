@@ -217,6 +217,7 @@ type ResponseFormat struct {
 type ReasoningEffort string
 
 const (
+	ReasoningEffortNone   ReasoningEffort = "none"
 	ReasoningEffortLow    ReasoningEffort = "low"
 	ReasoningEffortMedium ReasoningEffort = "medium"
 	ReasoningEffortHigh   ReasoningEffort = "high"

@@ -327,15 +327,24 @@ Package: `ai/openai`
 Constructor:
 
 ```go
-openai.New(apiKey string, debug gai.DebugSink) *openai.Provider
+openai.New(apiKey string, debug gai.DebugSink, options ...openai.Option) *openai.Provider
 ```
 
-The provider uses OpenAI's Chat Completions API. `Model(name)` accepts a
-non-empty chat-completions model ID; `ListModels()` discovers compatible models
-from the Models API and falls back to a bundled catalog when discovery is
-unavailable. Native history, function tools/tool choice, JSON object and JSON
-Schema responses, streaming, and low/medium/high reasoning effort for supported
-reasoning models are available.
+By default the provider uses OpenAI's Chat Completions API. Use
+`openai.WithResponsesTransport()` for the Responses API: it maps native user and
+assistant history, function-call/function-result continuation, streamed text and
+function calls, terminal stream errors, usage, and JSON output. Responses is the
+supported transport for GPT-5 reasoning requests that combine function tools with
+a non-`none` reasoning effort; the Chat Completions transport returns a local
+`ai.ErrUnsupportedCapability` before making that incompatible request. Reasoning
+models also accept the explicit provider-neutral `ai.ReasoningEffortNone` value;
+an empty reasoning configuration is omitted rather than serialized.
+
+`Model(name)` accepts a non-empty compatible model ID; `ListModels()` discovers
+compatible models from the Models API and falls back to a bundled catalog when
+discovery is unavailable. Both transports support function tools/tool choice,
+JSON object and JSON Schema responses, streaming, and reasoning effort where the
+selected OpenAI endpoint/model supports it.
 
 Bundled fallback models include:
 
