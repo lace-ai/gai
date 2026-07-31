@@ -43,11 +43,12 @@ type Definition struct {
 	Name string
 	// Model performs the agent's model calls.
 	Model ai.Model
-	// Tools are available to the model during loop execution. Unless the model
-	// implements ai.NativeToolModel and NativeTools returns true, their
-	// definitions and text-based invocation protocol are added as the first
-	// prompt context source unless its builder already contains a
-	// tool_definitions source.
+	// Tools are available to the model during loop execution. When the model's
+	// ai.ModelDescriber descriptor reports native tools are supported, their
+	// definitions and text-based invocation protocol are not added to the
+	// prompt. Models without a descriptor use ai.NativeToolModel as a legacy
+	// fallback. Otherwise, the protocol is added as the first prompt context
+	// source unless its builder already contains a tool_definitions source.
 	Tools []loop.Tool
 	// ToolDefinitionOptions configure the auto-prepended tool-definitions prompt
 	// source used for Tools.
@@ -180,6 +181,9 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 }
 
 func usesNativeTools(model ai.Model) bool {
+	if describer, ok := model.(ai.ModelDescriber); ok {
+		return describer.Descriptor().NativeTools == ai.FeatureSupportSupported
+	}
 	native, ok := model.(ai.NativeToolModel)
 	return ok && native.NativeTools()
 }
