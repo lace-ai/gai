@@ -147,6 +147,10 @@ func TestModelResponsesTransportDisablesResponseStorage(t *testing.T) {
 		if request["store"] != false {
 			t.Fatalf("%s request store = %#v, want false", path, request["store"])
 		}
+		include, ok := request["include"].([]any)
+		if !ok || !slices.Contains(include, any("reasoning.encrypted_content")) {
+			t.Fatalf("%s request include = %#v, want reasoning.encrypted_content", path, request["include"])
+		}
 	}
 }
 

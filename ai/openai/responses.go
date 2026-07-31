@@ -109,7 +109,11 @@ func (m *Model) generateResponsesStream(ctx context.Context, out chan<- ai.Token
 }
 
 func buildResponsesParams(model string, req ai.AIRequest) (responses.ResponseNewParams, error) {
-	params := responses.ResponseNewParams{Model: model, Store: param.NewOpt(false)}
+	params := responses.ResponseNewParams{
+		Model:   model,
+		Store:   param.NewOpt(false),
+		Include: []responses.ResponseIncludable{responses.ResponseIncludableReasoningEncryptedContent},
+	}
 	if len(req.Messages) == 0 {
 		params.Input.OfString = param.NewOpt(req.Prompt)
 	} else {
