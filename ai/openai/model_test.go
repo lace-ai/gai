@@ -556,16 +556,26 @@ func TestBuildChatCompletionParamsAssumesPrevalidatedRequest(t *testing.T) {
 }
 
 func TestOpenAIMapsExtendedReasoningEfforts(t *testing.T) {
-	for _, effort := range []ai.ReasoningEffort{ai.ReasoningEffortMinimal, ai.ReasoningEffortXHigh, ai.ReasoningEffortMax} {
-		t.Run(string(effort), func(t *testing.T) {
+	tests := []struct {
+		model  string
+		effort ai.ReasoningEffort
+	}{
+		{"gpt-5", ai.ReasoningEffortMinimal},
+		{"gpt-5.6-terra", ai.ReasoningEffortXHigh},
+		{"gpt-5.6-terra", ai.ReasoningEffortMax},
+	}
+	for _, tt := range tests {
+		t.Run(tt.model+"/"+string(tt.effort), func(t *testing.T) {
+			effort := tt.effort
+			model := tt.model
 			req := ai.AIRequest{Prompt: "hello", Reasoning: ai.ReasoningConfig{Effort: effort}}
-			if _, err := buildChatCompletionParams("gpt-5.6-terra", req, false); err != nil {
+			if _, err := buildChatCompletionParams(model, req, false); err != nil {
 				t.Fatalf("buildChatCompletionParams(%q): %v", effort, err)
 			}
-			if _, err := buildResponsesParams("gpt-5.6-terra", req); err != nil {
+			if _, err := buildResponsesParams(model, req); err != nil {
 				t.Fatalf("buildResponsesParams(%q): %v", effort, err)
 			}
-			if err := openAIDescriptor("gpt-5.6-terra").ValidateRequest(req); err != nil {
+			if err := openAIDescriptor(model).ValidateRequest(req); err != nil {
 				t.Fatalf("descriptor rejected %q: %v", effort, err)
 			}
 		})
@@ -680,7 +690,9 @@ func TestOpenAIDescriptorUsesReasoningFamilyOverlay(t *testing.T) {
 		efforts []ai.ReasoningEffort
 	}{
 		{"o5-pro", []ai.ReasoningEffort{ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh}},
-		{"gpt-5.99-preview", []ai.ReasoningEffort{ai.ReasoningEffortNone, ai.ReasoningEffortMinimal, ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh, ai.ReasoningEffortXHigh, ai.ReasoningEffortMax}},
+		{"gpt-5", []ai.ReasoningEffort{ai.ReasoningEffortMinimal, ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh}},
+		{"gpt-5.1-codex", []ai.ReasoningEffort{ai.ReasoningEffortNone, ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh}},
+		{"gpt-5.6-terra", []ai.ReasoningEffort{ai.ReasoningEffortNone, ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh, ai.ReasoningEffortXHigh, ai.ReasoningEffortMax}},
 	}
 	for _, tt := range tests {
 		d := openAIDescriptor(tt.model)
@@ -691,6 +703,10 @@ func TestOpenAIDescriptorUsesReasoningFamilyOverlay(t *testing.T) {
 	d := openAIDescriptor("future-chat-model")
 	if d.ReasoningEffort != ai.FeatureSupportUnknown || len(d.ReasoningEfforts) != 0 {
 		t.Fatalf("unrelated unknown descriptor = %#v, want unknown reasoning effort", d)
+	}
+	d = openAIDescriptor("gpt-5.99-preview")
+	if d.ReasoningEffort != ai.FeatureSupportUnknown || len(d.ReasoningEfforts) != 0 {
+		t.Fatalf("unknown GPT-5 revision descriptor = %#v, want unknown reasoning effort", d)
 	}
 }
 

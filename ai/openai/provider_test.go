@@ -65,7 +65,7 @@ func TestProviderDynamicallyListsModelsAndAcceptsThem(t *testing.T) {
 func TestProviderAggregatesDynamicReasoningDescriptors(t *testing.T) {
 	p := New("test-key", nil)
 	p.httpClient = &http.Client{Transport: handlerRoundTripper(func(*http.Request) (*http.Response, error) {
-		return response(http.StatusOK, `{"data":[{"id":"gpt-5.99-preview"},{"id":"future-chat-model"}]}`), nil
+		return response(http.StatusOK, `{"data":[{"id":"gpt-5.6-terra"},{"id":"future-chat-model"}]}`), nil
 	})}
 	repo := ai.NewModelRepository(nil)
 	if err := repo.RegisterProvider(context.Background(), p); err != nil {
@@ -78,7 +78,7 @@ func TestProviderAggregatesDynamicReasoningDescriptors(t *testing.T) {
 	if len(descriptors) != 2 || descriptors[0].Provider != "openai" || descriptors[0].Model != "future-chat-model" {
 		t.Fatalf("descriptors = %#v", descriptors)
 	}
-	if descriptors[1].Model != "gpt-5.99-preview" || descriptors[1].ReasoningEffort != ai.FeatureSupportSupported || len(descriptors[1].ReasoningEfforts) != 7 || descriptors[1].ReasoningEfforts[0] != ai.ReasoningEffortNone || descriptors[1].ReasoningEfforts[6] != ai.ReasoningEffortMax {
+	if descriptors[1].Model != "gpt-5.6-terra" || descriptors[1].ReasoningEffort != ai.FeatureSupportSupported || len(descriptors[1].ReasoningEfforts) != 6 || descriptors[1].ReasoningEfforts[0] != ai.ReasoningEffortNone || descriptors[1].ReasoningEfforts[5] != ai.ReasoningEffortMax {
 		t.Fatalf("dynamic reasoning descriptor = %#v", descriptors[1])
 	}
 	if descriptors[0].ReasoningEffort != ai.FeatureSupportUnknown {
@@ -91,12 +91,12 @@ func TestModelDescriptorUsesCatalogSnapshotWithoutNetwork(t *testing.T) {
 	p := New("test-key", nil)
 	p.httpClient = &http.Client{Transport: handlerRoundTripper(func(*http.Request) (*http.Response, error) {
 		hits++
-		return response(http.StatusOK, `{"data":[{"id":"gpt-5.99-preview"}]}`), nil
+		return response(http.StatusOK, `{"data":[{"id":"gpt-5.6-terra"}]}`), nil
 	})}
 	if _, err := p.ListModelDescriptors(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	model, err := p.Model("gpt-5.99-preview")
+	model, err := p.Model("gpt-5.6-terra")
 	if err != nil {
 		t.Fatal(err)
 	}

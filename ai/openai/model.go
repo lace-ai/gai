@@ -257,9 +257,11 @@ func openAIDescriptor(model string) ai.ModelDescriptor {
 		JSONOutput:  ai.FeatureSupportSupported, JSONSchemaOutput: ai.FeatureSupportSupported,
 		Tokenizer: ai.TokenizerDescriptor{Available: ai.FeatureSupportUnsupported},
 	}
-	if isGPT5ReasoningFamily(model) {
+	if efforts := gpt5ReasoningEfforts(model); len(efforts) > 0 {
 		d.ReasoningEffort = ai.FeatureSupportSupported
-		d.ReasoningEfforts = []ai.ReasoningEffort{ai.ReasoningEffortNone, ai.ReasoningEffortMinimal, ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh, ai.ReasoningEffortXHigh, ai.ReasoningEffortMax}
+		d.ReasoningEfforts = efforts
+	} else if isGPT5ReasoningFamily(model) {
+		// Unknown GPT-5 revisions must not inherit another revision's effort set.
 	} else if isOpenAIReasoningFamily(model) {
 		d.ReasoningEffort = ai.FeatureSupportSupported
 		d.ReasoningEfforts = []ai.ReasoningEffort{ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh}
@@ -281,6 +283,20 @@ func (m *Model) validateTransport(req ai.AIRequest) error {
 func isGPT5ReasoningFamily(model string) bool {
 	name := strings.ToLower(strings.TrimSpace(model))
 	return strings.HasPrefix(name, "gpt-5") && (len(name) == len("gpt-5") || name[len("gpt-5")] == '.' || name[len("gpt-5")] == '-')
+}
+
+func gpt5ReasoningEfforts(model string) []ai.ReasoningEffort {
+	name := strings.ToLower(strings.TrimSpace(model))
+	switch {
+	case name == "gpt-5" || strings.HasPrefix(name, "gpt-5-"):
+		return []ai.ReasoningEffort{ai.ReasoningEffortMinimal, ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh}
+	case name == "gpt-5.1" || strings.HasPrefix(name, "gpt-5.1-"):
+		return []ai.ReasoningEffort{ai.ReasoningEffortNone, ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh}
+	case name == "gpt-5.6" || strings.HasPrefix(name, "gpt-5.6-"):
+		return []ai.ReasoningEffort{ai.ReasoningEffortNone, ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh, ai.ReasoningEffortXHigh, ai.ReasoningEffortMax}
+	default:
+		return nil
+	}
 }
 
 func isOpenAIReasoningFamily(model string) bool {
