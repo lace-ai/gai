@@ -44,6 +44,12 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (*ai.AIResponse,
 	if err := ai.ValidateModelRequest(m, req); err != nil {
 		return nil, err
 	}
+	if err := m.validateTransport(req); err != nil {
+		return nil, err
+	}
+	if m.provider.transport == TransportResponses {
+		return m.generateResponses(ctx, req)
+	}
 	params, err := buildChatCompletionParams(m.name, req, false)
 	if err != nil {
 		return nil, err
@@ -84,6 +90,14 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 		defer close(out)
 		if err := ai.ValidateModelRequest(m, req); err != nil {
 			ai.SendToken(ctx, out, ai.Token{Type: ai.TokenTypeErr, Err: err, Text: err.Error()})
+			return
+		}
+		if err := m.validateTransport(req); err != nil {
+			ai.SendToken(ctx, out, ai.Token{Type: ai.TokenTypeErr, Err: err, Text: err.Error()})
+			return
+		}
+		if m.provider.transport == TransportResponses {
+			m.generateResponsesStream(ctx, out, req)
 			return
 		}
 		params, err := buildChatCompletionParams(m.name, req, true)
@@ -196,7 +210,8 @@ func buildChatCompletionParams(model string, req ai.AIRequest, stream bool) (sdk
 		return sdk.ChatCompletionNewParams{}, err
 	}
 	switch req.Reasoning.Effort {
-	case "", ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh:
+	case "":
+	case ai.ReasoningEffortNone, ai.ReasoningEffortMinimal, ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh, ai.ReasoningEffortXHigh, ai.ReasoningEffortMax:
 		params.ReasoningEffort = shared.ReasoningEffort(req.Reasoning.Effort)
 	default:
 		return sdk.ChatCompletionNewParams{}, fmt.Errorf("%w: OpenAI reasoning effort %q", ai.ErrUnsupportedCapability, req.Reasoning.Effort)
@@ -242,7 +257,12 @@ func openAIDescriptor(model string) ai.ModelDescriptor {
 		JSONOutput:  ai.FeatureSupportSupported, JSONSchemaOutput: ai.FeatureSupportSupported,
 		Tokenizer: ai.TokenizerDescriptor{Available: ai.FeatureSupportUnsupported},
 	}
-	if isOpenAIReasoningFamily(model) {
+	if efforts := gpt5ReasoningEfforts(model); len(efforts) > 0 {
+		d.ReasoningEffort = ai.FeatureSupportSupported
+		d.ReasoningEfforts = efforts
+	} else if isGPT5ReasoningFamily(model) {
+		// Unknown GPT-5 revisions must not inherit another revision's effort set.
+	} else if isOpenAIReasoningFamily(model) {
 		d.ReasoningEffort = ai.FeatureSupportSupported
 		d.ReasoningEfforts = []ai.ReasoningEffort{ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh}
 	} else if isKnownNonReasoningModel(model) {
@@ -251,11 +271,39 @@ func openAIDescriptor(model string) ai.ModelDescriptor {
 	return d
 }
 
-func isOpenAIReasoningFamily(model string) bool {
+// validateTransport rejects known endpoint/model combinations before opening an
+// HTTP stream. Responses transport is the supported path for these requests.
+func (m *Model) validateTransport(req ai.AIRequest) error {
+	if m.provider.transport == TransportChatCompletions && isGPT5ReasoningFamily(m.name) && len(req.Tools) > 0 && req.Reasoning.Effort != "" {
+		return fmt.Errorf("%w: OpenAI GPT-5 models with function tools and an explicit reasoning effort require the Responses transport", ai.ErrUnsupportedCapability)
+	}
+	return nil
+}
+
+func isGPT5ReasoningFamily(model string) bool {
 	name := strings.ToLower(strings.TrimSpace(model))
-	if strings.HasPrefix(name, "gpt-5") && (len(name) == len("gpt-5") || name[len("gpt-5")] == '.' || name[len("gpt-5")] == '-') {
+	return strings.HasPrefix(name, "gpt-5") && (len(name) == len("gpt-5") || name[len("gpt-5")] == '.' || name[len("gpt-5")] == '-')
+}
+
+func gpt5ReasoningEfforts(model string) []ai.ReasoningEffort {
+	name := strings.ToLower(strings.TrimSpace(model))
+	switch {
+	case name == "gpt-5" || strings.HasPrefix(name, "gpt-5-"):
+		return []ai.ReasoningEffort{ai.ReasoningEffortMinimal, ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh}
+	case name == "gpt-5.1" || strings.HasPrefix(name, "gpt-5.1-"):
+		return []ai.ReasoningEffort{ai.ReasoningEffortNone, ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh}
+	case name == "gpt-5.6" || strings.HasPrefix(name, "gpt-5.6-"):
+		return []ai.ReasoningEffort{ai.ReasoningEffortNone, ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh, ai.ReasoningEffortXHigh, ai.ReasoningEffortMax}
+	default:
+		return nil
+	}
+}
+
+func isOpenAIReasoningFamily(model string) bool {
+	if isGPT5ReasoningFamily(model) {
 		return true
 	}
+	name := strings.ToLower(strings.TrimSpace(model))
 	if len(name) < 2 || name[0] != 'o' {
 		return false
 	}

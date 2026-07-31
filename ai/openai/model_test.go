@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/lace-ai/gai/ai"
@@ -59,6 +60,377 @@ func TestModelGenerateMapsCapabilitiesAndResponse(t *testing.T) {
 	}
 	if len(res.ToolCalls) != 1 || res.ToolCalls[0].ID != "call_1" || res.ToolCalls[0].Name != "search" || string(res.ToolCalls[0].Args) != `{"query":"go"}` {
 		t.Fatalf("unexpected tool calls: %#v", res.ToolCalls)
+	}
+}
+
+func TestModelGenerateWithResponsesTransportMapsToolContinuationAndNoneEffort(t *testing.T) {
+	var got map[string]any
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/responses" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_1","status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"done"}]},{"type":"function_call","call_id":"call_2","name":"search","arguments":"{\"q\":\"go\"}","status":"completed"}],"usage":{"input_tokens":11,"output_tokens":7,"output_tokens_details":{"reasoning_tokens":3}}}`))
+	}))
+	defer ts.Close()
+
+	p := New("test-key", nil, WithResponsesTransport())
+	p.baseURL = ts.URL
+	m, err := p.Model("gpt-5.6-terra")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := m.Generate(t.Context(), ai.AIRequest{
+		Messages: []ai.RequestMessage{
+			{Role: ai.RequestMessageRoleAssistant, ToolCalls: []ai.RequestToolCall{{ID: "call_1", Name: "search", Arguments: json.RawMessage(`{"q":"first"}`)}}},
+			{Role: ai.RequestMessageRoleTool, ToolResult: &ai.RequestToolResult{ToolCallID: "call_1", Name: "search", Content: "first result"}},
+			{Role: ai.RequestMessageRoleUser, Text: "continue"},
+		},
+		Tools:      []ai.ToolDefinition{{Type: "function", Name: "search", Description: "Search", Parameters: json.RawMessage(`{"type":"object"}`)}},
+		ToolChoice: ai.ToolChoice{Mode: ai.ToolChoiceRequired, Names: []string{"search"}},
+		Reasoning:  ai.ReasoningConfig{Effort: ai.ReasoningEffortNone},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["model"] != "gpt-5.6-terra" || got["reasoning"].(map[string]any)["effort"] != "none" || got["tool_choice"].(map[string]any)["name"] != "search" {
+		t.Fatalf("unexpected Responses request: %#v", got)
+	}
+	input := got["input"].([]any)
+	if len(input) != 3 || input[0].(map[string]any)["type"] != "function_call" || input[1].(map[string]any)["type"] != "function_call_output" {
+		t.Fatalf("native tool continuation = %#v", input)
+	}
+	if res.Text != "done" || len(res.ToolCalls) != 1 || res.ToolCalls[0].ID != "call_2" || res.InputTokens != 11 || res.OutputTokens != 7 || res.ReasoningTokens != 3 {
+		t.Fatalf("response = %#v", res)
+	}
+}
+
+func TestModelResponsesTransportDisablesResponseStorage(t *testing.T) {
+	requests := make(chan map[string]any, 2)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/responses" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		requests <- request
+		w.Header().Set("Content-Type", "application/json")
+		if r.Header.Get("Accept") == "text/event-stream" {
+			_, _ = w.Write([]byte("data: {\"type\":\"response.completed\",\"response\":{}}\n\n"))
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":"resp_1","status":"completed","output":[],"usage":{"input_tokens":0,"output_tokens":0}}`))
+	}))
+	defer ts.Close()
+
+	p := New("test-key", nil, WithResponsesTransport())
+	p.baseURL = ts.URL
+	m, err := p.Model("gpt-5.6-terra")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Generate(t.Context(), ai.AIRequest{Prompt: "sync"}); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	for token := range m.GenerateStream(t.Context(), ai.AIRequest{Prompt: "stream"}) {
+		if token.Type == ai.TokenTypeErr {
+			t.Fatalf("GenerateStream token error: %v", token.Err)
+		}
+	}
+	for _, path := range []string{"synchronous", "streaming"} {
+		request := <-requests
+		if request["store"] != false {
+			t.Fatalf("%s request store = %#v, want false", path, request["store"])
+		}
+		include, ok := request["include"].([]any)
+		if !ok || !slices.Contains(include, any("reasoning.encrypted_content")) {
+			t.Fatalf("%s request include = %#v, want reasoning.encrypted_content", path, request["include"])
+		}
+	}
+}
+
+func TestModelGenerateWithResponsesTransportPreservesReasoningItemsAcrossToolContinuation(t *testing.T) {
+	var continuation map[string]any
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/responses" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		if requests == 1 {
+			_, _ = w.Write([]byte(`{"id":"resp_1","status":"completed","output":[{"id":"rs_1","type":"reasoning","encrypted_content":"opaque-reasoning","summary":[],"status":"completed"},{"type":"function_call","call_id":"call_1","name":"search","arguments":"{\"q\":\"go\"}","status":"completed"}],"usage":{"input_tokens":1,"output_tokens":1}}`))
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&continuation); err != nil {
+			t.Fatalf("decode continuation: %v", err)
+		}
+		_, _ = w.Write([]byte(`{"id":"resp_2","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer ts.Close()
+
+	p := New("test-key", nil, WithResponsesTransport())
+	p.baseURL = ts.URL
+	m, err := p.Model("gpt-5.6-terra")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := m.Generate(t.Context(), ai.AIRequest{Prompt: "find go", Tools: []ai.ToolDefinition{{Type: "function", Name: "search", Description: "Search", Parameters: json.RawMessage(`{"type":"object"}`)}}})
+	if err != nil {
+		t.Fatalf("first Generate: %v", err)
+	}
+	if len(first.ToolCalls) != 1 || string(first.ToolCalls[0].ThoughtSignature) == "" {
+		t.Fatalf("first tool calls = %#v, want reasoning signature", first.ToolCalls)
+	}
+	_, err = m.Generate(t.Context(), ai.AIRequest{Messages: []ai.RequestMessage{
+		{Role: ai.RequestMessageRoleAssistant, ToolCalls: []ai.RequestToolCall{{ID: first.ToolCalls[0].ID, Name: first.ToolCalls[0].Name, Arguments: first.ToolCalls[0].Args, ThoughtSignature: first.ToolCalls[0].ThoughtSignature}}},
+		{Role: ai.RequestMessageRoleTool, ToolResult: &ai.RequestToolResult{ToolCallID: first.ToolCalls[0].ID, Name: first.ToolCalls[0].Name, Content: "result"}},
+	}})
+	if err != nil {
+		t.Fatalf("continuation Generate: %v", err)
+	}
+	input := continuation["input"].([]any)
+	if len(input) != 3 || input[0].(map[string]any)["type"] != "reasoning" || input[0].(map[string]any)["encrypted_content"] != "opaque-reasoning" || input[1].(map[string]any)["type"] != "function_call" || input[2].(map[string]any)["type"] != "function_call_output" {
+		t.Fatalf("continuation input = %#v", input)
+	}
+}
+
+func TestModelGenerateStreamWithResponsesTransportPreservesReasoningItemsAcrossToolContinuation(t *testing.T) {
+	var continuation map[string]any
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/responses" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		requests++
+		if requests == 1 {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"encrypted_content\":\"opaque-reasoning\",\"summary\":[],\"status\":\"completed\"}}\n\n"))
+			_, _ = w.Write([]byte("data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"search\",\"arguments\":\"{\\\"q\\\":\\\"go\\\"}\",\"status\":\"completed\"}}\n\n"))
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&continuation); err != nil {
+			t.Fatalf("decode continuation: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_2","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer ts.Close()
+
+	p := New("test-key", nil, WithResponsesTransport())
+	p.baseURL = ts.URL
+	m, err := p.Model("gpt-5.6-terra")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var call *ai.ToolCall
+	for token := range m.GenerateStream(t.Context(), ai.AIRequest{Prompt: "find go", Tools: []ai.ToolDefinition{{Type: "function", Name: "search", Description: "Search", Parameters: json.RawMessage(`{"type":"object"}`)}}}) {
+		if token.Type == ai.TokenTypeToolCall {
+			call = token.ToolCall
+		}
+	}
+	if call == nil || len(call.ThoughtSignature) == 0 {
+		t.Fatalf("streamed tool call = %#v, want reasoning signature", call)
+	}
+	_, err = m.Generate(t.Context(), ai.AIRequest{Messages: []ai.RequestMessage{
+		{Role: ai.RequestMessageRoleAssistant, ToolCalls: []ai.RequestToolCall{{ID: call.ID, Name: call.Name, Arguments: call.Args, ThoughtSignature: call.ThoughtSignature}}},
+		{Role: ai.RequestMessageRoleTool, ToolResult: &ai.RequestToolResult{ToolCallID: call.ID, Name: call.Name, Content: "result"}},
+	}})
+	if err != nil {
+		t.Fatalf("continuation Generate: %v", err)
+	}
+	input := continuation["input"].([]any)
+	if len(input) != 3 || input[0].(map[string]any)["type"] != "reasoning" || input[0].(map[string]any)["encrypted_content"] != "opaque-reasoning" || input[1].(map[string]any)["type"] != "function_call" || input[2].(map[string]any)["type"] != "function_call_output" {
+		t.Fatalf("continuation input = %#v", input)
+	}
+}
+
+func TestModelGenerateWithResponsesTransportRejectsInvalidToolCallArguments(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/responses" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_1","status":"completed","output":[{"type":"function_call","call_id":"call_1","name":"search","arguments":"not-json","status":"completed"}],"usage":{"input_tokens":11,"output_tokens":7}}`))
+	}))
+	defer ts.Close()
+
+	p := New("test-key", nil, WithResponsesTransport())
+	p.baseURL = ts.URL
+	m, err := p.Model("gpt-5.6-terra")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = m.Generate(t.Context(), ai.AIRequest{Prompt: "hello"})
+	if err == nil || err.Error() != `invalid JSON arguments for tool "search"` {
+		t.Fatalf("Generate error = %v, want invalid tool arguments error", err)
+	}
+}
+
+func TestModelGenerateWithResponsesTransportRejectsFailedResponseWithoutErrorMessage(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/responses" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_1","status":"failed","output":[],"usage":{"input_tokens":0,"output_tokens":0}}`))
+	}))
+	defer ts.Close()
+
+	p := New("test-key", nil, WithResponsesTransport())
+	p.baseURL = ts.URL
+	m, err := p.Model("gpt-5.6-terra")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = m.Generate(t.Context(), ai.AIRequest{Prompt: "hello"})
+	if err == nil || err.Error() != "OpenAI Responses API: response failed" {
+		t.Fatalf("Generate error = %v, want failed response error", err)
+	}
+}
+
+func TestModelGenerateWithResponsesTransportReturnsRefusalText(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/responses" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_1","status":"completed","output":[{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"refusal","refusal":"I can't help with that."}],"status":"completed"}],"usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer ts.Close()
+
+	p := New("test-key", nil, WithResponsesTransport())
+	p.baseURL = ts.URL
+	m, err := p.Model("gpt-5.6-terra")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := m.Generate(t.Context(), ai.AIRequest{Prompt: "hello"})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if res.Text != "I can't help with that." {
+		t.Fatalf("response text = %q, want refusal text", res.Text)
+	}
+}
+
+func TestBuildResponsesParamsWrapsUnsupportedToolChoiceMode(t *testing.T) {
+	_, err := buildResponsesParams("gpt-5.6-terra", ai.AIRequest{
+		Prompt: "hello",
+		Tools: []ai.ToolDefinition{{
+			Type:        "function",
+			Name:        "search",
+			Description: "Search",
+			Parameters:  json.RawMessage(`{"type":"object"}`),
+		}},
+		ToolChoice: ai.ToolChoice{Mode: ai.ToolChoiceMode("unsupported")},
+	})
+	if !errors.Is(err, ai.ErrUnsupportedCapability) {
+		t.Fatalf("buildResponsesParams error = %v, want ErrUnsupportedCapability", err)
+	}
+}
+
+func TestBuildResponsesParamsRejectsUndefinedRequiredTool(t *testing.T) {
+	_, err := buildResponsesParams("gpt-5.6-terra", ai.AIRequest{
+		Prompt: "hello",
+		Tools: []ai.ToolDefinition{{
+			Type:        "function",
+			Name:        "search",
+			Description: "Search",
+			Parameters:  json.RawMessage(`{"type":"object"}`),
+		}},
+		ToolChoice: ai.ToolChoice{Mode: ai.ToolChoiceRequired, Names: []string{"missing"}},
+	})
+	if err == nil || err.Error() != `required tool "missing" is not defined` {
+		t.Fatalf("buildResponsesParams error = %v, want undefined required-tool error", err)
+	}
+}
+
+func TestModelGenerateStreamWithResponsesTransportMapsTextToolCallsAndTerminalErrors(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello \"}\n\n"))
+		_, _ = w.Write([]byte("data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"search\",\"arguments\":\"{\\\"q\\\":\\\"go\\\"}\",\"status\":\"completed\"}}\n\n"))
+		_, _ = w.Write([]byte("data: {\"type\":\"error\",\"code\":\"server_error\",\"message\":\"provider failed\"}\n\n"))
+	}))
+	defer ts.Close()
+
+	p := New("test-key", nil, WithResponsesTransport())
+	p.baseURL = ts.URL
+	m, err := p.Model("gpt-5.6-terra")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tokens []ai.Token
+	for token := range m.GenerateStream(t.Context(), ai.AIRequest{Prompt: "hello", Tools: []ai.ToolDefinition{{Type: "function", Name: "search", Description: "Search", Parameters: json.RawMessage(`{"type":"object"}`)}}}) {
+		tokens = append(tokens, token)
+	}
+	if len(tokens) != 3 || tokens[0].Type != ai.TokenTypeText || tokens[0].Text != "hello " {
+		t.Fatalf("tokens = %#v", tokens)
+	}
+	if call := tokens[1].ToolCall; tokens[1].Type != ai.TokenTypeToolCall || call == nil || call.ID != "call_1" || call.Name != "search" || string(call.Args) != `{"q":"go"}` {
+		t.Fatalf("tool token = %#v", tokens[1])
+	}
+	if tokens[2].Type != ai.TokenTypeErr || tokens[2].Err == nil || tokens[2].Err.Error() != "OpenAI Responses API: provider failed" {
+		t.Fatalf("error token = %#v", tokens[2])
+	}
+}
+
+func TestModelGenerateStreamWithResponsesTransportFallsBackForEmptyFailedResponseError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"type\":\"response.failed\",\"response\":{}}\n\n"))
+	}))
+	defer ts.Close()
+
+	p := New("test-key", nil, WithResponsesTransport())
+	p.baseURL = ts.URL
+	m, err := p.Model("gpt-5.6-terra")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tokens []ai.Token
+	for token := range m.GenerateStream(t.Context(), ai.AIRequest{Prompt: "hello"}) {
+		tokens = append(tokens, token)
+	}
+	if len(tokens) != 1 || tokens[0].Type != ai.TokenTypeErr || tokens[0].Err == nil || tokens[0].Err.Error() != "OpenAI Responses API: response failed" {
+		t.Fatalf("tokens = %#v", tokens)
+	}
+}
+
+func TestModelGenerateStreamWithResponsesTransportReturnsRefusalText(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"type\":\"response.refusal.delta\",\"delta\":\"I can't help with that.\"}\n\n"))
+	}))
+	defer ts.Close()
+
+	p := New("test-key", nil, WithResponsesTransport())
+	p.baseURL = ts.URL
+	m, err := p.Model("gpt-5.6-terra")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tokens []ai.Token
+	for token := range m.GenerateStream(t.Context(), ai.AIRequest{Prompt: "hello"}) {
+		tokens = append(tokens, token)
+	}
+	if len(tokens) != 1 || tokens[0].Type != ai.TokenTypeText || tokens[0].Text != "I can't help with that." {
+		t.Fatalf("tokens = %#v, want refusal text token", tokens)
 	}
 }
 
@@ -183,6 +555,33 @@ func TestBuildChatCompletionParamsAssumesPrevalidatedRequest(t *testing.T) {
 	}
 }
 
+func TestOpenAIMapsExtendedReasoningEfforts(t *testing.T) {
+	tests := []struct {
+		model  string
+		effort ai.ReasoningEffort
+	}{
+		{"gpt-5", ai.ReasoningEffortMinimal},
+		{"gpt-5.6-terra", ai.ReasoningEffortXHigh},
+		{"gpt-5.6-terra", ai.ReasoningEffortMax},
+	}
+	for _, tt := range tests {
+		t.Run(tt.model+"/"+string(tt.effort), func(t *testing.T) {
+			effort := tt.effort
+			model := tt.model
+			req := ai.AIRequest{Prompt: "hello", Reasoning: ai.ReasoningConfig{Effort: effort}}
+			if _, err := buildChatCompletionParams(model, req, false); err != nil {
+				t.Fatalf("buildChatCompletionParams(%q): %v", effort, err)
+			}
+			if _, err := buildResponsesParams(model, req); err != nil {
+				t.Fatalf("buildResponsesParams(%q): %v", effort, err)
+			}
+			if err := openAIDescriptor(model).ValidateRequest(req); err != nil {
+				t.Fatalf("descriptor rejected %q: %v", effort, err)
+			}
+		})
+	}
+}
+
 func TestModelPreflightRejectsUnsupportedBeforeTransport(t *testing.T) {
 	requests := 0
 	ts := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requests++ }))
@@ -198,6 +597,60 @@ func TestModelPreflightRejectsUnsupportedBeforeTransport(t *testing.T) {
 		t.Fatalf("Generate error = %v, requests = %d; want local unsupported error and no request", err, requests)
 	}
 	for token := range m.GenerateStream(t.Context(), ai.AIRequest{Reasoning: ai.ReasoningConfig{Effort: ai.ReasoningEffortHigh}}) {
+		if !errors.Is(token.Err, ai.ErrUnsupportedCapability) {
+			t.Fatalf("stream error = %v, want unsupported capability", token.Err)
+		}
+	}
+	if requests != 0 {
+		t.Fatalf("stream made %d requests, want none", requests)
+	}
+}
+
+func TestModelPreflightRejectsReasoningToolsOnChatCompletionsBeforeTransport(t *testing.T) {
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requests++ }))
+	defer ts.Close()
+	p := New("test-key", nil)
+	p.baseURL = ts.URL
+	m, err := p.Model("gpt-5.6-terra")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := ai.AIRequest{
+		Tools:     []ai.ToolDefinition{{Type: "function", Name: "search", Description: "Search", Parameters: json.RawMessage(`{"type":"object"}`)}},
+		Reasoning: ai.ReasoningConfig{Effort: ai.ReasoningEffortHigh},
+	}
+	if _, err := m.Generate(t.Context(), req); !errors.Is(err, ai.ErrUnsupportedCapability) || requests != 0 {
+		t.Fatalf("Generate error = %v, requests = %d; want local unsupported error and no request", err, requests)
+	}
+	for token := range m.GenerateStream(t.Context(), req) {
+		if !errors.Is(token.Err, ai.ErrUnsupportedCapability) {
+			t.Fatalf("stream error = %v, want unsupported capability", token.Err)
+		}
+	}
+	if requests != 0 {
+		t.Fatalf("stream made %d requests, want none", requests)
+	}
+}
+
+func TestModelPreflightRejectsNoneReasoningToolsOnChatCompletionsBeforeTransport(t *testing.T) {
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requests++ }))
+	defer ts.Close()
+	p := New("test-key", nil)
+	p.baseURL = ts.URL
+	m, err := p.Model("gpt-5.6-terra")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := ai.AIRequest{
+		Tools:     []ai.ToolDefinition{{Type: "function", Name: "search", Description: "Search", Parameters: json.RawMessage(`{"type":"object"}`)}},
+		Reasoning: ai.ReasoningConfig{Effort: ai.ReasoningEffortNone},
+	}
+	if _, err := m.Generate(t.Context(), req); !errors.Is(err, ai.ErrUnsupportedCapability) || requests != 0 {
+		t.Fatalf("Generate error = %v, requests = %d; want local unsupported error and no request", err, requests)
+	}
+	for token := range m.GenerateStream(t.Context(), req) {
 		if !errors.Is(token.Err, ai.ErrUnsupportedCapability) {
 			t.Fatalf("stream error = %v, want unsupported capability", token.Err)
 		}
@@ -232,15 +685,28 @@ func TestModelAllowsUnknownDynamicReasoningEffort(t *testing.T) {
 }
 
 func TestOpenAIDescriptorUsesReasoningFamilyOverlay(t *testing.T) {
-	for _, model := range []string{"o5-pro", "gpt-5.99-preview"} {
-		d := openAIDescriptor(model)
-		if d.ReasoningEffort != ai.FeatureSupportSupported || len(d.ReasoningEfforts) != 3 {
-			t.Fatalf("descriptor for %q = %#v, want supported reasoning efforts", model, d)
+	tests := []struct {
+		model   string
+		efforts []ai.ReasoningEffort
+	}{
+		{"o5-pro", []ai.ReasoningEffort{ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh}},
+		{"gpt-5", []ai.ReasoningEffort{ai.ReasoningEffortMinimal, ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh}},
+		{"gpt-5.1-codex", []ai.ReasoningEffort{ai.ReasoningEffortNone, ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh}},
+		{"gpt-5.6-terra", []ai.ReasoningEffort{ai.ReasoningEffortNone, ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh, ai.ReasoningEffortXHigh, ai.ReasoningEffortMax}},
+	}
+	for _, tt := range tests {
+		d := openAIDescriptor(tt.model)
+		if d.ReasoningEffort != ai.FeatureSupportSupported || !slices.Equal(d.ReasoningEfforts, tt.efforts) {
+			t.Fatalf("descriptor for %q = %#v, want efforts %#v", tt.model, d, tt.efforts)
 		}
 	}
 	d := openAIDescriptor("future-chat-model")
 	if d.ReasoningEffort != ai.FeatureSupportUnknown || len(d.ReasoningEfforts) != 0 {
 		t.Fatalf("unrelated unknown descriptor = %#v, want unknown reasoning effort", d)
+	}
+	d = openAIDescriptor("gpt-5.99-preview")
+	if d.ReasoningEffort != ai.FeatureSupportUnknown || len(d.ReasoningEfforts) != 0 {
+		t.Fatalf("unknown GPT-5 revision descriptor = %#v, want unknown reasoning effort", d)
 	}
 }
 

@@ -22,18 +22,43 @@ type Provider struct {
 	debug      gai.DebugSink
 	catalog    ai.ModelCatalogCache
 	catalogMu  ai.ContextMutex
+	transport  Transport
+}
+
+// Transport selects the OpenAI API endpoint used by models from this provider.
+type Transport string
+
+const (
+	TransportChatCompletions Transport = "chat_completions"
+	TransportResponses       Transport = "responses"
+)
+
+// Option configures an OpenAI provider.
+type Option func(*Provider)
+
+// WithResponsesTransport selects OpenAI's Responses API. It supports native
+// function-call/result history and reasoning models that require this endpoint.
+func WithResponsesTransport() Option {
+	return func(p *Provider) { p.transport = TransportResponses }
 }
 
 var _ ai.Provider = (*Provider)(nil)
 var _ ai.ModelCatalogProvider = (*Provider)(nil)
 
-func New(apiKey string, debug gai.DebugSink) *Provider {
-	return &Provider{
+func New(apiKey string, debug gai.DebugSink, options ...Option) *Provider {
+	p := &Provider{
 		apiKey:     apiKey,
 		baseURL:    "https://api.openai.com/v1",
 		httpClient: &http.Client{},
 		debug:      debug,
+		transport:  TransportChatCompletions,
 	}
+	for _, option := range options {
+		if option != nil {
+			option(p)
+		}
+	}
+	return p
 }
 
 func (p *Provider) Validate() error {
