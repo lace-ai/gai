@@ -128,6 +128,7 @@ func buildResponsesParams(model string, req ai.AIRequest) (responses.ResponseNew
 			return responses.ResponseNewParams{}, fmt.Errorf("%w: OpenAI reasoning effort %q", ai.ErrUnsupportedCapability, req.Reasoning.Effort)
 		}
 	}
+	available := make(map[string]struct{}, len(req.Tools))
 	for _, definition := range req.Tools {
 		if err := definition.Validate(); err != nil {
 			return responses.ResponseNewParams{}, err
@@ -139,6 +140,7 @@ func buildResponsesParams(model string, req ai.AIRequest) (responses.ResponseNew
 		params.Tools = append(params.Tools, responses.ToolUnionParam{OfFunction: &responses.FunctionToolParam{
 			Name: definition.Name, Description: param.NewOpt(definition.Description), Parameters: schema, Strict: param.NewOpt(false),
 		}})
+		available[definition.Name] = struct{}{}
 	}
 	if len(req.Tools) > 0 {
 		switch req.ToolChoice.Mode {
@@ -148,6 +150,9 @@ func buildResponsesParams(model string, req ai.AIRequest) (responses.ResponseNew
 			params.ToolChoice.OfToolChoiceMode = param.NewOpt(responses.ToolChoiceOptionsNone)
 		case ai.ToolChoiceRequired:
 			if len(req.ToolChoice.Names) == 1 {
+				if _, ok := available[req.ToolChoice.Names[0]]; !ok {
+					return responses.ResponseNewParams{}, fmt.Errorf("required tool %q is not defined", req.ToolChoice.Names[0])
+				}
 				params.ToolChoice.OfFunctionTool = &responses.ToolChoiceFunctionParam{Name: req.ToolChoice.Names[0]}
 				break
 			}

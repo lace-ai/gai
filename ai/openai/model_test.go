@@ -167,6 +167,22 @@ func TestBuildResponsesParamsWrapsUnsupportedToolChoiceMode(t *testing.T) {
 	}
 }
 
+func TestBuildResponsesParamsRejectsUndefinedRequiredTool(t *testing.T) {
+	_, err := buildResponsesParams("gpt-5.6-terra", ai.AIRequest{
+		Prompt: "hello",
+		Tools: []ai.ToolDefinition{{
+			Type:        "function",
+			Name:        "search",
+			Description: "Search",
+			Parameters:  json.RawMessage(`{"type":"object"}`),
+		}},
+		ToolChoice: ai.ToolChoice{Mode: ai.ToolChoiceRequired, Names: []string{"missing"}},
+	})
+	if err == nil || err.Error() != `required tool "missing" is not defined` {
+		t.Fatalf("buildResponsesParams error = %v, want undefined required-tool error", err)
+	}
+}
+
 func TestModelGenerateStreamWithResponsesTransportMapsTextToolCallsAndTerminalErrors(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/responses" {
