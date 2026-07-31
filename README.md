@@ -1,6 +1,6 @@
 <div align="center">
   <a href="https://github.com/lace-ai/gai">
-    <img alt="GAI" src="/docs/GAI_thumbnail.png">
+    <img alt="GAI" src="docs/GAI_thumbnail.png">
   </a>
 
   <p><strong>Type-safe, provider-neutral agent runtime for Go.</strong></p>

@@ -44,7 +44,7 @@ func newLookupOrderTool() *lookupOrderTool {
 				Status:            "in_transit",
 				Carrier:           "Austrian Post",
 				TrackingNumber:    "AT123456789",
-				EstimatedDelivery: "2026-08-03",
+				EstimatedDelivery: "within 2 business days",
 				LastUpdate:        "Departed the Vienna logistics center",
 			},
 		},
