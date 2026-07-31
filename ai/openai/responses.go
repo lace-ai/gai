@@ -95,7 +95,7 @@ func (m *Model) generateResponsesStream(ctx context.Context, out chan<- ai.Token
 }
 
 func buildResponsesParams(model string, req ai.AIRequest) (responses.ResponseNewParams, error) {
-	params := responses.ResponseNewParams{Model: model}
+	params := responses.ResponseNewParams{Model: model, Store: param.NewOpt(false)}
 	if len(req.Messages) == 0 {
 		params.Input.OfString = param.NewOpt(req.Prompt)
 	} else {

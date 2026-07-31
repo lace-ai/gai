@@ -108,6 +108,45 @@ func TestModelGenerateWithResponsesTransportMapsToolContinuationAndNoneEffort(t 
 	}
 }
 
+func TestModelResponsesTransportDisablesResponseStorage(t *testing.T) {
+	requests := make(chan map[string]any, 2)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/responses" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		requests <- request
+		w.Header().Set("Content-Type", "application/json")
+		if r.Header.Get("Accept") == "text/event-stream" {
+			_, _ = w.Write([]byte("data: {\"type\":\"response.completed\",\"response\":{}}\n\n"))
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":"resp_1","status":"completed","output":[],"usage":{"input_tokens":0,"output_tokens":0}}`))
+	}))
+	defer ts.Close()
+
+	p := New("test-key", nil, WithResponsesTransport())
+	p.baseURL = ts.URL
+	m, err := p.Model("gpt-5.6-terra")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Generate(t.Context(), ai.AIRequest{Prompt: "sync"}); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	for range m.GenerateStream(t.Context(), ai.AIRequest{Prompt: "stream"}) {
+	}
+	for _, path := range []string{"synchronous", "streaming"} {
+		request := <-requests
+		if request["store"] != false {
+			t.Fatalf("%s request store = %#v, want false", path, request["store"])
+		}
+	}
+}
+
 func TestModelGenerateWithResponsesTransportPreservesReasoningItemsAcrossToolContinuation(t *testing.T) {
 	var continuation map[string]any
 	requests := 0
