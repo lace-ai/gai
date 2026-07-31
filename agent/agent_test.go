@@ -34,6 +34,15 @@ type disabledNativeToolWorkflowModel struct {
 
 func (disabledNativeToolWorkflowModel) NativeTools() bool { return false }
 
+type describedToolWorkflowModel struct {
+	*scriptedWorkflowModel
+	descriptor        ai.ModelDescriptor
+	legacyNativeTools bool
+}
+
+func (m describedToolWorkflowModel) Descriptor() ai.ModelDescriptor { return m.descriptor }
+func (m describedToolWorkflowModel) NativeTools() bool              { return m.legacyNativeTools }
+
 func (s testContextSource) Name() string { return s.name }
 func (s testContextSource) Function(context.Context, int) (gaictx.Part, error) {
 	return gaictx.NewTextPart(s.name), nil
@@ -251,6 +260,46 @@ func TestAgentNativeToolModelWithoutSupportAddsPromptToolProtocol(t *testing.T) 
 	}
 	if !strings.Contains(prompt, `{"type":"function","name":"<tool-name>","arguments":{...}}`) {
 		t.Fatalf("disabled native tool model prompt missing tool protocol:\n%s", prompt)
+	}
+}
+
+func TestAgentModelDescriberControlsPromptToolProtocol(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name               string
+		nativeTools        ai.FeatureSupport
+		legacyNativeTools  bool
+		wantPromptProtocol bool
+	}{
+		{name: "supported overrides legacy false", nativeTools: ai.FeatureSupportSupported},
+		{name: "unknown ignores legacy support", nativeTools: ai.FeatureSupportUnknown, legacyNativeTools: true, wantPromptProtocol: true},
+		{name: "unsupported ignores legacy support", nativeTools: ai.FeatureSupportUnsupported, legacyNativeTools: true, wantPromptProtocol: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			builder := gaictx.New(gaictx.Definition{Renderer: &gaictx.SimpleRenderer{}})
+			assistant := agent.New(agent.Definition{
+				Model: describedToolWorkflowModel{
+					scriptedWorkflowModel: &scriptedWorkflowModel{},
+					descriptor:            ai.ModelDescriptor{NativeTools: tt.nativeTools},
+					legacyNativeTools:     tt.legacyNativeTools,
+				},
+				Tools: []loop.Tool{loop.NewEchoTool()},
+				Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+					return builder, nil
+				},
+			})
+
+			if _, err := assistant.NewRun(context.Background(), textRunInput("use echo")); err != nil {
+				t.Fatalf("NewRun failed: %v", err)
+			}
+			hasPromptProtocol := len(builder.ContextSources) == 1 && builder.ContextSources[0].Name() == "tool_definitions"
+			if hasPromptProtocol != tt.wantPromptProtocol {
+				t.Fatalf("prompt protocol = %t, want %t; sources: %+v", hasPromptProtocol, tt.wantPromptProtocol, builder.ContextSources)
+			}
+		})
 	}
 }
 

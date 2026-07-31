@@ -66,6 +66,13 @@ type ModelDescriptor struct {
 	Tokenizer        TokenizerDescriptor
 }
 
+// SupportsNativeTools reports whether native tool calling is known to be
+// supported. Unknown capability is intentionally treated as unsupported so
+// callers can retain the text-based tool protocol as a compatibility fallback.
+func (d ModelDescriptor) SupportsNativeTools() bool {
+	return d.NativeTools == FeatureSupportSupported
+}
+
 // Copy returns an independent copy of d. It is provided so callers need not
 // rely on the descriptor's current value-only representation.
 func (d ModelDescriptor) Copy() ModelDescriptor {
