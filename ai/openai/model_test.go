@@ -129,6 +129,28 @@ func TestModelGenerateWithResponsesTransportRejectsInvalidToolCallArguments(t *t
 	}
 }
 
+func TestModelGenerateWithResponsesTransportRejectsFailedResponseWithoutErrorMessage(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/responses" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_1","status":"failed","output":[],"usage":{"input_tokens":0,"output_tokens":0}}`))
+	}))
+	defer ts.Close()
+
+	p := New("test-key", nil, WithResponsesTransport())
+	p.baseURL = ts.URL
+	m, err := p.Model("gpt-5.6-terra")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = m.Generate(t.Context(), ai.AIRequest{Prompt: "hello"})
+	if err == nil || err.Error() != "OpenAI Responses API: response failed" {
+		t.Fatalf("Generate error = %v, want failed response error", err)
+	}
+}
+
 func TestBuildResponsesParamsWrapsUnsupportedToolChoiceMode(t *testing.T) {
 	_, err := buildResponsesParams("gpt-5.6-terra", ai.AIRequest{
 		Prompt: "hello",

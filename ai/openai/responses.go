@@ -24,6 +24,13 @@ func (m *Model) generateResponses(ctx context.Context, req ai.AIRequest) (*ai.AI
 	if response.Error.Message != "" {
 		return nil, fmt.Errorf("OpenAI Responses API: %s", response.Error.Message)
 	}
+	if response.Status == "failed" {
+		message := string(response.Error.Code)
+		if message == "" {
+			message = "response failed"
+		}
+		return nil, fmt.Errorf("OpenAI Responses API: %s", message)
+	}
 	return responseFromResponses(response)
 }
 
