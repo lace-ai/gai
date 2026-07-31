@@ -182,7 +182,7 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 
 func usesNativeTools(model ai.Model) bool {
 	if describer, ok := model.(ai.ModelDescriber); ok {
-		return describer.Descriptor().NativeTools == ai.FeatureSupportSupported
+		return describer.Descriptor().SupportsNativeTools()
 	}
 	native, ok := model.(ai.NativeToolModel)
 	return ok && native.NativeTools()

@@ -273,8 +273,8 @@ func TestAgentModelDescriberControlsPromptToolProtocol(t *testing.T) {
 		wantPromptProtocol bool
 	}{
 		{name: "supported overrides legacy false", nativeTools: ai.FeatureSupportSupported},
-		{name: "unknown falls back", nativeTools: ai.FeatureSupportUnknown, legacyNativeTools: true, wantPromptProtocol: true},
-		{name: "unsupported falls back", nativeTools: ai.FeatureSupportUnsupported, legacyNativeTools: true, wantPromptProtocol: true},
+		{name: "unknown ignores legacy support", nativeTools: ai.FeatureSupportUnknown, legacyNativeTools: true, wantPromptProtocol: true},
+		{name: "unsupported ignores legacy support", nativeTools: ai.FeatureSupportUnsupported, legacyNativeTools: true, wantPromptProtocol: true},
 	}
 
 	for _, tt := range tests {
