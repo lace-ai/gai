@@ -534,6 +534,33 @@ func TestModelGenerateStreamPreservesUsageOnlyTerminalChunk(t *testing.T) {
 	}
 }
 
+func TestModelGenerateStreamPreservesMetadataFromSoleUsageOnlyChunk(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_sole\",\"model\":\"gpt-4.1-mini\",\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":7}}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer ts.Close()
+
+	p := New("test-key", nil)
+	p.baseURL = ts.URL
+	m, err := p.Model(GPT41Mini)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tokens []ai.Token
+	for token := range m.GenerateStream(t.Context(), ai.AIRequest{Prompt: "hello"}) {
+		tokens = append(tokens, token)
+	}
+	if len(tokens) != 1 || tokens[0].Type != ai.TokenTypeCompletion {
+		t.Fatalf("tokens = %#v", tokens)
+	}
+	completion := tokens[0].Completion
+	if completion == nil || completion.RequestID != "chatcmpl_sole" || completion.Provider != "openai" || completion.Model != GPT41Mini {
+		t.Fatalf("completion = %#v", completion)
+	}
+}
+
 func TestModelGenerateStreamSnapshotsUsageOnlyCompletion(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

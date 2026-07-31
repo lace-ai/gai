@@ -116,9 +116,15 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			}
 		}()
 		calls := map[int64]*streamToolCall{}
-		var completion ai.Completion
+		completion := ai.Completion{Provider: "openai"}
 		for stream.Next() {
 			chunk := stream.Current()
+			if chunk.ID != "" {
+				completion.RequestID = chunk.ID
+			}
+			if chunk.Model != "" {
+				completion.Model = chunk.Model
+			}
 			if len(chunk.Choices) == 0 {
 				if chunk.JSON.Usage.Valid() {
 					completion.Usage = ai.Usage{
@@ -135,9 +141,6 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 				}
 				continue
 			}
-			completion.RequestID = chunk.ID
-			completion.Provider = "openai"
-			completion.Model = chunk.Model
 			choice := chunk.Choices[0]
 			if choice.FinishReason != "" {
 				completion.FinishReason = string(choice.FinishReason)
