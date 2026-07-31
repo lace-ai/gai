@@ -118,3 +118,22 @@ type AIRequest struct {
 	// Reasoning configures model reasoning/thinking behavior when supported.
 	Reasoning ReasoningConfig
 }
+
+// Validate checks request structure before provider-specific mapping.
+func (r AIRequest) Validate() error {
+	if err := r.ValidateMessages(); err != nil {
+		return err
+	}
+	if err := r.ResponseFormat.Validate(); err != nil {
+		return err
+	}
+	for _, tool := range r.Tools {
+		if err := tool.Validate(); err != nil {
+			return err
+		}
+	}
+	if len(r.Tools) == 0 && (r.ToolChoice.Mode != "" || len(r.ToolChoice.Names) != 0) {
+		return fmt.Errorf("tool choice requires tools")
+	}
+	return nil
+}

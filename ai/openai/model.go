@@ -22,6 +22,7 @@ type Model struct {
 }
 
 var _ ai.Model = (*Model)(nil)
+var _ ai.ModelDescriber = (*Model)(nil)
 var _ ai.NativeToolModel = (*Model)(nil)
 
 func (m *Model) Name() string { return m.name }
@@ -32,7 +33,17 @@ func (m *Model) Close() error { return nil }
 
 func (m *Model) Tokenizer() ai.Tokenizer { return tokenizer{modelName: m.name} }
 
+func (m *Model) Descriptor() ai.ModelDescriptor {
+	if facts, ok := m.provider.catalog.Lookup(m.name); ok {
+		return effectiveOpenAIDescriptor(m.name, facts)
+	}
+	return openAIDescriptor(m.name)
+}
+
 func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (*ai.AIResponse, error) {
+	if err := ai.ValidateModelRequest(m, req); err != nil {
+		return nil, err
+	}
 	params, err := buildChatCompletionParams(m.name, req, false)
 	if err != nil {
 		return nil, err
@@ -71,6 +82,10 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 	out := make(chan ai.Token, 1)
 	go func() {
 		defer close(out)
+		if err := ai.ValidateModelRequest(m, req); err != nil {
+			ai.SendToken(ctx, out, ai.Token{Type: ai.TokenTypeErr, Err: err, Text: err.Error()})
+			return
+		}
 		params, err := buildChatCompletionParams(m.name, req, true)
 		if err != nil {
 			ai.SendToken(ctx, out, ai.Token{Type: ai.TokenTypeErr, Err: err, Text: err.Error()})
@@ -160,12 +175,6 @@ func sendStreamToolCalls(ctx context.Context, out chan<- ai.Token, calls map[int
 }
 
 func buildChatCompletionParams(model string, req ai.AIRequest, stream bool) (sdk.ChatCompletionNewParams, error) {
-	if err := req.ValidateMessages(); err != nil {
-		return sdk.ChatCompletionNewParams{}, err
-	}
-	if err := req.ResponseFormat.Validate(); err != nil {
-		return sdk.ChatCompletionNewParams{}, err
-	}
 	params := sdk.ChatCompletionNewParams{Model: shared.ChatModel(model), Messages: []sdk.ChatCompletionMessageParamUnion{sdk.UserMessage(req.Prompt)}}
 	if len(req.Messages) > 0 {
 		messages, err := mapNativeMessages(req.Messages)
@@ -185,9 +194,6 @@ func buildChatCompletionParams(model string, req ai.AIRequest, stream bool) (sdk
 	}
 	if err := applyResponseFormat(&params, req.ResponseFormat); err != nil {
 		return sdk.ChatCompletionNewParams{}, err
-	}
-	if req.Reasoning.Effort != "" && !isReasoningModel(model) {
-		return sdk.ChatCompletionNewParams{}, fmt.Errorf("%w: reasoning effort is unsupported for model %q", ai.ErrUnsupportedCapability, model)
 	}
 	switch req.Reasoning.Effort {
 	case "", ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh:
@@ -226,9 +232,43 @@ func mapNativeMessages(messages []ai.RequestMessage) ([]sdk.ChatCompletionMessag
 	return out, nil
 }
 
-func isReasoningModel(model string) bool {
+func openAIDescriptor(model string) ai.ModelDescriptor {
+	d := ai.ModelDescriptor{
+		Model: model, NativeMessages: ai.FeatureSupportSupported, NativeTools: ai.FeatureSupportSupported,
+		ToolChoiceModes: []ai.ToolChoiceMode{ai.ToolChoiceAuto, ai.ToolChoiceNone, ai.ToolChoiceRequired},
+		Multimodal:      ai.FeatureSupportUnsupported,
+		Usage:           ai.FeatureSupportSupported, FinishReason: ai.FeatureSupportUnsupported, StreamingUsage: ai.FeatureSupportUnsupported,
+		ToolCalling: ai.FeatureSupportSupported,
+		JSONOutput:  ai.FeatureSupportSupported, JSONSchemaOutput: ai.FeatureSupportSupported,
+		Tokenizer: ai.TokenizerDescriptor{Available: ai.FeatureSupportUnsupported},
+	}
+	if isOpenAIReasoningFamily(model) {
+		d.ReasoningEffort = ai.FeatureSupportSupported
+		d.ReasoningEfforts = []ai.ReasoningEffort{ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh}
+	} else if isKnownNonReasoningModel(model) {
+		d.Reasoning, d.ReasoningEffort = ai.FeatureSupportUnsupported, ai.FeatureSupportUnsupported
+	}
+	return d
+}
+
+func isOpenAIReasoningFamily(model string) bool {
+	name := strings.ToLower(strings.TrimSpace(model))
+	if strings.HasPrefix(name, "gpt-5") && (len(name) == len("gpt-5") || name[len("gpt-5")] == '.' || name[len("gpt-5")] == '-') {
+		return true
+	}
+	if len(name) < 2 || name[0] != 'o' {
+		return false
+	}
+	i := 1
+	for i < len(name) && name[i] >= '0' && name[i] <= '9' {
+		i++
+	}
+	return i > 1 && (i == len(name) || name[i] == '.' || name[i] == '-')
+}
+
+func isKnownNonReasoningModel(model string) bool {
 	switch model {
-	case O3, O3Mini, O4Mini:
+	case GPT41, GPT41Mini, GPT41Nano, GPT4o, GPT4oMini:
 		return true
 	default:
 		return false

@@ -28,6 +28,7 @@ type Model struct {
 }
 
 var _ ai.Model = (*Model)(nil)
+var _ ai.ModelDescriber = (*Model)(nil)
 var _ ai.NativeToolModel = (*Model)(nil)
 
 func (m *Model) Name() string      { return m.name }
@@ -35,6 +36,53 @@ func (m *Model) NativeTools() bool { return true }
 func (m *Model) Close() error      { return nil }
 func (m *Model) Tokenizer() ai.Tokenizer {
 	return &Tokenizer{modelName: m.name, client: m.client, debug: m.debug}
+}
+
+func (m *Model) Descriptor() ai.ModelDescriptor {
+	if facts, ok := m.client.catalog.Lookup(m.name); ok {
+		return effectiveAnthropicDescriptor(m.name, facts)
+	}
+	return effectiveAnthropicDescriptor(m.name, ai.ModelDescriptor{Model: m.name})
+}
+
+func anthropicAdapterDescriptor(model string) ai.ModelDescriptor {
+	return ai.ModelDescriptor{Model: model, NativeMessages: ai.FeatureSupportSupported, NativeTools: ai.FeatureSupportSupported,
+		ToolChoiceModes: []ai.ToolChoiceMode{ai.ToolChoiceAuto, ai.ToolChoiceNone, ai.ToolChoiceRequired},
+		Multimodal:      ai.FeatureSupportUnsupported,
+		Usage:           ai.FeatureSupportSupported, FinishReason: ai.FeatureSupportSupported, StreamingUsage: ai.FeatureSupportUnsupported,
+		ToolCalling: ai.FeatureSupportSupported,
+		JSONOutput:  ai.FeatureSupportUnsupported, JSONSchemaOutput: ai.FeatureSupportSupported,
+		Reasoning: ai.FeatureSupportSupported, ReasoningEffort: ai.FeatureSupportSupported,
+		ReasoningEfforts: []ai.ReasoningEffort{ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh},
+		Tokenizer:        ai.TokenizerDescriptor{Available: ai.FeatureSupportSupported, Fidelity: ai.TokenizerFidelityEstimated}}
+}
+
+func anthropicLocalFacts(model string) ai.ModelDescriptor {
+	d := ai.ModelDescriptor{Model: model}
+	if supportsAdaptiveThinking(model) {
+		d.Reasoning = ai.FeatureSupportSupported
+		d.ReasoningEffort = ai.FeatureSupportSupported
+		d.ReasoningEfforts = []ai.ReasoningEffort{ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh}
+	} else if isKnownModel(model) {
+		d.Reasoning = ai.FeatureSupportSupported
+		d.ReasoningEffort = ai.FeatureSupportUnsupported
+	}
+	return d
+}
+
+func anthropicProviderDefaults(model string) ai.ModelDescriptor {
+	d := anthropicAdapterDescriptor(model)
+	d.Reasoning = ai.FeatureSupportUnknown
+	d.ReasoningEffort = ai.FeatureSupportUnknown
+	return d
+}
+
+func effectiveAnthropicDescriptor(model string, catalog ai.ModelDescriptor) ai.ModelDescriptor {
+	adapter := anthropicAdapterDescriptor(model)
+	facts := anthropicProviderDefaults(model)
+	facts = ai.OverrideModelDescriptor(facts, anthropicLocalFacts(model))
+	facts = ai.OverrideModelDescriptor(facts, catalog)
+	return ai.IntersectModelDescriptors(adapter, facts)
 }
 
 // sdkClient is deliberately created from the provider's fields for each call.
@@ -50,7 +98,7 @@ func (p *Provider) sdkClient() antropic.Client {
 	)
 }
 
-func buildMessagesRequest(req ai.AIRequest, model string) (antropic.MessageNewParams, error) {
+func buildMessagesRequest(req ai.AIRequest, descriptor ai.ModelDescriptor) (antropic.MessageNewParams, error) {
 	if err := req.ValidateMessages(); err != nil {
 		return antropic.MessageNewParams{}, err
 	}
@@ -62,7 +110,7 @@ func buildMessagesRequest(req ai.AIRequest, model string) (antropic.MessageNewPa
 		maxTokens = defaultMaxTokens
 	}
 	p := antropic.MessageNewParams{
-		Model:     antropic.Model(model),
+		Model:     antropic.Model(descriptor.Model),
 		MaxTokens: int64(maxTokens),
 		Messages:  []antropic.MessageParam{antropic.NewUserMessage(antropic.NewTextBlock(req.Prompt))},
 	}
@@ -93,8 +141,8 @@ func buildMessagesRequest(req ai.AIRequest, model string) (antropic.MessageNewPa
 		p.OutputConfig = *format
 	}
 	if req.Reasoning.Effort != "" {
-		if !supportsAdaptiveThinking(model) {
-			return antropic.MessageNewParams{}, fmt.Errorf("%w: anthropic reasoning effort is unsupported by %s", ai.ErrUnsupportedCapability, model)
+		if descriptor.ReasoningEffort == ai.FeatureSupportUnsupported {
+			return antropic.MessageNewParams{}, fmt.Errorf("%w: anthropic reasoning effort is unsupported by %s", ai.ErrUnsupportedCapability, descriptor.Model)
 		}
 		switch req.Reasoning.Effort {
 		case ai.ReasoningEffortLow:
@@ -119,14 +167,14 @@ func buildMessagesRequest(req ai.AIRequest, model string) (antropic.MessageNewPa
 				thinking.OfEnabled.Display = antropic.ThinkingConfigEnabledDisplayOmitted
 			}
 			p.Thinking = thinking
-		} else if supportsAdaptiveThinking(model) {
+		} else if descriptor.ReasoningEffort != ai.FeatureSupportUnsupported {
 			display := antropic.ThinkingConfigAdaptiveDisplayOmitted
 			if req.Reasoning.IncludeThoughts {
 				display = antropic.ThinkingConfigAdaptiveDisplaySummarized
 			}
 			p.Thinking = antropic.ThinkingConfigParamUnion{OfAdaptive: &antropic.ThinkingConfigAdaptiveParam{Display: display}}
 		} else {
-			return antropic.MessageNewParams{}, fmt.Errorf("%w: anthropic adaptive thinking is unsupported by %s", ai.ErrUnsupportedCapability, model)
+			return antropic.MessageNewParams{}, fmt.Errorf("%w: anthropic adaptive thinking is unsupported by %s", ai.ErrUnsupportedCapability, descriptor.Model)
 		}
 		if p.ToolChoice.OfAny != nil || p.ToolChoice.OfTool != nil {
 			return antropic.MessageNewParams{}, fmt.Errorf("%w: anthropic thinking is incompatible with required tool choice", ai.ErrUnsupportedCapability)
@@ -238,7 +286,10 @@ func mapResponseFormat(format ai.ResponseFormat) (*antropic.OutputConfigParam, e
 func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AIResponse, err error) {
 	ctx, span := gai.StartOperationSpan(ctx, anthropicTracerName, "ai.anthropic", "ai.operation", "model.generate", attribute.String("ai.provider", "anthropic"), attribute.String("ai.model", m.name), attribute.Int("ai.max_tokens", req.MaxTokens), attribute.Int("ai.prompt_length", len(req.Prompt)))
 	defer func() { gai.EndSpan(span, err) }()
-	payload, err := buildMessagesRequest(req, m.name)
+	if err := ai.ValidateModelRequest(m, req); err != nil {
+		return nil, err
+	}
+	payload, err := buildMessagesRequest(req, m.Descriptor())
 	if err != nil {
 		return nil, err
 	}
@@ -324,7 +375,12 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			streamErr = ctx.Err()
 			return false
 		}
-		payload, err := buildMessagesRequest(req, m.name)
+		if err := ai.ValidateModelRequest(m, req); err != nil {
+			streamErr = err
+			emit(ai.Token{Type: ai.TokenTypeErr, Err: err, Text: err.Error()})
+			return
+		}
+		payload, err := buildMessagesRequest(req, m.Descriptor())
 		if err != nil {
 			streamErr = err
 			emit(ai.Token{Type: ai.TokenTypeErr, Err: err, Text: err.Error()})

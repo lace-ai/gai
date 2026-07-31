@@ -20,9 +20,12 @@ type Provider struct {
 	baseURL    string
 	httpClient *http.Client
 	debug      gai.DebugSink
+	catalog    ai.ModelCatalogCache
+	catalogMu  ai.ContextMutex
 }
 
 var _ ai.Provider = (*Provider)(nil)
+var _ ai.ModelCatalogProvider = (*Provider)(nil)
 
 func New(apiKey string, debug gai.DebugSink) *Provider {
 	return &Provider{
@@ -65,20 +68,44 @@ func (p *Provider) Model(name string) (ai.Model, error) {
 }
 
 func (p *Provider) ListModels() ([]string, error) {
+	descriptors, err := p.ListModelDescriptors(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(descriptors))
+	for _, descriptor := range descriptors {
+		names = append(names, descriptor.Model)
+	}
+	return names, nil
+}
+
+// ListModelDescriptors returns a cached point-in-time model catalog. Discovery
+// is the only capability path that may perform network I/O.
+func (p *Provider) ListModelDescriptors(ctx context.Context) ([]ai.ModelDescriptor, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), modelDiscoveryTimeout)
-	defer cancel()
-	discovered, err := p.listModels(ctx)
-	if err == nil {
-		return discovered, nil
+	if err := p.catalogMu.Lock(ctx); err != nil {
+		return nil, err
 	}
-	return fallbackModels(), nil
+	defer p.catalogMu.Unlock()
+	if cached, ok := p.catalog.Load(); ok {
+		return p.effectiveDescriptors(cached), nil
+	}
+	discoveryCtx, cancel := context.WithTimeout(ctx, modelDiscoveryTimeout)
+	defer cancel()
+	discovered, err := p.listModelCatalog(discoveryCtx)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return p.fallbackDescriptors(), nil
+	}
+	p.catalog.Replace(discovered)
+	return p.effectiveDescriptors(discovered), nil
 }
 
-func (p *Provider) listModels(ctx context.Context) ([]string, error) {
+func (p *Provider) listModelCatalog(ctx context.Context) ([]ai.ModelDescriptor, error) {
 	if p.httpClient == nil {
 		return nil, fmt.Errorf("openai model discovery: nil HTTP client")
 	}
@@ -106,13 +133,13 @@ func (p *Provider) listModels(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 
-	names := make([]string, 0, len(payload.Data))
+	descriptors := make([]ai.ModelDescriptor, 0, len(payload.Data))
 	for _, model := range payload.Data {
 		if name := strings.TrimSpace(model.ID); isChatCapableModel(name) {
-			names = append(names, name)
+			descriptors = append(descriptors, ai.ModelDescriptor{Model: name})
 		}
 	}
-	return names, nil
+	return descriptors, nil
 }
 
 // isChatCapableModel excludes model families that the Models endpoint lists but
@@ -146,6 +173,31 @@ func fallbackModels() []string {
 	out := make([]string, len(models))
 	copy(out, models)
 	return out
+}
+
+func (p *Provider) fallbackDescriptors() []ai.ModelDescriptor {
+	descriptors := make([]ai.ModelDescriptor, 0, len(models))
+	for _, model := range models {
+		descriptors = append(descriptors, openAIDescriptor(model))
+	}
+	return descriptors
+}
+
+func (p *Provider) effectiveDescriptors(facts []ai.ModelDescriptor) []ai.ModelDescriptor {
+	descriptors := make([]ai.ModelDescriptor, 0, len(facts))
+	for _, fact := range facts {
+		descriptors = append(descriptors, effectiveOpenAIDescriptor(fact.Model, fact))
+	}
+	return descriptors
+}
+
+func effectiveOpenAIDescriptor(model string, catalog ai.ModelDescriptor) ai.ModelDescriptor {
+	// The adapter descriptor is the maintained baseline. OpenAI's Models API
+	// currently returns model IDs only, so omitted remote facts must retain that
+	// baseline rather than downgrading known adapter support to Unknown.
+	adapter := openAIDescriptor(model)
+	facts := ai.OverrideModelDescriptor(adapter, catalog)
+	return ai.IntersectModelDescriptors(adapter, facts)
 }
 
 func isKnownModel(name string) bool {

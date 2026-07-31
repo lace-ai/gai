@@ -1,6 +1,7 @@
 package gemini
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -63,6 +64,11 @@ func TestProviderDynamicallyListsModelsAndAcceptsThem(t *testing.T) {
 }
 
 func TestProviderFallsBackWhenModelDiscoveryFails(t *testing.T) {
+	got := effectiveGeminiDescriptor("gemini-dynamic", ai.ModelDescriptor{Model: "gemini-dynamic"})
+	if got.Reasoning != ai.FeatureSupportUnknown || got.ReasoningEffort != ai.FeatureSupportUnknown {
+		t.Fatalf("descriptor = %#v; absent catalog thinking facts must remain unknown", got)
+	}
+
 	p := New("test-key", nil)
 	p.httpClient = &http.Client{Transport: handlerRoundTripper(func(*http.Request) (*http.Response, error) {
 		return response(http.StatusServiceUnavailable, "unavailable"), nil
@@ -77,6 +83,22 @@ func TestProviderFallsBackWhenModelDiscoveryFails(t *testing.T) {
 	}
 	if _, err := p.Model(Gemini3FlashPreview); err != nil {
 		t.Fatalf("Model did not accept fallback model: %v", err)
+	}
+}
+
+func TestProviderFallsBackWhenModelDiscoveryTimesOut(t *testing.T) {
+	p := New("test-key", nil)
+	p.httpClient = &http.Client{Transport: handlerRoundTripper(func(r *http.Request) (*http.Response, error) {
+		<-r.Context().Done()
+		return nil, r.Context().Err()
+	})}
+
+	descriptors, err := p.ListModelDescriptors(context.Background())
+	if err != nil {
+		t.Fatalf("ListModelDescriptors returned error: %v", err)
+	}
+	if len(descriptors) == 0 || descriptors[0].Model != Gemini3FlashPreview {
+		t.Fatalf("expected hard-coded fallback descriptors, got %#v", descriptors)
 	}
 }
 

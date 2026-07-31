@@ -31,7 +31,7 @@ func TestModelGenerate(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}],"usage":{"prompt_tokens":11,"completion_tokens":7}}`))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":11,"completion_tokens":7}}`))
 	}))
 	defer ts.Close()
 
@@ -69,6 +69,9 @@ func TestModelGenerate(t *testing.T) {
 
 	if res.Text != "ok" {
 		t.Fatalf("unexpected response text: %q", res.Text)
+	}
+	if res.FinishReason != "stop" {
+		t.Fatalf("unexpected finish reason: %q", res.FinishReason)
 	}
 	if res.InputTokens != 11 || res.OutputTokens != 7 {
 		t.Fatalf("unexpected usage mapping: %+v", res)

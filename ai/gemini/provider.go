@@ -19,9 +19,12 @@ type Provider struct {
 	baseURL    string
 	newClient  func(context.Context, *genai.ClientConfig) (*genai.Client, error)
 	debug      gai.DebugSink
+	catalog    ai.ModelCatalogCache
+	catalogMu  ai.ContextMutex
 }
 
 var _ ai.Provider = (*Provider)(nil)
+var _ ai.ModelCatalogProvider = (*Provider)(nil)
 
 func New(apiKey string, debug gai.DebugSink) *Provider {
 	return &Provider{
@@ -61,20 +64,43 @@ func (p *Provider) Model(name string) (ai.Model, error) {
 }
 
 func (p *Provider) ListModels() ([]string, error) {
+	descriptors, err := p.ListModelDescriptors(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(descriptors))
+	for _, descriptor := range descriptors {
+		names = append(names, descriptor.Model)
+	}
+	return names, nil
+}
+
+// ListModelDescriptors returns a cached point-in-time model catalog.
+func (p *Provider) ListModelDescriptors(ctx context.Context) ([]ai.ModelDescriptor, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), modelDiscoveryTimeout)
-	defer cancel()
-	discovered, err := p.listModels(ctx)
-	if err == nil {
-		return discovered, nil
+	if err := p.catalogMu.Lock(ctx); err != nil {
+		return nil, err
 	}
-	return fallbackModels(), nil
+	defer p.catalogMu.Unlock()
+	if cached, ok := p.catalog.Load(); ok {
+		return p.effectiveDescriptors(cached), nil
+	}
+	discoveryCtx, cancel := context.WithTimeout(ctx, modelDiscoveryTimeout)
+	defer cancel()
+	discovered, err := p.listModelCatalog(discoveryCtx)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return p.fallbackDescriptors(), nil
+	}
+	p.catalog.Replace(discovered)
+	return p.effectiveDescriptors(discovered), nil
 }
 
-func (p *Provider) listModels(ctx context.Context) ([]string, error) {
+func (p *Provider) listModelCatalog(ctx context.Context) ([]ai.ModelDescriptor, error) {
 	client, err := p.getClient(ctx)
 	if err != nil {
 		return nil, err
@@ -85,25 +111,63 @@ func (p *Provider) listModels(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 
-	var names []string
+	var descriptors []ai.ModelDescriptor
 	for {
 		for _, model := range page.Items {
-			if !containsModel(model.SupportedActions, "generateContent") {
+			if len(model.SupportedActions) > 0 && !containsModel(model.SupportedActions, "generateContent") {
 				continue
 			}
 			name := strings.TrimSpace(strings.TrimPrefix(model.Name, "models/"))
 			if name != "" {
-				names = append(names, name)
+				facts := ai.ModelDescriptor{Model: name}
+				if model.Thinking {
+					facts.Reasoning = ai.FeatureSupportSupported
+				}
+				descriptors = append(descriptors, facts)
 			}
 		}
 		page, err = page.Next(ctx)
 		if err == genai.ErrPageDone {
-			return names, nil
+			return descriptors, nil
 		}
 		if err != nil {
 			return nil, err
 		}
 	}
+}
+
+func (p *Provider) fallbackDescriptors() []ai.ModelDescriptor {
+	descriptors := make([]ai.ModelDescriptor, 0, len(models))
+	for _, model := range models {
+		descriptors = append(descriptors, effectiveGeminiDescriptor(model, ai.ModelDescriptor{Model: model}))
+	}
+	return descriptors
+}
+
+func (p *Provider) effectiveDescriptors(facts []ai.ModelDescriptor) []ai.ModelDescriptor {
+	descriptors := make([]ai.ModelDescriptor, 0, len(facts))
+	for _, fact := range facts {
+		descriptors = append(descriptors, effectiveGeminiDescriptor(fact.Model, fact))
+	}
+	return descriptors
+}
+
+func effectiveGeminiDescriptor(model string, catalog ai.ModelDescriptor) ai.ModelDescriptor {
+	adapter := geminiAdapterDescriptor(model)
+	facts := geminiProviderDefaults(model)
+	facts = ai.OverrideModelDescriptor(facts, catalog)
+	effective := ai.IntersectModelDescriptors(adapter, facts)
+	if effective.ReasoningEffort == ai.FeatureSupportUnknown {
+		effective.ReasoningEfforts = append([]ai.ReasoningEffort(nil), adapter.ReasoningEfforts...)
+	}
+	return effective
+}
+
+func geminiProviderDefaults(model string) ai.ModelDescriptor {
+	d := geminiAdapterDescriptor(model)
+	d.Reasoning = ai.FeatureSupportUnknown
+	d.ReasoningEffort = ai.FeatureSupportUnknown
+	return d
 }
 
 func (p *Provider) getClient(ctx context.Context) (*genai.Client, error) {

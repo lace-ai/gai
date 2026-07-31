@@ -1,0 +1,221 @@
+package ai
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"testing"
+)
+
+func TestModelDescriptorZeroValueIsUnknownAndPermitsRequests(t *testing.T) {
+	if FeatureSupportUnknown != 0 {
+		t.Fatalf("FeatureSupportUnknown = %d, want zero", FeatureSupportUnknown)
+	}
+	if err := (ModelDescriptor{}).ValidateRequest(AIRequest{Reasoning: ReasoningConfig{Effort: ReasoningEffortHigh}}); err != nil {
+		t.Fatalf("zero descriptor rejected unknown capability: %v", err)
+	}
+}
+
+func TestModelDescriptorCopy(t *testing.T) {
+	d := ModelDescriptor{Model: "test", ToolCalling: FeatureSupportSupported, NativeMessages: FeatureSupportSupported, ToolChoiceModes: []ToolChoiceMode{ToolChoiceAuto}, ReasoningEfforts: []ReasoningEffort{ReasoningEffortLow}, Tokenizer: TokenizerDescriptor{Available: FeatureSupportSupported, Fidelity: TokenizerFidelityExact}}
+	copy := d.Copy()
+	copy.Model = "other"
+	copy.Tokenizer.Fidelity = TokenizerFidelityEstimated
+	copy.ToolChoiceModes[0] = ToolChoiceNone
+	copy.ReasoningEfforts[0] = ReasoningEffortHigh
+	if d.Model != "test" || d.Tokenizer.Fidelity != TokenizerFidelityExact || d.ToolChoiceModes[0] != ToolChoiceAuto || d.ReasoningEfforts[0] != ReasoningEffortLow {
+		t.Fatalf("Copy mutated original: %#v", d)
+	}
+}
+
+func TestIntersectModelDescriptorsUsesStrictTriStateIntersection(t *testing.T) {
+	supports := []FeatureSupport{
+		FeatureSupportUnknown,
+		FeatureSupportSupported,
+		FeatureSupportUnsupported,
+	}
+	for _, adapter := range supports {
+		for _, catalog := range supports {
+			want := FeatureSupportUnknown
+			if adapter == FeatureSupportUnsupported || catalog == FeatureSupportUnsupported {
+				want = FeatureSupportUnsupported
+			} else if adapter == FeatureSupportSupported && catalog == FeatureSupportSupported {
+				want = FeatureSupportSupported
+			}
+			got := IntersectModelDescriptors(
+				ModelDescriptor{NativeMessages: adapter},
+				ModelDescriptor{NativeMessages: catalog},
+			)
+			if got.NativeMessages != want {
+				t.Fatalf("%v intersect %v = %v, want %v", adapter, catalog, got.NativeMessages, want)
+			}
+		}
+	}
+}
+
+func TestIntersectModelDescriptorsIntersectsKnownValuesWithoutAliasing(t *testing.T) {
+	adapter := ModelDescriptor{
+		Provider:         "provider",
+		Model:            "model",
+		NativeTools:      FeatureSupportSupported,
+		ToolCalling:      FeatureSupportSupported,
+		ToolChoiceModes:  []ToolChoiceMode{ToolChoiceAuto, ToolChoiceRequired},
+		ReasoningEffort:  FeatureSupportSupported,
+		ReasoningEfforts: []ReasoningEffort{ReasoningEffortLow, ReasoningEffortHigh},
+		Tokenizer:        TokenizerDescriptor{Available: FeatureSupportSupported, Fidelity: TokenizerFidelityExact},
+	}
+	catalog := ModelDescriptor{
+		NativeTools:      FeatureSupportSupported,
+		ToolCalling:      FeatureSupportSupported,
+		ToolChoiceModes:  []ToolChoiceMode{ToolChoiceRequired, ToolChoiceNone},
+		ReasoningEffort:  FeatureSupportSupported,
+		ReasoningEfforts: []ReasoningEffort{ReasoningEffortHigh},
+		Tokenizer:        TokenizerDescriptor{Available: FeatureSupportSupported, Fidelity: TokenizerFidelityEstimated},
+	}
+
+	got := IntersectModelDescriptors(adapter, catalog)
+	if got.Provider != "provider" || got.Model != "model" {
+		t.Fatalf("identity = %q:%q", got.Provider, got.Model)
+	}
+	if len(got.ToolChoiceModes) != 1 || got.ToolChoiceModes[0] != ToolChoiceRequired {
+		t.Fatalf("tool choice modes = %#v", got.ToolChoiceModes)
+	}
+	if len(got.ReasoningEfforts) != 1 || got.ReasoningEfforts[0] != ReasoningEffortHigh {
+		t.Fatalf("reasoning efforts = %#v", got.ReasoningEfforts)
+	}
+	if got.Tokenizer.Fidelity != TokenizerFidelityUnknown {
+		t.Fatalf("tokenizer fidelity = %v, want unknown conflict", got.Tokenizer.Fidelity)
+	}
+	got.ToolChoiceModes[0] = ToolChoiceNone
+	got.ReasoningEfforts[0] = ReasoningEffortLow
+	if adapter.ToolChoiceModes[0] != ToolChoiceAuto || catalog.ReasoningEfforts[0] != ReasoningEffortHigh {
+		t.Fatal("intersection aliases an input descriptor")
+	}
+}
+
+func TestOverrideModelDescriptorCannotDefeatAdapterUnsupported(t *testing.T) {
+	adapter := ModelDescriptor{Model: "model", Reasoning: FeatureSupportUnsupported}
+	facts := ModelDescriptor{}
+	override := ModelDescriptor{Reasoning: FeatureSupportSupported}
+
+	got := IntersectModelDescriptors(adapter, OverrideModelDescriptor(facts, override))
+	if got.Reasoning != FeatureSupportUnsupported {
+		t.Fatalf("reasoning = %v, want unsupported", got.Reasoning)
+	}
+}
+
+func TestModelCatalogCacheSnapshotsAreImmutable(t *testing.T) {
+	var cache ModelCatalogCache
+	original := []ModelDescriptor{{
+		Model:           "model",
+		ToolChoiceModes: []ToolChoiceMode{ToolChoiceAuto},
+	}}
+	cache.Replace(original)
+	original[0].Model = "changed"
+	original[0].ToolChoiceModes[0] = ToolChoiceNone
+
+	loaded, ok := cache.Load()
+	if !ok || len(loaded) != 1 || loaded[0].Model != "model" || loaded[0].ToolChoiceModes[0] != ToolChoiceAuto {
+		t.Fatalf("loaded snapshot = %#v, %v", loaded, ok)
+	}
+	loaded[0].ToolChoiceModes[0] = ToolChoiceRequired
+	lookup, ok := cache.Lookup("model")
+	if !ok || lookup.ToolChoiceModes[0] != ToolChoiceAuto {
+		t.Fatalf("lookup = %#v, %v", lookup, ok)
+	}
+
+	cache.Replace(nil)
+	empty, ok := cache.Load()
+	if !ok || len(empty) != 0 {
+		t.Fatalf("empty successful snapshot = %#v, %v", empty, ok)
+	}
+}
+
+func TestModelCatalogCachePreservesSnapshotOrder(t *testing.T) {
+	var cache ModelCatalogCache
+	cache.Replace([]ModelDescriptor{{Model: "z"}, {Model: "a"}, {Model: "m"}})
+	for i := 0; i < 10; i++ {
+		got, ok := cache.Load()
+		if !ok || len(got) != 3 || got[0].Model != "z" || got[1].Model != "a" || got[2].Model != "m" {
+			t.Fatalf("load %d order = %#v, %v", i, got, ok)
+		}
+	}
+}
+
+func TestContextMutexHonorsCanceledContext(t *testing.T) {
+	var mu ContextMutex
+	if err := mu.Lock(context.Background()); err != nil {
+		t.Fatalf("first lock: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := mu.Lock(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled lock error = %v, want context.Canceled", err)
+	}
+	mu.Unlock()
+}
+
+func TestModelDescriptorRejectsUnsupportedWithTypedError(t *testing.T) {
+	err := (ModelDescriptor{Model: "test", ReasoningEffort: FeatureSupportUnsupported}).ValidateRequest(AIRequest{Reasoning: ReasoningConfig{Effort: ReasoningEffortHigh}})
+	if !errors.Is(err, ErrUnsupportedCapability) {
+		t.Fatalf("error = %v, want ErrUnsupportedCapability", err)
+	}
+	var unsupported *UnsupportedCapabilityError
+	if !errors.As(err, &unsupported) || unsupported.Capability != "reasoning effort" || unsupported.Model != "test" {
+		t.Fatalf("error = %#v, want typed reasoning effort error", err)
+	}
+}
+
+func TestModelDescriptorRejectsUnadvertisedReasoningEffort(t *testing.T) {
+	d := ModelDescriptor{Model: "test", ReasoningEffort: FeatureSupportSupported, ReasoningEfforts: []ReasoningEffort{ReasoningEffortLow, ReasoningEffortHigh}}
+	err := d.ValidateRequest(AIRequest{Reasoning: ReasoningConfig{Effort: ReasoningEffortMedium}})
+	if !errors.Is(err, ErrUnsupportedCapability) {
+		t.Fatalf("error = %v, want unsupported capability", err)
+	}
+}
+
+func TestModelDescriptorRejectsUnsupportedNativeCapabilities(t *testing.T) {
+	messageErr := (ModelDescriptor{Model: "test", NativeMessages: FeatureSupportUnsupported}).ValidateRequest(AIRequest{Messages: []RequestMessage{{Role: RequestMessageRoleUser, Text: "hello"}}})
+	if !errors.Is(messageErr, ErrUnsupportedCapability) {
+		t.Fatalf("native message error = %v, want unsupported capability", messageErr)
+	}
+	toolErr := (ModelDescriptor{Model: "test", NativeTools: FeatureSupportUnsupported}).ValidateRequest(AIRequest{Tools: []ToolDefinition{{Type: "function", Name: "search", Description: "Search", Parameters: []byte(`{"type":"object"}`)}}})
+	if !errors.Is(toolErr, ErrUnsupportedCapability) {
+		t.Fatalf("native tool error = %v, want unsupported capability", toolErr)
+	}
+}
+
+func TestModelDescriptorRejectsToolHistoryWithoutNativeTools(t *testing.T) {
+	d := ModelDescriptor{
+		Model:          "test",
+		NativeMessages: FeatureSupportSupported,
+		NativeTools:    FeatureSupportUnsupported,
+	}
+	req := AIRequest{Messages: []RequestMessage{
+		{Role: RequestMessageRoleAssistant, ToolCalls: []RequestToolCall{{ID: "call_1", Name: "search", Arguments: json.RawMessage(`{"q":"x"}`)}}},
+		{Role: RequestMessageRoleTool, ToolResult: &RequestToolResult{ToolCallID: "call_1", Name: "search", Content: "ok"}},
+	}}
+
+	err := d.ValidateRequest(req)
+	if !errors.Is(err, ErrUnsupportedCapability) {
+		t.Fatalf("tool history error = %v, want unsupported capability", err)
+	}
+	var unsupported *UnsupportedCapabilityError
+	if !errors.As(err, &unsupported) || unsupported.Capability != "native tools" {
+		t.Fatalf("error = %#v, want native tools capability error", err)
+	}
+}
+
+func TestValidateModelRequestSupportsLegacyModel(t *testing.T) {
+	if err := ValidateModelRequest(legacyModel{}, AIRequest{Reasoning: ReasoningConfig{Effort: ReasoningEffortHigh}}); err != nil {
+		t.Fatalf("legacy model request rejected: %v", err)
+	}
+}
+
+type legacyModel struct{}
+
+func (legacyModel) Name() string                                             { return "legacy" }
+func (legacyModel) Generate(context.Context, AIRequest) (*AIResponse, error) { return nil, nil }
+func (legacyModel) GenerateStream(context.Context, AIRequest) <-chan Token   { return nil }
+func (legacyModel) Close() error                                             { return nil }
+func (legacyModel) Tokenizer() Tokenizer                                     { return nil }

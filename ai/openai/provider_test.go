@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -61,6 +62,52 @@ func TestProviderDynamicallyListsModelsAndAcceptsThem(t *testing.T) {
 	}
 }
 
+func TestProviderAggregatesDynamicReasoningDescriptors(t *testing.T) {
+	p := New("test-key", nil)
+	p.httpClient = &http.Client{Transport: handlerRoundTripper(func(*http.Request) (*http.Response, error) {
+		return response(http.StatusOK, `{"data":[{"id":"gpt-5.99-preview"},{"id":"future-chat-model"}]}`), nil
+	})}
+	repo := ai.NewModelRepository(nil)
+	if err := repo.RegisterProvider(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+	descriptors, err := repo.ListModelDescriptors(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(descriptors) != 2 || descriptors[0].Provider != "openai" || descriptors[0].Model != "future-chat-model" {
+		t.Fatalf("descriptors = %#v", descriptors)
+	}
+	if descriptors[1].Model != "gpt-5.99-preview" || descriptors[1].ReasoningEffort != ai.FeatureSupportSupported || len(descriptors[1].ReasoningEfforts) != 3 {
+		t.Fatalf("dynamic reasoning descriptor = %#v", descriptors[1])
+	}
+	if descriptors[0].ReasoningEffort != ai.FeatureSupportUnknown {
+		t.Fatalf("unrelated dynamic descriptor = %#v, want unknown reasoning effort", descriptors[0])
+	}
+}
+
+func TestModelDescriptorUsesCatalogSnapshotWithoutNetwork(t *testing.T) {
+	hits := 0
+	p := New("test-key", nil)
+	p.httpClient = &http.Client{Transport: handlerRoundTripper(func(*http.Request) (*http.Response, error) {
+		hits++
+		return response(http.StatusOK, `{"data":[{"id":"gpt-5.99-preview"}]}`), nil
+	})}
+	if _, err := p.ListModelDescriptors(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	model, err := p.Model("gpt-5.99-preview")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := model.(ai.ModelDescriber).Descriptor(); got.ReasoningEffort != ai.FeatureSupportSupported {
+		t.Fatalf("descriptor = %#v", got)
+	}
+	if hits != 1 {
+		t.Fatalf("descriptor caused catalog I/O: got %d requests, want 1", hits)
+	}
+}
+
 func TestProviderExcludesNonChatModelsFromDiscovery(t *testing.T) {
 	p := New("test-key", nil)
 	p.httpClient = &http.Client{Transport: handlerRoundTripper(func(*http.Request) (*http.Response, error) {
@@ -96,6 +143,29 @@ func TestProviderFallsBackWhenModelDiscoveryFails(t *testing.T) {
 	}
 	if _, err := p.Model(GPT56Sol); err != nil {
 		t.Fatalf("Model did not accept fallback model: %v", err)
+	}
+}
+
+func TestProviderFallsBackWhenModelDiscoveryTimesOut(t *testing.T) {
+	p := New("test-key", nil)
+	p.httpClient = &http.Client{Transport: handlerRoundTripper(func(r *http.Request) (*http.Response, error) {
+		<-r.Context().Done()
+		return nil, r.Context().Err()
+	})}
+
+	descriptors, err := p.ListModelDescriptors(context.Background())
+	if err != nil {
+		t.Fatalf("ListModelDescriptors returned error: %v", err)
+	}
+	found := false
+	for _, descriptor := range descriptors {
+		if descriptor.Model == GPT56Sol {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected hard-coded fallback descriptors, got %#v", descriptors)
 	}
 }
 

@@ -1,6 +1,7 @@
 package mistral
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -41,7 +42,7 @@ func TestProviderDynamicallyListsModelsAndAcceptsThem(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListModels returned error: %v", err)
 	}
-	if len(models) != 1 || models[0] != "mistral-chat" {
+	if len(models) != 2 || models[0] != "mistral-chat" || models[1] != "mistral-without-capability" {
 		t.Fatalf("unexpected models: %#v", models)
 	}
 
@@ -65,6 +66,42 @@ func TestProviderDynamicallyListsModelsAndAcceptsThem(t *testing.T) {
 	}
 }
 
+func TestProviderCatalogCachesExplicitCapabilitiesForLocalValidation(t *testing.T) {
+	hits := 0
+	p := New("test-key", nil)
+	p.httpClient = &http.Client{Transport: handlerRoundTripper(func(*http.Request) (*http.Response, error) {
+		hits++
+		return response(http.StatusOK, `{"data":[{"id":"no-tools","capabilities":{"completion_chat":true,"function_calling":false}}]}`), nil
+	})}
+
+	descriptors, err := p.ListModelDescriptors(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(descriptors) != 1 || descriptors[0].ToolCalling != ai.FeatureSupportUnsupported {
+		t.Fatalf("descriptors = %#v", descriptors)
+	}
+	descriptors[0].ToolCalling = ai.FeatureSupportSupported
+
+	model, err := p.Model("no-tools")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := ai.AIRequest{Tools: []ai.ToolDefinition{{
+		Type: "function", Name: "search", Description: "Search", Parameters: []byte(`{"type":"object"}`),
+	}}}
+	if err := ai.ValidateModelRequest(model, req); !errors.Is(err, ai.ErrUnsupportedCapability) {
+		t.Fatalf("ValidateModelRequest error = %v, want unsupported capability", err)
+	}
+	if hits != 1 {
+		t.Fatalf("descriptor validation made a discovery request; hits = %d", hits)
+	}
+	again, err := p.ListModelDescriptors(context.Background())
+	if err != nil || again[0].ToolCalling != ai.FeatureSupportUnsupported || hits != 1 {
+		t.Fatalf("cached snapshot = %#v, err = %v, hits = %d", again, err, hits)
+	}
+}
+
 func TestProviderFallsBackWhenModelDiscoveryFails(t *testing.T) {
 	p := New("test-key", nil)
 	p.httpClient = &http.Client{Transport: handlerRoundTripper(func(*http.Request) (*http.Response, error) {
@@ -80,6 +117,22 @@ func TestProviderFallsBackWhenModelDiscoveryFails(t *testing.T) {
 	}
 	if _, err := p.Model(MistralSmallLatest); err != nil {
 		t.Fatalf("Model did not accept fallback model: %v", err)
+	}
+}
+
+func TestProviderFallsBackWhenModelDiscoveryTimesOut(t *testing.T) {
+	p := New("test-key", nil)
+	p.httpClient = &http.Client{Transport: handlerRoundTripper(func(r *http.Request) (*http.Response, error) {
+		<-r.Context().Done()
+		return nil, r.Context().Err()
+	})}
+
+	descriptors, err := p.ListModelDescriptors(context.Background())
+	if err != nil {
+		t.Fatalf("ListModelDescriptors returned error: %v", err)
+	}
+	if len(descriptors) == 0 || descriptors[0].Model != MistralSmallLatest {
+		t.Fatalf("expected hard-coded fallback descriptors, got %#v", descriptors)
 	}
 }
 
