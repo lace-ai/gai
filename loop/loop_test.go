@@ -1297,7 +1297,15 @@ func TestLoopCreatesToolSpans(t *testing.T) {
 		if attributes["tool.input.redaction_applied"] != true || attributes["tool.output.redaction_applied"] != true {
 			t.Fatalf("tool span is missing redaction metadata: %#v", attributes)
 		}
-		return
+		if attributes["gen_ai.operation.name"] != "execute_tool" || attributes["langfuse.observation.type"] != "tool" {
+			t.Fatalf("tool span is missing semantic attributes: %#v", attributes)
+		}
+		for _, candidate := range recorder.Ended() {
+			if candidate.Name() == "loop.iteration" && candidate.SpanContext().SpanID() == span.Parent().SpanID() {
+				return
+			}
+		}
+		t.Fatalf("tool span parent %s is not a loop.iteration span", span.Parent().SpanID())
 	}
 	t.Fatalf("expected loop.tool span, got %#v", recorder.Ended())
 }
