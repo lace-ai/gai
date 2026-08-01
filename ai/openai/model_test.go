@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/lace-ai/gai/ai"
@@ -506,6 +507,118 @@ func TestModelGenerateStreamMapsTextAndToolCalls(t *testing.T) {
 	}
 }
 
+func TestModelGenerateStreamPreservesUsageOnlyTerminalChunk(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_1\",\"model\":\"gpt-4.1-mini\",\"choices\":[{\"delta\":{\"content\":\"hello\"},\"finish_reason\":\"stop\"}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_1\",\"model\":\"gpt-4.1-mini\",\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":7,\"completion_tokens_details\":{\"reasoning_tokens\":3},\"prompt_tokens_details\":{\"cached_tokens\":2}}}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer ts.Close()
+
+	p := New("test-key", nil)
+	p.baseURL = ts.URL
+	m, err := p.Model(GPT41Mini)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tokens []ai.Token
+	for token := range m.GenerateStream(t.Context(), ai.AIRequest{Prompt: "hello"}) {
+		tokens = append(tokens, token)
+	}
+	if len(tokens) != 2 || tokens[1].Type != ai.TokenTypeCompletion {
+		t.Fatalf("tokens = %#v", tokens)
+	}
+	completion := tokens[1].Completion
+	if completion == nil || completion.Usage.InputTokens != 11 || completion.Usage.OutputTokens != 7 || completion.Usage.ReasoningTokens != 3 || completion.Usage.CachedTokens != 2 || completion.FinishReason != "stop" || completion.RequestID != "chatcmpl_1" || completion.Provider != "openai" || completion.Model != GPT41Mini {
+		t.Fatalf("completion = %#v", completion)
+	}
+}
+
+func TestModelGenerateStreamPreservesMetadataFromSoleUsageOnlyChunk(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_sole\",\"model\":\"gpt-4.1-mini\",\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":7}}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer ts.Close()
+
+	p := New("test-key", nil)
+	p.baseURL = ts.URL
+	m, err := p.Model(GPT41Mini)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tokens []ai.Token
+	for token := range m.GenerateStream(t.Context(), ai.AIRequest{Prompt: "hello"}) {
+		tokens = append(tokens, token)
+	}
+	if len(tokens) != 1 || tokens[0].Type != ai.TokenTypeCompletion {
+		t.Fatalf("tokens = %#v", tokens)
+	}
+	completion := tokens[0].Completion
+	if completion == nil || completion.RequestID != "chatcmpl_sole" || completion.Provider != "openai" || completion.Model != GPT41Mini {
+		t.Fatalf("completion = %#v", completion)
+	}
+}
+
+func TestModelGenerateStreamSnapshotsUsageOnlyCompletion(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":7}}\n\n"))
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_later\",\"model\":\"gpt-4.1-mini\",\"choices\":[{\"delta\":{\"content\":\"hello\"},\"finish_reason\":\"stop\"}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer ts.Close()
+
+	p := New("test-key", nil)
+	p.baseURL = ts.URL
+	m, err := p.Model(GPT41Mini)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tokens []ai.Token
+	for token := range m.GenerateStream(t.Context(), ai.AIRequest{Prompt: "hello"}) {
+		tokens = append(tokens, token)
+	}
+	if len(tokens) != 2 || tokens[0].Type != ai.TokenTypeCompletion {
+		t.Fatalf("tokens = %#v", tokens)
+	}
+	completion := tokens[0].Completion
+	if completion == nil || completion.Usage.InputTokens != 11 || completion.Usage.OutputTokens != 7 || completion.RequestID != "" || completion.Model != "" || completion.FinishReason != "" {
+		t.Fatalf("completion must be a snapshot of the usage-only chunk, got %#v", completion)
+	}
+}
+
+func TestModelGenerateStreamSnapshotsRawForEachUsageOnlyCompletion(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":7}}\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":13,\"completion_tokens\":9}}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer ts.Close()
+
+	p := New("test-key", nil)
+	p.baseURL = ts.URL
+	m, err := p.Model(GPT41Mini)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var completions []*ai.Completion
+	for token := range m.GenerateStream(t.Context(), ai.AIRequest{Prompt: "hello"}) {
+		if token.Type == ai.TokenTypeCompletion {
+			completions = append(completions, token.Completion)
+		}
+	}
+	if len(completions) != 2 {
+		t.Fatalf("completion count = %d, want 2", len(completions))
+	}
+	if !strings.Contains(string(completions[0].Raw), `"prompt_tokens":11`) || !strings.Contains(string(completions[1].Raw), `"prompt_tokens":13`) {
+		t.Fatalf("completion raw values must remain distinct: first=%s second=%s", completions[0].Raw, completions[1].Raw)
+	}
+}
+
 func TestModelGenerateStreamEmitsToolCallsByIndex(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -715,7 +828,7 @@ func TestModelDescriptorDoesNotAdvertiseUnsupportedTokenizer(t *testing.T) {
 	if d.Tokenizer.Available != ai.FeatureSupportUnsupported || d.Tokenizer.Fidelity != ai.TokenizerFidelityUnknown {
 		t.Fatalf("tokenizer descriptor = %#v, want unsupported/unknown", d.Tokenizer)
 	}
-	if d.NativeMessages != ai.FeatureSupportSupported || d.NativeTools != ai.FeatureSupportSupported || d.Multimodal != ai.FeatureSupportUnsupported || d.Usage != ai.FeatureSupportSupported || d.FinishReason != ai.FeatureSupportUnsupported || d.StreamingUsage != ai.FeatureSupportUnsupported {
+	if d.NativeMessages != ai.FeatureSupportSupported || d.NativeTools != ai.FeatureSupportSupported || d.Multimodal != ai.FeatureSupportUnsupported || d.Usage != ai.FeatureSupportSupported || d.FinishReason != ai.FeatureSupportSupported || d.StreamingUsage != ai.FeatureSupportSupported {
 		t.Fatalf("capability descriptor = %#v", d)
 	}
 }

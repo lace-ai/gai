@@ -53,6 +53,8 @@ type Iteration struct {
 	Parts []IterationPart
 	// UserMessage is the structured user input retained by the first iteration.
 	UserMessage *gaictx.Message
+	// Usage is the provider-reported usage for the accepted generation attempt.
+	Usage ai.Usage
 }
 
 // IterationPart contains one response, tool call, or tool result segment.
@@ -148,6 +150,18 @@ func (i *Iteration) AppendToken(t ai.Token) {
 	}
 
 	switch t.Type {
+	case ai.TokenTypeCompletion:
+		if t.Completion == nil {
+			return
+		}
+		i.Usage = t.Completion.Usage
+		if last != nil && last.Type == IterationTypeResponse {
+			last.Response.AppendToken(t)
+		} else {
+			response := &ai.AIResponse{}
+			response.AppendToken(t)
+			i.Parts = append(i.Parts, IterationPart{Type: IterationTypeResponse, Response: response})
+		}
 	case ai.TokenTypeText:
 		if last != nil && last.Type == IterationTypeResponse {
 			last.Response.AppendToken(t)

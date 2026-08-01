@@ -43,7 +43,10 @@ type AgentResult struct {
 	Reasoning  string
 	Messages   []gaictx.Message
 	Iterations []loop.Iteration
-	Errors     []error
+	// Usage totals accepted iteration usage. BilledUsage includes discarded retries.
+	Usage       ai.Usage
+	BilledUsage ai.Usage
+	Errors      []error
 	// Canceled reports that the agent stopped because its context ended.
 	Canceled bool
 	// CancellationErr contains context.Canceled or context.DeadlineExceeded.
@@ -68,8 +71,11 @@ type WorkflowResult struct {
 	Tokens    []ai.Token
 	Text      string
 	Reasoning string
-	Stages    []StageResult
-	Errors    []error
+	// Usage totals accepted iteration usage. BilledUsage includes discarded retries.
+	Usage       ai.Usage
+	BilledUsage ai.Usage
+	Stages      []StageResult
+	Errors      []error
 	// Canceled reports that the workflow stopped because its context ended.
 	Canceled bool
 	// CancellationErr contains context.Canceled or context.DeadlineExceeded.
@@ -292,6 +298,8 @@ func (w *Workflow) capturePrimary(ctx context.Context, upstream Stream, obs *wor
 			Reasoning:       tokenReasoning(captured.Tokens),
 			Messages:        cloneMessages(w.Loop.Messages()),
 			Iterations:      cloneIterations(w.Loop.Iterations),
+			Usage:           iterationUsage(w.Loop.Iterations),
+			BilledUsage:     statusUsage(captured.Statuses),
 			Errors:          append([]error(nil), captured.Errors...),
 			Canceled:        canceled,
 			CancellationErr: cancellationErr,
@@ -301,6 +309,8 @@ func (w *Workflow) capturePrimary(ctx context.Context, upstream Stream, obs *wor
 		w.result.Tokens = cloneTokens(captured.Tokens)
 		w.result.Text = result.Text
 		w.result.Reasoning = result.Reasoning
+		w.result.Usage = result.Usage
+		w.result.BilledUsage = result.BilledUsage
 		w.result.Errors = append([]error(nil), captured.Errors...)
 		w.result.Canceled = canceled
 		w.result.CancellationErr = cancellationErr
@@ -602,6 +612,22 @@ func cloneMessages(messages []gaictx.Message) []gaictx.Message {
 		}
 	}
 	return cloned
+}
+
+func statusUsage(statuses []loop.IterationInformation) ai.Usage {
+	var usage ai.Usage
+	for _, status := range statuses {
+		usage.Add(status.Iteration.Usage)
+	}
+	return usage
+}
+
+func iterationUsage(iterations []loop.Iteration) ai.Usage {
+	var usage ai.Usage
+	for _, iteration := range iterations {
+		usage.Add(iteration.Usage)
+	}
+	return usage
 }
 
 func cloneIterations(iterations []loop.Iteration) []loop.Iteration {
