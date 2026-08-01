@@ -27,10 +27,12 @@ type AIResponse struct {
 
 // Usage is normalized provider token accounting for one completed request.
 type Usage struct {
-	InputTokens     int
-	OutputTokens    int
-	ReasoningTokens int
-	CachedTokens    int
+	InputTokens         int
+	OutputTokens        int
+	ReasoningTokens     int
+	CachedTokens        int
+	CacheCreationTokens int
+	ToolUseTokens       int
 }
 
 // Add accumulates another provider usage record.
@@ -39,6 +41,8 @@ func (u *Usage) Add(other Usage) {
 	u.OutputTokens += other.OutputTokens
 	u.ReasoningTokens += other.ReasoningTokens
 	u.CachedTokens += other.CachedTokens
+	u.CacheCreationTokens += other.CacheCreationTokens
+	u.ToolUseTokens += other.ToolUseTokens
 }
 
 // Completion is terminal metadata emitted by a streaming provider request.

@@ -49,7 +49,7 @@ func anthropicAdapterDescriptor(model string) ai.ModelDescriptor {
 	return ai.ModelDescriptor{Model: model, NativeMessages: ai.FeatureSupportSupported, NativeTools: ai.FeatureSupportSupported,
 		ToolChoiceModes: []ai.ToolChoiceMode{ai.ToolChoiceAuto, ai.ToolChoiceNone, ai.ToolChoiceRequired},
 		Multimodal:      ai.FeatureSupportUnsupported,
-		Usage:           ai.FeatureSupportSupported, FinishReason: ai.FeatureSupportSupported, StreamingUsage: ai.FeatureSupportUnsupported,
+		Usage:           ai.FeatureSupportSupported, FinishReason: ai.FeatureSupportSupported, StreamingUsage: ai.FeatureSupportSupported,
 		ToolCalling: ai.FeatureSupportSupported,
 		JSONOutput:  ai.FeatureSupportUnsupported, JSONSchemaOutput: ai.FeatureSupportSupported,
 		Reasoning: ai.FeatureSupportSupported, ReasoningEffort: ai.FeatureSupportSupported,
@@ -397,9 +397,28 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 		stream := client.Messages.NewStreaming(ctx, payload)
 		defer stream.Close()
 		blocks := map[int64]*streamBlock{}
+		completion := ai.Completion{Provider: "anthropic"}
 		for stream.Next() {
 			event := stream.Current()
 			switch event.Type {
+			case "message_start":
+				completion.RequestID = event.Message.ID
+				completion.Model = string(event.Message.Model)
+			case "message_delta":
+				completion.Usage = ai.Usage{
+					InputTokens:         int(event.Usage.InputTokens + event.Usage.CacheCreationInputTokens + event.Usage.CacheReadInputTokens),
+					OutputTokens:        int(event.Usage.OutputTokens),
+					ReasoningTokens:     int(event.Usage.OutputTokensDetails.ThinkingTokens),
+					CachedTokens:        int(event.Usage.CacheReadInputTokens),
+					CacheCreationTokens: int(event.Usage.CacheCreationInputTokens),
+				}
+				completion.FinishReason = string(event.Delta.StopReason)
+				completion.Raw = append(completion.Raw[:0], []byte(event.RawJSON())...)
+				snapshot := completion
+				snapshot.Raw = append(json.RawMessage(nil), completion.Raw...)
+				if !emit(ai.Token{Type: ai.TokenTypeCompletion, Completion: &snapshot}) {
+					return
+				}
 			case "content_block_start":
 				blocks[event.Index] = &streamBlock{typ: event.ContentBlock.Type, id: event.ContentBlock.ID, name: event.ContentBlock.Name}
 			case "content_block_delta":

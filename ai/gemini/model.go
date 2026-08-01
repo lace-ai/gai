@@ -51,7 +51,7 @@ func geminiAdapterDescriptor(model string) ai.ModelDescriptor {
 	return ai.ModelDescriptor{Model: model, NativeMessages: ai.FeatureSupportSupported, NativeTools: ai.FeatureSupportSupported,
 		ToolChoiceModes: []ai.ToolChoiceMode{ai.ToolChoiceAuto, ai.ToolChoiceNone, ai.ToolChoiceRequired},
 		Multimodal:      ai.FeatureSupportUnsupported,
-		Usage:           ai.FeatureSupportSupported, FinishReason: ai.FeatureSupportUnsupported, StreamingUsage: ai.FeatureSupportUnsupported,
+		Usage:           ai.FeatureSupportSupported, FinishReason: ai.FeatureSupportSupported, StreamingUsage: ai.FeatureSupportSupported,
 		ToolCalling: ai.FeatureSupportSupported,
 		JSONOutput:  ai.FeatureSupportSupported, JSONSchemaOutput: ai.FeatureSupportSupported,
 		Reasoning: ai.FeatureSupportSupported, ReasoningEffort: ai.FeatureSupportSupported, ReasoningEfforts: []ai.ReasoningEffort{ai.ReasoningEffortLow, ai.ReasoningEffortMedium, ai.ReasoningEffortHigh},
@@ -136,6 +136,8 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			return
 		}
 
+		completion := ai.Completion{Provider: "gemini"}
+		hasCompletion := false
 		for resp, err := range client.Models.GenerateContentStream(ctx, m.name, contents, config) {
 			if err != nil {
 				streamErr = fmt.Errorf("error generating content stream: %w", err)
@@ -153,7 +155,40 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 				return
 			}
 
-			if resp == nil || len(resp.Candidates) == 0 || resp.Candidates[0] == nil || resp.Candidates[0].Content == nil {
+			if resp == nil {
+				continue
+			}
+			if resp.ResponseID != "" {
+				completion.RequestID = resp.ResponseID
+			}
+			if resp.ModelVersion != "" {
+				completion.Model = resp.ModelVersion
+			}
+			if resp.UsageMetadata != nil {
+				completion.Usage = ai.Usage{
+					InputTokens:     int(resp.UsageMetadata.PromptTokenCount),
+					OutputTokens:    int(resp.UsageMetadata.CandidatesTokenCount),
+					ReasoningTokens: int(resp.UsageMetadata.ThoughtsTokenCount),
+					CachedTokens:    int(resp.UsageMetadata.CachedContentTokenCount),
+					ToolUseTokens:   int(resp.UsageMetadata.ToolUsePromptTokenCount),
+				}
+				hasCompletion = true
+			}
+			if len(resp.Candidates) > 0 && resp.Candidates[0] != nil && resp.Candidates[0].FinishReason != "" {
+				completion.FinishReason = string(resp.Candidates[0].FinishReason)
+				hasCompletion = true
+			}
+			if hasCompletion {
+				raw, marshalErr := json.Marshal(resp)
+				if marshalErr != nil {
+					streamErr = fmt.Errorf("encode Gemini completion metadata: %w", marshalErr)
+					ai.SendToken(ctx, out, ai.Token{Err: streamErr, Type: ai.TokenTypeErr, Text: streamErr.Error()})
+					return
+				}
+				completion.Raw = append(completion.Raw[:0], raw...)
+			}
+
+			if len(resp.Candidates) == 0 || resp.Candidates[0] == nil || resp.Candidates[0].Content == nil {
 				continue
 			}
 
@@ -241,6 +276,11 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 					toolCallCount++
 				}
 			}
+		}
+		if hasCompletion {
+			snapshot := completion
+			snapshot.Raw = append(json.RawMessage(nil), completion.Raw...)
+			ai.SendToken(ctx, out, ai.Token{Type: ai.TokenTypeCompletion, Completion: &snapshot})
 		}
 	}()
 

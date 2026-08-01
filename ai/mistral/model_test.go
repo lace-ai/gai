@@ -513,6 +513,37 @@ func TestModelGenerateStream(t *testing.T) {
 	}
 }
 
+func TestModelGenerateStreamEmitsTerminalCompletion(t *testing.T) {
+	var gotReq chatCompletionRequest
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotReq); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"cmpl_1\",\"model\":\"mistral-test\",\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: {\"id\":\"cmpl_1\",\"model\":\"mistral-test\",\"choices\":[],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3}}\n\ndata: [DONE]\n\n")
+	}))
+	defer ts.Close()
+	p := New("test-key", nil)
+	p.baseURL = ts.URL
+	m, err := p.Model(MistralSmallLatest)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var completion *ai.Completion
+	for token := range m.GenerateStream(t.Context(), ai.AIRequest{Prompt: "hello"}) {
+		if token.Type == ai.TokenTypeCompletion {
+			completion = token.Completion
+		}
+	}
+	if gotReq.StreamOptions == nil || !gotReq.StreamOptions.IncludeUsage {
+		t.Fatalf("stream options = %#v", gotReq.StreamOptions)
+	}
+	if completion == nil || completion.Provider != "mistral" || completion.RequestID != "cmpl_1" || completion.Model != "mistral-test" || completion.FinishReason != "stop" || completion.Usage.InputTokens != 7 || completion.Usage.OutputTokens != 3 || !json.Valid(completion.Raw) {
+		t.Fatalf("completion = %#v", completion)
+	}
+}
+
 func TestModelGenerateStreamToolCall(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

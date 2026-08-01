@@ -65,6 +65,14 @@ func TestAIResponseAppendTokenCompletionUsesLatestUsage(t *testing.T) {
 	}
 }
 
+func TestUsageAddPreservesProviderSpecificBreakdowns(t *testing.T) {
+	usage := ai.Usage{InputTokens: 1, CachedTokens: 2, CacheCreationTokens: 3, ToolUseTokens: 4}
+	usage.Add(ai.Usage{InputTokens: 5, CachedTokens: 6, CacheCreationTokens: 7, ToolUseTokens: 8})
+	if usage.InputTokens != 6 || usage.CachedTokens != 8 || usage.CacheCreationTokens != 10 || usage.ToolUseTokens != 12 {
+		t.Fatalf("usage = %#v", usage)
+	}
+}
+
 type expectedWrapToken struct {
 	typ          ai.TokenType
 	data         string
