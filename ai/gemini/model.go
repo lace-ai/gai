@@ -160,9 +160,11 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			}
 			if resp.ResponseID != "" {
 				completion.RequestID = resp.ResponseID
+				hasCompletion = true
 			}
 			if resp.ModelVersion != "" {
 				completion.Model = resp.ModelVersion
+				hasCompletion = true
 			}
 			if resp.UsageMetadata != nil {
 				completion.Usage = ai.Usage{

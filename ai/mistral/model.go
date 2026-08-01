@@ -714,9 +714,11 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			}
 			if chunk.ID != "" {
 				completion.RequestID = chunk.ID
+				hasCompletion = true
 			}
 			if chunk.Model != "" {
 				completion.Model = chunk.Model
+				hasCompletion = true
 			}
 			if chunk.Usage != nil {
 				completion.Usage = ai.Usage{InputTokens: chunk.Usage.PromptTokens, OutputTokens: chunk.Usage.CompletionTokens}

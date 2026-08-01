@@ -544,6 +544,33 @@ func TestModelGenerateStreamEmitsTerminalCompletion(t *testing.T) {
 	}
 }
 
+func TestModelGenerateStreamEmitsCompletionForIdentityMetadata(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"cmpl_1\",\"model\":\"mistral-test\",\"choices\":[]}\n\ndata: [DONE]\n\n")
+	}))
+	defer ts.Close()
+	p := New("test-key", nil)
+	p.baseURL = ts.URL
+	m, err := p.Model(MistralSmallLatest)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var completion *ai.Completion
+	for token := range m.GenerateStream(t.Context(), ai.AIRequest{Prompt: "hello"}) {
+		if token.Err != nil {
+			t.Fatalf("unexpected stream error: %v", token.Err)
+		}
+		if token.Type == ai.TokenTypeCompletion {
+			completion = token.Completion
+		}
+	}
+	if completion == nil || completion.Provider != "mistral" || completion.RequestID != "cmpl_1" || completion.Model != "mistral-test" || !json.Valid(completion.Raw) {
+		t.Fatalf("completion = %#v", completion)
+	}
+}
+
 func TestModelGenerateStreamToolCall(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
