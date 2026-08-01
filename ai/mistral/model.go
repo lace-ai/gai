@@ -529,7 +529,9 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			if ai.SendToken(ctx, raw, token) {
 				return true
 			}
-			streamErr = ctx.Err()
+			if streamErr == nil {
+				streamErr = ctx.Err()
+			}
 			return false
 		}
 		if err := ai.ValidateModelRequest(m, req); err != nil {
@@ -637,13 +639,13 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 						Err: readErr,
 					})
 				}
+				streamErr = fmt.Errorf("mistral chat stream failed (status %d): %w", res.StatusCode, readErr)
 				if !emit(ai.Token{
-					Err:  fmt.Errorf("mistral chat stream failed (status %d): %w", res.StatusCode, readErr),
+					Err:  streamErr,
 					Type: ai.TokenTypeErr,
 				}) {
 					return
 				}
-				streamErr = readErr
 				return
 			}
 			if m.debug != nil {
@@ -686,6 +688,16 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			hasCompletion = false
 			return nil
 		}
+		defer func() {
+			previousErr := streamErr
+			if emitErr := emitCompletion(); emitErr != nil {
+				if previousErr != nil {
+					streamErr = previousErr
+				} else {
+					streamErr = emitErr
+				}
+			}
+		}()
 
 		flushEvent := func() error {
 			event := strings.TrimSpace(eventData.String())

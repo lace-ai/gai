@@ -74,6 +74,8 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 		var streamErr error
 		var observation *ai.GenerationObservation
 		generationResult := ai.GenerationResult{}
+		completion := ai.Completion{Provider: "gemini"}
+		hasCompletion := false
 		defer close(out)
 		if gai.DebugContentEnabled(ctx, m.debug, gai.ContentKindPrompt) {
 			fields := map[string]any{"max_tokens": req.MaxTokens}
@@ -85,6 +87,15 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			})
 		}
 		defer func() {
+			if hasCompletion {
+				generationResult.ResponseModel = completion.Model
+				generationResult.RequestID = completion.RequestID
+				generationResult.FinishReason = completion.FinishReason
+				if completion.UsageReported {
+					usage := completion.Usage
+					generationResult.Usage = &usage
+				}
+			}
 			generationResult.Err = streamErr
 			observation.Finish(generationResult)
 		}()
@@ -93,7 +104,9 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			if ai.SendToken(ctx, out, token) {
 				return true
 			}
-			streamErr = ctx.Err()
+			if streamErr == nil {
+				streamErr = ctx.Err()
+			}
 			return false
 		}
 		if err := ai.ValidateModelRequest(m, req); err != nil {
@@ -136,8 +149,6 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 		generationCtx, startedObservation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "gemini", Model: m.name, Streaming: true})
 		observation = startedObservation
 		ctx = generationCtx
-		completion := ai.Completion{Provider: "gemini"}
-		hasCompletion := false
 		for resp, err := range client.Models.GenerateContentStream(generationCtx, m.name, contents, config) {
 			if err != nil {
 				streamErr = fmt.Errorf("error generating content stream: %w", err)

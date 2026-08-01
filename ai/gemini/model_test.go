@@ -78,6 +78,43 @@ func TestModelGenerateStreamEmitsCompletionForIdentityMetadata(t *testing.T) {
 	}
 }
 
+func TestModelGenerateStreamPreservesCompletionBeforeError(t *testing.T) {
+	recorder := obstest.Install(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"responseId\":\"resp_before_error\",\"modelVersion\":\"gemini-resolved\"}\n\n"))
+		_, _ = w.Write([]byte("data: {not-json}\n\n"))
+	}))
+	defer server.Close()
+
+	provider := New("test-api-key", nil)
+	provider.baseURL = server.URL
+	provider.httpClient = server.Client()
+	model, err := provider.Model("gemini-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var completionCount int
+	var streamError error
+	for token := range model.GenerateStream(t.Context(), ai.AIRequest{Prompt: "hello"}) {
+		if token.Type == ai.TokenTypeCompletion {
+			completionCount++
+		}
+		if token.Type == ai.TokenTypeErr {
+			streamError = token.Err
+		}
+	}
+	if streamError == nil || completionCount != 0 {
+		t.Fatalf("stream error = %v, completion count = %d", streamError, completionCount)
+	}
+	span := obstest.RequireGenerationSpans(t, recorder, 1)[0]
+	attrs := obstest.Attributes(span)
+	if span.Status().Code.String() != "Error" || attrs["gen_ai.response.id"].AsString() != "resp_before_error" || attrs["gen_ai.response.model"].AsString() != "gemini-resolved" {
+		t.Fatalf("generation status = %s, attrs = %#v", span.Status().Code, attrs)
+	}
+}
+
 func TestMapFunctionCall(t *testing.T) {
 	got, err := mapFunctionCall(&genai.FunctionCall{
 		ID:   "call_1",

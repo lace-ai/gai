@@ -582,6 +582,69 @@ func TestModelGenerateStreamEmitsCompletionForIdentityMetadata(t *testing.T) {
 	}
 }
 
+func TestModelGenerateStreamEmitsCompletionOnCleanEOFWithoutDone(t *testing.T) {
+	recorder := obstest.Install(t)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"cmpl_eof\",\"model\":\"mistral-eof\",\"choices\":[],\"usage\":{\"prompt_tokens\":9,\"completion_tokens\":4}}\n\n")
+	}))
+	defer ts.Close()
+	p := New("test-key", nil)
+	p.baseURL = ts.URL
+	m, err := p.Model(MistralSmallLatest)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var completions []*ai.Completion
+	for token := range m.GenerateStream(t.Context(), ai.AIRequest{Prompt: "hello"}) {
+		if token.Type == ai.TokenTypeCompletion {
+			completions = append(completions, token.Completion)
+		}
+	}
+	if len(completions) != 1 || completions[0] == nil || completions[0].RequestID != "cmpl_eof" || completions[0].Usage.InputTokens != 9 {
+		t.Fatalf("completions = %#v", completions)
+	}
+	attrs := obstest.Attributes(obstest.RequireGenerationSpans(t, recorder, 1)[0])
+	if attrs["gen_ai.response.id"].AsString() != "cmpl_eof" || attrs["gen_ai.usage.output_tokens"].AsInt64() != 4 {
+		t.Fatalf("generation attrs = %#v", attrs)
+	}
+}
+
+func TestModelGenerateStreamPreservesCompletionOnMalformedEvent(t *testing.T) {
+	recorder := obstest.Install(t)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"cmpl_error\",\"model\":\"mistral-error\",\"choices\":[],\"usage\":{\"prompt_tokens\":6,\"completion_tokens\":2}}\n\ndata: {not-json}\n\n")
+	}))
+	defer ts.Close()
+	p := New("test-key", nil)
+	p.baseURL = ts.URL
+	m, err := p.Model(MistralSmallLatest)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var completion *ai.Completion
+	var streamError error
+	for token := range m.GenerateStream(t.Context(), ai.AIRequest{Prompt: "hello"}) {
+		switch token.Type {
+		case ai.TokenTypeCompletion:
+			completion = token.Completion
+		case ai.TokenTypeErr:
+			streamError = token.Err
+		}
+	}
+	if streamError == nil || completion == nil || completion.RequestID != "cmpl_error" {
+		t.Fatalf("stream error = %v, completion = %#v", streamError, completion)
+	}
+	span := obstest.RequireGenerationSpans(t, recorder, 1)[0]
+	attrs := obstest.Attributes(span)
+	if span.Status().Code.String() != "Error" || attrs["gen_ai.response.id"].AsString() != "cmpl_error" || attrs["gen_ai.usage.input_tokens"].AsInt64() != 6 {
+		t.Fatalf("generation status = %s, attrs = %#v", span.Status().Code, attrs)
+	}
+}
+
 func TestModelGenerateStreamToolCall(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
