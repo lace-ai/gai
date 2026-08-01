@@ -68,24 +68,29 @@ type Tool interface {
 // It returns an error response when validation fails, no tool matches, or a
 // tool returns nil.
 func CallTool(ctx context.Context, req *ai.ToolCall, tools []Tool) *ToolResponse {
+	response, _ := callTool(ctx, req, tools)
+	return response
+}
+
+func callTool(ctx context.Context, req *ai.ToolCall, tools []Tool) (*ToolResponse, bool) {
 	if err := req.Validate(); err != nil {
-		return NewToolError(err)
+		return NewToolError(err), false
 	}
 
 	for index, tool := range tools {
 		if tool == nil {
-			return NewToolError(fmt.Errorf("%w: tool at index %d is nil", ai.ErrInvalidToolDefinition, index))
+			return NewToolError(fmt.Errorf("%w: tool at index %d is nil", ai.ErrInvalidToolDefinition, index)), false
 		}
 		if tool.Name() == req.Name {
 			res := tool.Function(ctx, req)
 			if res == nil {
-				return NewToolError(fmt.Errorf("tool %s returned nil response", req.Name))
+				return NewToolError(fmt.Errorf("tool %s returned nil response", req.Name)), true
 			}
-			return res
+			return res, false
 		}
 	}
 
-	return NewToolError(fmt.Errorf("%w: %s", ErrToolNotFound, req.Name))
+	return NewToolError(fmt.Errorf("%w: %s", ErrToolNotFound, req.Name)), false
 }
 
 // DecodeToolArgs validates req and decodes its JSON arguments into target.

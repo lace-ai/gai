@@ -419,6 +419,47 @@ The older `ai.provider`, `ai.model`, `ai.max_tokens`, `ai.input_tokens`,
 remain during the semantic-attribute migration. New integrations should use
 the `gen_ai.*` attributes.
 
+Every tool invocation executed through `Loop` creates one `loop.tool` child
+span. Direct calls to `CallTool` are not instrumented.
+
+| Attribute | Value |
+| --- | --- |
+| `loop.operation` | `tool` |
+| `gen_ai.operation.name` | `execute_tool` |
+| `gen_ai.tool.name`, `gen_ai.tool.call.id` | Stable tool name and model-issued call ID |
+| `gen_ai.tool.type` | `function` |
+| `langfuse.observation.type` | `tool` |
+| `gai.tool.outcome` | `success`, `tool_error`, `panic`, `deadline`, `cancellation`, or `missing_response` |
+| `error.type` | Fixed `gai.tool.*` classification on failures |
+| `tool.name`, `tool.call_id`, `tool.status` | Legacy compatibility attributes |
+
+Span errors use fixed, low-cardinality classifications; raw tool errors and
+panic values are never exported implicitly. A panic is recorded and then
+rethrown unchanged.
+
+Tool arguments and results are absent by default. Enable them independently
+with the same request-scoped capture policy used for other sensitive content:
+
+```go
+ctx = gai.WithContentCapturePolicy(ctx, gai.ContentCapturePolicy{
+  ToolInput:  gai.CaptureEnabled,
+  ToolOutput: gai.CaptureEnabled,
+  MaxBytes:   4096,
+  Redact: func(ctx context.Context, kind gai.ContentKind, value []byte) ([]byte, error) {
+    return redactApplicationSecrets(value), nil
+  },
+})
+```
+
+Captured input is written to `gen_ai.tool.call.arguments` and
+`langfuse.observation.input`; captured output is written to
+`langfuse.observation.output`, and successful output is also written to
+`gen_ai.tool.call.result`. The legacy `tool.input` and `tool.output` attributes
+remain during migration and carry the redaction, truncation, and byte-count
+metadata. Content is captured once and reused for every applicable alias.
+Valid JSON remains serialized JSON; invalid JSON is retained as bounded UTF-8
+text. Redactor errors and panics fail closed.
+
 ## Package map
 
 ```text

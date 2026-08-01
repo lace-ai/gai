@@ -3,6 +3,7 @@ package loop
 import (
 	"context"
 	"errors"
+	"sync"
 
 	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
@@ -12,7 +13,22 @@ import (
 
 const loopTracerName = "github.com/lace-ai/gai/loop"
 
-var errObservedToolExecution = errors.New("tool execution failed")
+const (
+	toolOutcomeSuccess         = "success"
+	toolOutcomeError           = "tool_error"
+	toolOutcomePanic           = "panic"
+	toolOutcomeDeadline        = "deadline"
+	toolOutcomeCancellation    = "cancellation"
+	toolOutcomeMissingResponse = "missing_response"
+)
+
+var (
+	errObservedToolExecution       = errors.New("tool execution failed")
+	errObservedToolPanic           = errors.New("tool execution panicked")
+	errObservedToolDeadline        = errors.New("tool execution deadline exceeded")
+	errObservedToolCancellation    = errors.New("tool execution canceled")
+	errObservedToolMissingResponse = errors.New("tool response missing")
+)
 
 type loopRunState struct {
 	obs        *loopObserver
@@ -253,52 +269,117 @@ func (o *iterationObserver) finish(err error, stats loopIterationStats) {
 	gai.EndSpan(o.span, err)
 }
 
-func startToolSpan(ctx context.Context, call ai.ToolCall) (context.Context, func(*ToolResponse)) {
+type toolObservation struct {
+	ctx        context.Context
+	span       trace.Span
+	finishOnce sync.Once
+}
+
+func startToolSpan(ctx context.Context, call ai.ToolCall) (context.Context, *toolObservation) {
 	ctx, span := gai.StartOperationSpan(ctx, loopTracerName, "loop", "loop.operation", "tool",
 		attribute.String("tool.name", call.Name),
 		attribute.String("tool.call_id", call.ID),
+		attribute.String("gen_ai.operation.name", "execute_tool"),
+		attribute.String("gen_ai.tool.name", call.Name),
+		attribute.String("gen_ai.tool.type", "function"),
+		attribute.String("gen_ai.tool.call.id", call.ID),
+		attribute.String("langfuse.observation.type", "tool"),
 	)
 	if captured, ok := gai.CaptureContent(ctx, gai.ContentKindToolInput, call.Args); ok {
-		setCapturedToolContent(span, "tool.input", captured)
+		setCapturedToolContent(span, "tool.input", captured,
+			"gen_ai.tool.call.arguments",
+			"langfuse.observation.input",
+		)
 	}
-	return ctx, func(response *ToolResponse) {
-		status := "success"
-		var executionErr error
-		var output string
-		if response == nil {
-			status = "error"
-			executionErr = ErrToolErrorMissing
-		} else if responseErr := response.ErrorValue(); responseErr != nil {
-			status = "error"
-			executionErr = responseErr
-			output = responseErr.Error()
-		} else {
-			output = response.TextValue()
+	return ctx, &toolObservation{ctx: ctx, span: span}
+}
+
+func callObservedTool(ctx context.Context, call ai.ToolCall, tools []Tool) (response *ToolResponse) {
+	toolCtx, observation := startToolSpan(ctx, call)
+	missingResponse := false
+	defer func() {
+		if panicValue := recover(); panicValue != nil {
+			observation.finishPanic()
+			panic(panicValue)
 		}
-		if response != nil {
-			if captured, ok := gai.CaptureContent(ctx, gai.ContentKindToolOutput, []byte(output)); ok {
-				setCapturedToolContent(span, "tool.output", captured)
+		observation.finish(response, missingResponse)
+	}()
+	response, missingResponse = callTool(toolCtx, &call, tools)
+	return response
+}
+
+func (o *toolObservation) finish(response *ToolResponse, missingResponse bool) {
+	if o == nil {
+		return
+	}
+	o.finishOnce.Do(func() {
+		outcome, output, spanErr := toolResult(response, missingResponse)
+		if response != nil && outcome != toolOutcomeMissingResponse {
+			if captured, ok := gai.CaptureContent(o.ctx, gai.ContentKindToolOutput, []byte(output)); ok {
+				aliases := []string{"langfuse.observation.output"}
+				if outcome == toolOutcomeSuccess {
+					aliases = append(aliases, "gen_ai.tool.call.result")
+				}
+				setCapturedToolContent(o.span, "tool.output", captured, aliases...)
 			}
 		}
-		span.SetAttributes(attribute.String("tool.status", status))
-		if response == nil {
-			gai.EndSpan(span, ErrToolErrorMissing)
-			return
-		}
-		if executionErr != nil {
-			gai.EndSpan(span, errObservedToolExecution)
-			return
-		}
-		gai.EndSpan(span, nil)
+		o.setOutcome(outcome, spanErr)
+	})
+}
+
+func (o *toolObservation) finishPanic() {
+	if o == nil {
+		return
+	}
+	o.finishOnce.Do(func() {
+		o.setOutcome(toolOutcomePanic, errObservedToolPanic)
+	})
+}
+
+func (o *toolObservation) setOutcome(outcome string, spanErr error) {
+	status := "success"
+	attrs := []attribute.KeyValue{attribute.String("gai.tool.outcome", outcome)}
+	if spanErr != nil {
+		status = "error"
+		attrs = append(attrs, attribute.String("error.type", "gai.tool."+outcome))
+	}
+	attrs = append(attrs, attribute.String("tool.status", status))
+	o.span.SetAttributes(attrs...)
+	gai.EndSpan(o.span, spanErr)
+}
+
+func toolResult(response *ToolResponse, missingResponse bool) (outcome string, output string, spanErr error) {
+	if missingResponse || response == nil {
+		return toolOutcomeMissingResponse, "", errObservedToolMissingResponse
+	}
+	responseErr := response.ErrorValue()
+	if responseErr == nil && response.Status == "error" {
+		responseErr = ErrToolErrorMissing
+	}
+	if responseErr == nil {
+		return toolOutcomeSuccess, response.TextValue(), nil
+	}
+	output = responseErr.Error()
+	switch {
+	case errors.Is(responseErr, context.DeadlineExceeded):
+		return toolOutcomeDeadline, output, errObservedToolDeadline
+	case errors.Is(responseErr, context.Canceled):
+		return toolOutcomeCancellation, output, errObservedToolCancellation
+	default:
+		return toolOutcomeError, output, errObservedToolExecution
 	}
 }
 
-func setCapturedToolContent(span trace.Span, prefix string, captured gai.CapturedContent) {
-	span.SetAttributes(
+func setCapturedToolContent(span trace.Span, prefix string, captured gai.CapturedContent, aliases ...string) {
+	attrs := []attribute.KeyValue{
 		attribute.String(prefix, string(captured.Value)),
 		attribute.Int(prefix+".original_bytes", captured.OriginalBytes),
 		attribute.Int(prefix+".captured_bytes", captured.CapturedBytes),
 		attribute.Bool(prefix+".truncated", captured.Truncated),
 		attribute.Bool(prefix+".redaction_applied", captured.RedactionApplied),
-	)
+	}
+	for _, alias := range aliases {
+		attrs = append(attrs, attribute.String(alias, string(captured.Value)))
+	}
+	span.SetAttributes(attrs...)
 }
