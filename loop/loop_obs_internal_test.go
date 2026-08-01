@@ -120,6 +120,26 @@ func TestObservedToolPanicFinalizesAndRepanics(t *testing.T) {
 	}
 }
 
+func TestToolObservationMissingResponseOmitsOutput(t *testing.T) {
+	recorder := obstest.Install(t)
+	ctx := gai.WithContentCapturePolicy(t.Context(), gai.ContentCapturePolicy{ToolOutput: gai.CaptureEnabled})
+	call := ai.ToolCall{ID: "call-missing", Type: "function", Name: "missing", Args: json.RawMessage(`{}`)}
+	tool := observedTestTool{name: "missing", call: func(context.Context, *ai.ToolCall) *ToolResponse {
+		return nil
+	}}
+	callObservedTool(ctx, call, []Tool{tool})
+
+	attrs := obstest.Attributes(requireToolSpans(t, recorder, 1)[0])
+	if got := attrs["gai.tool.outcome"].AsString(); got != toolOutcomeMissingResponse {
+		t.Fatalf("gai.tool.outcome = %q, want %q", got, toolOutcomeMissingResponse)
+	}
+	for _, key := range []string{"tool.output", "gen_ai.tool.call.result", "langfuse.observation.output"} {
+		if _, ok := attrs[key]; ok {
+			t.Fatalf("missing response exported %q: %#v", key, attrs[key])
+		}
+	}
+}
+
 func TestToolObservationUsesPolicyGatedContentAliases(t *testing.T) {
 	recorder := obstest.Install(t)
 	ctx := gai.WithContentCapturePolicy(t.Context(), gai.ContentCapturePolicy{

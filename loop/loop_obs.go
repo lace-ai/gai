@@ -314,7 +314,7 @@ func (o *toolObservation) finish(response *ToolResponse, missingResponse bool) {
 	}
 	o.finishOnce.Do(func() {
 		outcome, output, spanErr := toolResult(response, missingResponse)
-		if response != nil {
+		if response != nil && outcome != toolOutcomeMissingResponse {
 			if captured, ok := gai.CaptureContent(o.ctx, gai.ContentKindToolOutput, []byte(output)); ok {
 				aliases := []string{"langfuse.observation.output"}
 				if outcome == toolOutcomeSuccess {
