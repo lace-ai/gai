@@ -68,16 +68,13 @@ func (m *Model) Close() error {
 
 func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.Token {
 	out := make(chan ai.Token, 1)
-	prompt := req.Prompt
 
 	go func() {
-		ctx, span := gai.StartOperationSpan(ctx, geminiTracerName, "ai.gemini", "ai.operation", "model.generate_stream",
-			attribute.String("ai.provider", "gemini"),
-			attribute.String("ai.model", m.name),
-			attribute.Int("ai.max_tokens", req.MaxTokens),
-			attribute.Int("ai.prompt_length", len(prompt)),
-		)
+		ctx := ctx
 		var streamErr error
+		var observation *ai.GenerationObservation
+		generationResult := ai.GenerationResult{}
+		defer close(out)
 		if gai.DebugContentEnabled(ctx, m.debug, gai.ContentKindPrompt) {
 			fields := map[string]any{"max_tokens": req.MaxTokens}
 			gai.AddDebugContent(ctx, m.debug, fields, "prompt", gai.ContentKindPrompt, req.Prompt)
@@ -87,21 +84,21 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 				Fields: fields,
 			})
 		}
-		textTokenCount := 0
-		thoughtTokenCount := 0
-		toolCallCount := 0
 		defer func() {
-			span.SetAttributes(
-				attribute.Int("ai.text_token_count", textTokenCount),
-				attribute.Int("ai.thought_token_count", thoughtTokenCount),
-				attribute.Int("ai.tool_call_count", toolCallCount),
-			)
-			gai.EndSpan(span, streamErr)
+			generationResult.Err = streamErr
+			observation.Finish(generationResult)
 		}()
-		defer close(out)
+		emit := func(token ai.Token) bool {
+			observation.ObserveToken(token)
+			if ai.SendToken(ctx, out, token) {
+				return true
+			}
+			streamErr = ctx.Err()
+			return false
+		}
 		if err := ai.ValidateModelRequest(m, req); err != nil {
 			streamErr = err
-			ai.SendToken(ctx, out, ai.Token{Err: err, Type: ai.TokenTypeErr, Text: err.Error()})
+			emit(ai.Token{Err: err, Type: ai.TokenTypeErr, Text: err.Error()})
 			return
 		}
 
@@ -118,27 +115,30 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 					Err: err,
 				})
 			}
-			ai.SendToken(ctx, out, ai.Token{Err: err, Type: ai.TokenTypeErr, Text: err.Error()})
+			emit(ai.Token{Err: err, Type: ai.TokenTypeErr, Text: err.Error()})
 			return
 		}
 
 		config, err := buildGenerateContentConfig(req)
 		if err != nil {
 			streamErr = err
-			ai.SendToken(ctx, out, ai.Token{Err: err, Type: ai.TokenTypeErr, Text: err.Error()})
+			emit(ai.Token{Err: err, Type: ai.TokenTypeErr, Text: err.Error()})
 			return
 		}
 
 		contents, err := nativeContents(req)
 		if err != nil {
 			streamErr = err
-			ai.SendToken(ctx, out, ai.Token{Err: err, Type: ai.TokenTypeErr, Text: err.Error()})
+			emit(ai.Token{Err: err, Type: ai.TokenTypeErr, Text: err.Error()})
 			return
 		}
 
+		generationCtx, startedObservation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "gemini", Model: m.name, Streaming: true})
+		observation = startedObservation
+		ctx = generationCtx
 		completion := ai.Completion{Provider: "gemini"}
 		hasCompletion := false
-		for resp, err := range client.Models.GenerateContentStream(ctx, m.name, contents, config) {
+		for resp, err := range client.Models.GenerateContentStream(generationCtx, m.name, contents, config) {
 			if err != nil {
 				streamErr = fmt.Errorf("error generating content stream: %w", err)
 				if m.debug != nil {
@@ -151,7 +151,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 						Err: err,
 					})
 				}
-				ai.SendToken(ctx, out, ai.Token{Err: streamErr, Type: ai.TokenTypeErr, Text: streamErr.Error()})
+				emit(ai.Token{Err: streamErr, Type: ai.TokenTypeErr, Text: streamErr.Error()})
 				return
 			}
 
@@ -170,6 +170,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 				responseHasCompletion = true
 			}
 			if resp.UsageMetadata != nil {
+				completion.UsageReported = true
 				completion.Usage = ai.Usage{
 					InputTokens:     int(resp.UsageMetadata.PromptTokenCount),
 					OutputTokens:    int(resp.UsageMetadata.CandidatesTokenCount),
@@ -189,7 +190,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 				raw, marshalErr := json.Marshal(resp)
 				if marshalErr != nil {
 					streamErr = fmt.Errorf("encode Gemini completion metadata: %w", marshalErr)
-					ai.SendToken(ctx, out, ai.Token{Err: streamErr, Type: ai.TokenTypeErr, Text: streamErr.Error()})
+					emit(ai.Token{Err: streamErr, Type: ai.TokenTypeErr, Text: streamErr.Error()})
 					return
 				}
 				completion.Raw = append(completion.Raw[:0], raw...)
@@ -207,13 +208,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 				switch {
 				case part.Text != "":
 					token := buildTextToken(part)
-					switch token.Type {
-					case ai.TokenTypeThought:
-						thoughtTokenCount++
-					default:
-						textTokenCount++
-					}
-					if !ai.SendToken(ctx, out, token) {
+					if !emit(token) {
 						return
 					}
 				case part.FunctionCall != nil:
@@ -235,7 +230,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 								Err:    err,
 							})
 						}
-						ai.SendToken(ctx, out, ai.Token{Err: encodeErr, Type: ai.TokenTypeErr, Text: encodeErr.Error()})
+						emit(ai.Token{Err: encodeErr, Type: ai.TokenTypeErr, Text: encodeErr.Error()})
 						return
 					}
 					toolCall, err := mapFunctionCall(part.FunctionCall)
@@ -257,7 +252,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 								Err:    err,
 							})
 						}
-						ai.SendToken(ctx, out, ai.Token{Err: mapErr, Type: ai.TokenTypeErr, Text: mapErr.Error()})
+						emit(ai.Token{Err: mapErr, Type: ai.TokenTypeErr, Text: mapErr.Error()})
 						return
 					}
 					toolCall.ThoughtSignature = append([]byte(nil), part.ThoughtSignature...)
@@ -273,21 +268,20 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 							Fields: fields,
 						})
 					}
-					if !ai.SendToken(ctx, out, ai.Token{
+					if !emit(ai.Token{
 						Type:     ai.TokenTypeToolCall,
 						Data:     rawPart,
 						ToolCall: toolCall,
 					}) {
 						return
 					}
-					toolCallCount++
 				}
 			}
 		}
 		if hasCompletion {
 			snapshot := completion
 			snapshot.Raw = append(json.RawMessage(nil), completion.Raw...)
-			ai.SendToken(ctx, out, ai.Token{Type: ai.TokenTypeCompletion, Completion: &snapshot})
+			emit(ai.Token{Type: ai.TokenTypeCompletion, Completion: &snapshot})
 		}
 	}()
 
@@ -295,14 +289,6 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 }
 
 func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AIResponse, err error) {
-	prompt := req.Prompt
-	ctx, span := gai.StartOperationSpan(ctx, geminiTracerName, "ai.gemini", "ai.operation", "model.generate",
-		attribute.String("ai.provider", "gemini"),
-		attribute.String("ai.model", m.name),
-		attribute.Int("ai.max_tokens", req.MaxTokens),
-		attribute.Int("ai.prompt_length", len(prompt)),
-	)
-	defer func() { gai.EndSpan(span, err) }()
 	if err := ai.ValidateModelRequest(m, req); err != nil {
 		return nil, err
 	}
@@ -340,6 +326,12 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 	if err != nil {
 		return nil, err
 	}
+	ctx, observation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "gemini", Model: m.name})
+	generationResult := ai.GenerationResult{}
+	defer func() {
+		generationResult.Err = err
+		observation.Finish(generationResult)
+	}()
 	result, err := client.Models.GenerateContent(
 		ctx,
 		m.name,
@@ -370,12 +362,6 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 	if result.UsageMetadata != nil {
 		reasoningTokens = int(result.UsageMetadata.ThoughtsTokenCount)
 	}
-	span.SetAttributes(
-		attribute.Int("ai.input_tokens", inputTokens),
-		attribute.Int("ai.output_tokens", outputTokens),
-		attribute.Int("ai.reasoning_tokens", reasoningTokens),
-	)
-
 	text, reasoning, toolCalls, err := mapGenerateContentResponse(result)
 	if err != nil {
 		return nil, err
@@ -394,6 +380,19 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 		})
 	}
 	raw, _ := json.Marshal(result)
+	generationResult.ResponseModel = result.ModelVersion
+	generationResult.RequestID = result.ResponseID
+	generationResult.ToolCallCount = len(toolCalls)
+	if result.UsageMetadata != nil {
+		usage := ai.Usage{
+			InputTokens: inputTokens, OutputTokens: outputTokens, ReasoningTokens: reasoningTokens,
+			CachedTokens: int(result.UsageMetadata.CachedContentTokenCount), ToolUseTokens: int(result.UsageMetadata.ToolUsePromptTokenCount),
+		}
+		generationResult.Usage = &usage
+	}
+	if len(result.Candidates) > 0 && result.Candidates[0] != nil {
+		generationResult.FinishReason = string(result.Candidates[0].FinishReason)
+	}
 	return &ai.AIResponse{
 		Text:            text,
 		Reasoning:       reasoning,
@@ -402,6 +401,7 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 		InputTokens:     inputTokens,
 		OutputTokens:    outputTokens,
 		ReasoningTokens: reasoningTokens,
+		FinishReason:    generationResult.FinishReason,
 	}, nil
 }
 

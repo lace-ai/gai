@@ -13,11 +13,18 @@ import (
 	"github.com/openai/openai-go/shared"
 )
 
-func (m *Model) generateResponses(ctx context.Context, req ai.AIRequest) (*ai.AIResponse, error) {
+func (m *Model) generateResponses(ctx context.Context, req ai.AIRequest) (result *ai.AIResponse, err error) {
 	params, err := buildResponsesParams(m.name, req)
 	if err != nil {
 		return nil, err
 	}
+	ctx, observation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "openai", Model: m.name})
+	generationResult := ai.GenerationResult{}
+	defer func() {
+		generationResult.Err = err
+		generationResult.HTTPStatus = openAIHTTPStatus(err)
+		observation.Finish(generationResult)
+	}()
 	response, err := m.client(false).Responses.New(ctx, params)
 	if err != nil {
 		return nil, err
@@ -32,7 +39,21 @@ func (m *Model) generateResponses(ctx context.Context, req ai.AIRequest) (*ai.AI
 		}
 		return nil, fmt.Errorf("OpenAI Responses API: %s", message)
 	}
-	return responseFromResponses(response)
+	result, err = responseFromResponses(response)
+	if result != nil {
+		generationResult.ResponseModel = string(response.Model)
+		generationResult.RequestID = response.ID
+		generationResult.FinishReason = string(response.Status)
+		generationResult.ToolCallCount = len(result.ToolCalls)
+		if response.JSON.Usage.Valid() {
+			usage := ai.Usage{
+				InputTokens: result.InputTokens, OutputTokens: result.OutputTokens,
+				ReasoningTokens: result.ReasoningTokens, CachedTokens: int(response.Usage.InputTokensDetails.CachedTokens),
+			}
+			generationResult.Usage = &usage
+		}
+	}
+	return result, err
 }
 
 func (m *Model) generateResponsesStream(ctx context.Context, out chan<- ai.Token, req ai.AIRequest) {
@@ -40,6 +61,25 @@ func (m *Model) generateResponsesStream(ctx context.Context, out chan<- ai.Token
 	if err != nil {
 		ai.SendToken(ctx, out, ai.Token{Type: ai.TokenTypeErr, Err: err, Text: err.Error()})
 		return
+	}
+	ctx, observation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "openai", Model: m.name, Streaming: true})
+	var streamErr error
+	generationResult := ai.GenerationResult{}
+	defer func() {
+		generationResult.Err = streamErr
+		generationResult.HTTPStatus = openAIHTTPStatus(streamErr)
+		observation.Finish(generationResult)
+	}()
+	emit := func(token ai.Token) bool {
+		if token.Type == ai.TokenTypeErr && token.Err != nil {
+			streamErr = token.Err
+		}
+		observation.ObserveToken(token)
+		if ai.SendToken(ctx, out, token) {
+			return true
+		}
+		streamErr = ctx.Err()
+		return false
 	}
 	stream := m.client(true).Responses.NewStreaming(ctx, params)
 	defer func() {
@@ -56,7 +96,23 @@ func (m *Model) generateResponsesStream(ctx context.Context, out chan<- ai.Token
 		event := stream.Current()
 		switch event.Type {
 		case "response.output_text.delta", "response.refusal.delta":
-			if text := event.Delta.OfString; text != "" && !ai.SendToken(ctx, out, ai.Token{Type: ai.TokenTypeText, Data: []byte(text), Text: text}) {
+			if text := event.Delta.OfString; text != "" && !emit(ai.Token{Type: ai.TokenTypeText, Data: []byte(text), Text: text}) {
+				return
+			}
+		case "response.completed":
+			response := event.Response
+			completion := ai.Completion{
+				Provider: "openai", Model: string(response.Model), RequestID: response.ID,
+				FinishReason: string(response.Status), Raw: json.RawMessage(response.RawJSON()),
+			}
+			if response.JSON.Usage.Valid() {
+				completion.UsageReported = true
+				completion.Usage = ai.Usage{
+					InputTokens: int(response.Usage.InputTokens), OutputTokens: int(response.Usage.OutputTokens),
+					ReasoningTokens: int(response.Usage.OutputTokensDetails.ReasoningTokens), CachedTokens: int(response.Usage.InputTokensDetails.CachedTokens),
+				}
+			}
+			if !emit(ai.Token{Type: ai.TokenTypeCompletion, Completion: &completion}) {
 				return
 			}
 		case "response.output_item.done":
@@ -70,7 +126,8 @@ func (m *Model) generateResponsesStream(ctx context.Context, out chan<- ai.Token
 			args := json.RawMessage(event.Item.Arguments)
 			if !json.Valid(args) {
 				err := fmt.Errorf("invalid JSON arguments for tool %q", event.Item.Name)
-				ai.SendToken(ctx, out, ai.Token{Type: ai.TokenTypeErr, Err: err, Text: err.Error()})
+				streamErr = err
+				emit(ai.Token{Type: ai.TokenTypeErr, Err: err, Text: err.Error()})
 				return
 			}
 			var thoughtSignature []byte
@@ -78,17 +135,19 @@ func (m *Model) generateResponsesStream(ctx context.Context, out chan<- ai.Token
 				thoughtSignature, err = json.Marshal(reasoningItems)
 				if err != nil {
 					err = fmt.Errorf("encode OpenAI reasoning items: %w", err)
-					ai.SendToken(ctx, out, ai.Token{Type: ai.TokenTypeErr, Err: err, Text: err.Error()})
+					streamErr = err
+					emit(ai.Token{Type: ai.TokenTypeErr, Err: err, Text: err.Error()})
 					return
 				}
 			}
 			call := &ai.ToolCall{ID: event.Item.CallID, Type: "function", Name: event.Item.Name, Args: args, ThoughtSignature: append([]byte(nil), thoughtSignature...)}
-			if !ai.SendToken(ctx, out, ai.Token{Type: ai.TokenTypeToolCall, Data: []byte(args), ToolCall: call}) {
+			if !emit(ai.Token{Type: ai.TokenTypeToolCall, Data: []byte(args), ToolCall: call}) {
 				return
 			}
 		case "error":
 			err := fmt.Errorf("OpenAI Responses API: %s", event.Message)
-			ai.SendToken(ctx, out, ai.Token{Type: ai.TokenTypeErr, Err: err, Text: err.Error()})
+			streamErr = err
+			emit(ai.Token{Type: ai.TokenTypeErr, Err: err, Text: err.Error()})
 			return
 		case "response.failed":
 			message := event.Response.Error.Message
@@ -99,12 +158,14 @@ func (m *Model) generateResponsesStream(ctx context.Context, out chan<- ai.Token
 				message = "response failed"
 			}
 			err := fmt.Errorf("OpenAI Responses API: %s", message)
-			ai.SendToken(ctx, out, ai.Token{Type: ai.TokenTypeErr, Err: err, Text: err.Error()})
+			streamErr = err
+			emit(ai.Token{Type: ai.TokenTypeErr, Err: err, Text: err.Error()})
 			return
 		}
 	}
 	if err := stream.Err(); err != nil {
-		ai.SendToken(ctx, out, ai.Token{Type: ai.TokenTypeErr, Err: err, Text: err.Error()})
+		streamErr = err
+		emit(ai.Token{Type: ai.TokenTypeErr, Err: err, Text: err.Error()})
 	}
 }
 

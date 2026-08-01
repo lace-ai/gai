@@ -117,6 +117,8 @@ type chatResponseJSONSchema struct {
 }
 
 type chatCompletionResponse struct {
+	ID      string `json:"id"`
+	Model   string `json:"model"`
 	Choices []struct {
 		Message struct {
 			Content   string          `json:"content"`
@@ -124,7 +126,7 @@ type chatCompletionResponse struct {
 		} `json:"message"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
-	Usage struct {
+	Usage *struct {
 		PromptTokens     int `json:"prompt_tokens"`
 		CompletionTokens int `json:"completion_tokens"`
 	} `json:"usage"`
@@ -369,6 +371,9 @@ func (t *Tokenizer) CountTokens(ctx context.Context, text string) (tokens int, e
 	if err := json.Unmarshal(resBody, &parsed); err != nil {
 		return 0, err
 	}
+	if parsed.Usage == nil {
+		return 0, nil
+	}
 	return parsed.Usage.PromptTokens, nil
 }
 
@@ -498,17 +503,14 @@ func (a *mistralToolCallAccumulator) ready(final bool) []ai.ToolCall {
 }
 
 func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.Token {
-	prompt := req.Prompt
-	ctx, span := gai.StartOperationSpan(ctx, mistralTracerName, "ai.mistral", "ai.operation", "model.generate_stream",
-		attribute.String("ai.provider", "mistral"),
-		attribute.String("ai.model", m.name),
-		attribute.Int("ai.max_tokens", req.MaxTokens),
-		attribute.Int("ai.prompt_length", len(prompt)),
-	)
 	raw := make(chan ai.Token, 1)
 
 	go func() {
+		ctx := ctx
 		var streamErr error
+		var observation *ai.GenerationObservation
+		generationResult := ai.GenerationResult{}
+		defer close(raw)
 		if gai.DebugContentEnabled(ctx, m.debug, gai.ContentKindPrompt) {
 			fields := map[string]any{"max_tokens": req.MaxTokens}
 			gai.AddDebugContent(ctx, m.debug, fields, "prompt", gai.ContentKindPrompt, req.Prompt)
@@ -518,17 +520,12 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 				Fields: fields,
 			})
 		}
-		textTokenCount := 0
-		toolCallCount := 0
 		defer func() {
-			span.SetAttributes(
-				attribute.Int("ai.text_token_count", textTokenCount),
-				attribute.Int("ai.tool_call_count", toolCallCount),
-			)
-			gai.EndSpan(span, streamErr)
+			generationResult.Err = streamErr
+			observation.Finish(generationResult)
 		}()
-		defer close(raw)
 		emit := func(token ai.Token) bool {
+			observation.ObserveToken(token)
 			if ai.SendToken(ctx, raw, token) {
 				return true
 			}
@@ -599,6 +596,10 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 		httpReq.Header.Set("Authorization", "Bearer "+m.client.apiKey)
 		httpReq.Header.Set("Content-Type", "application/json")
 		httpReq.Header.Set("Accept", "text/event-stream")
+		generationCtx, startedObservation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "mistral", Model: m.name, Streaming: true})
+		observation = startedObservation
+		ctx = generationCtx
+		httpReq = httpReq.WithContext(generationCtx)
 
 		res, err := m.client.httpClient.Do(httpReq)
 		if err != nil {
@@ -619,7 +620,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			return
 		}
 		defer res.Body.Close()
-		span.SetAttributes(attribute.Int("http.response.status_code", res.StatusCode))
+		generationResult.HTTPStatus = res.StatusCode
 
 		if res.StatusCode >= http.StatusMultipleChoices {
 			const maxResponseBody = 1 << 20 // 1MB
@@ -721,6 +722,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 				hasCompletion = true
 			}
 			if chunk.Usage != nil {
+				completion.UsageReported = true
 				completion.Usage = ai.Usage{InputTokens: chunk.Usage.PromptTokens, OutputTokens: chunk.Usage.CompletionTokens}
 				hasCompletion = true
 			}
@@ -746,7 +748,6 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 				if !emit(ai.Token{Type: ai.TokenTypeText, Text: text, Data: []byte(text)}) {
 					return ctx.Err()
 				}
-				textTokenCount++
 			}
 
 			finalToolCalls := chunk.Choices[0].FinishReason == "tool_calls"
@@ -787,7 +788,6 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 					}) {
 						return ctx.Err()
 					}
-					toolCallCount++
 				}
 			}
 
@@ -917,14 +917,6 @@ func intPtr(v int) *int {
 }
 
 func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AIResponse, err error) {
-	prompt := req.Prompt
-	ctx, span := gai.StartOperationSpan(ctx, mistralTracerName, "ai.mistral", "ai.operation", "model.generate",
-		attribute.String("ai.provider", "mistral"),
-		attribute.String("ai.model", m.name),
-		attribute.Int("ai.max_tokens", req.MaxTokens),
-		attribute.Int("ai.prompt_length", len(prompt)),
-	)
-	defer func() { gai.EndSpan(span, err) }()
 	if err := ai.ValidateModelRequest(m, req); err != nil {
 		return nil, err
 	}
@@ -959,12 +951,20 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 	}
 	httpReq.Header.Set("Authorization", "Bearer "+m.client.apiKey)
 	httpReq.Header.Set("Content-Type", "application/json")
+	ctx, observation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "mistral", Model: m.name})
+	httpReq = httpReq.WithContext(ctx)
+	generationResult := ai.GenerationResult{}
+	defer func() {
+		generationResult.Err = err
+		observation.Finish(generationResult)
+	}()
 
 	res, err := m.client.httpClient.Do(httpReq)
 	if err != nil {
 		return nil, err
 	}
 	defer res.Body.Close()
+	generationResult.HTTPStatus = res.StatusCode
 
 	const maxResponseBody = 1 << 20 // 10MB
 	resBody, err := io.ReadAll(io.LimitReader(res.Body, maxResponseBody))
@@ -973,10 +973,8 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 	}
 
 	if res.StatusCode >= http.StatusMultipleChoices {
-		span.SetAttributes(attribute.Int("http.response.status_code", res.StatusCode))
 		return nil, newHTTPError("chat completion", res.StatusCode, resBody)
 	}
-	span.SetAttributes(attribute.Int("http.response.status_code", res.StatusCode))
 
 	var parsed chatCompletionResponse
 	if err := json.Unmarshal(resBody, &parsed); err != nil {
@@ -989,14 +987,19 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 	if err != nil {
 		return nil, err
 	}
-	span.SetAttributes(
-		attribute.Int("ai.input_tokens", parsed.Usage.PromptTokens),
-		attribute.Int("ai.output_tokens", parsed.Usage.CompletionTokens),
-	)
+	usage := ai.Usage{}
+	if parsed.Usage != nil {
+		usage = ai.Usage{InputTokens: parsed.Usage.PromptTokens, OutputTokens: parsed.Usage.CompletionTokens}
+		generationResult.Usage = &usage
+	}
+	generationResult.ResponseModel = parsed.Model
+	generationResult.RequestID = parsed.ID
+	generationResult.FinishReason = parsed.Choices[0].FinishReason
+	generationResult.ToolCallCount = len(toolCalls)
 	if m.debug != nil {
 		fields := map[string]any{
-			"input_tokens":  parsed.Usage.PromptTokens,
-			"output_tokens": parsed.Usage.CompletionTokens,
+			"input_tokens":  usage.InputTokens,
+			"output_tokens": usage.OutputTokens,
 		}
 		if _, hasPolicy := gai.ContentCapturePolicyFromContext(ctx); !hasPolicy && m.debug.IncludeSensitiveData() {
 			fields["response"] = parsed
@@ -1014,8 +1017,8 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 		ToolCalls:    toolCalls,
 		Raw:          append([]byte(nil), resBody...),
 		FinishReason: parsed.Choices[0].FinishReason,
-		InputTokens:  parsed.Usage.PromptTokens,
-		OutputTokens: parsed.Usage.CompletionTokens,
+		InputTokens:  usage.InputTokens,
+		OutputTokens: usage.OutputTokens,
 	}, nil
 }
 

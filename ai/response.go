@@ -47,12 +47,15 @@ func (u *Usage) Add(other Usage) {
 
 // Completion is terminal metadata emitted by a streaming provider request.
 type Completion struct {
-	Usage        Usage
-	FinishReason string
-	RequestID    string
-	Provider     string
-	Model        string
-	Raw          json.RawMessage
+	Usage Usage
+	// UsageReported distinguishes an absent provider usage block from a
+	// provider-reported usage block whose counters are all zero.
+	UsageReported bool
+	FinishReason  string
+	RequestID     string
+	Provider      string
+	Model         string
+	Raw           json.RawMessage
 }
 
 // TokenType identifies the semantic kind of a streamed token.

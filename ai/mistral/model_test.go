@@ -12,9 +12,11 @@ import (
 
 	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
+	"github.com/lace-ai/gai/internal/obstest"
 )
 
 func TestModelGenerate(t *testing.T) {
+	recorder := obstest.Install(t)
 	var gotAuth string
 	var gotReq chatCompletionRequest
 
@@ -76,6 +78,10 @@ func TestModelGenerate(t *testing.T) {
 	}
 	if res.InputTokens != 11 || res.OutputTokens != 7 {
 		t.Fatalf("unexpected usage mapping: %+v", res)
+	}
+	attrs := obstest.Attributes(obstest.RequireGenerationSpans(t, recorder, 1)[0])
+	if attrs["gen_ai.provider.name"].AsString() != "mistral_ai" || attrs["ai.provider"].AsString() != "mistral" || attrs["gai.gen_ai.streaming"].AsBool() {
+		t.Fatalf("generation attrs = %#v", attrs)
 	}
 }
 
@@ -514,6 +520,7 @@ func TestModelGenerateStream(t *testing.T) {
 }
 
 func TestModelGenerateStreamEmitsTerminalCompletion(t *testing.T) {
+	recorder := obstest.Install(t)
 	var gotReq chatCompletionRequest
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&gotReq); err != nil {
@@ -541,6 +548,10 @@ func TestModelGenerateStreamEmitsTerminalCompletion(t *testing.T) {
 	}
 	if completion == nil || completion.Provider != "mistral" || completion.RequestID != "cmpl_1" || completion.Model != "mistral-test" || completion.FinishReason != "stop" || completion.Usage.InputTokens != 7 || completion.Usage.OutputTokens != 3 || !json.Valid(completion.Raw) {
 		t.Fatalf("completion = %#v", completion)
+	}
+	attrs := obstest.Attributes(obstest.RequireGenerationSpans(t, recorder, 1)[0])
+	if !attrs["gai.gen_ai.streaming"].AsBool() || attrs["gen_ai.usage.input_tokens"].AsInt64() != 7 {
+		t.Fatalf("generation attrs = %#v", attrs)
 	}
 }
 

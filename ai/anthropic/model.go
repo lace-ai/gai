@@ -284,8 +284,6 @@ func mapResponseFormat(format ai.ResponseFormat) (*antropic.OutputConfigParam, e
 }
 
 func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AIResponse, err error) {
-	ctx, span := gai.StartOperationSpan(ctx, anthropicTracerName, "ai.anthropic", "ai.operation", "model.generate", attribute.String("ai.provider", "anthropic"), attribute.String("ai.model", m.name), attribute.Int("ai.max_tokens", req.MaxTokens), attribute.Int("ai.prompt_length", len(req.Prompt)))
-	defer func() { gai.EndSpan(span, err) }()
 	if err := ai.ValidateModelRequest(m, req); err != nil {
 		return nil, err
 	}
@@ -302,6 +300,13 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 		m.debug.Emit(ctx, gai.DebugEvent{Name: "anthropic_generate_request", Source: "ai:anthropic.Model.Generate", Fields: fields})
 	}
 	client := m.client.sdkClient()
+	ctx, observation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "anthropic", Model: m.name})
+	generationResult := ai.GenerationResult{}
+	defer func() {
+		generationResult.Err = err
+		generationResult.HTTPStatus = anthropicHTTPStatus(err)
+		observation.Finish(generationResult)
+	}()
 	message, err := client.Messages.New(ctx, payload)
 	if err != nil {
 		return nil, localError(err)
@@ -312,7 +317,18 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 	}
 	input := int(message.Usage.InputTokens + message.Usage.CacheCreationInputTokens + message.Usage.CacheReadInputTokens)
 	output := int(message.Usage.OutputTokens)
-	span.SetAttributes(attribute.Int("ai.input_tokens", input), attribute.Int("ai.output_tokens", output))
+	usage := ai.Usage{
+		InputTokens: input, OutputTokens: output,
+		ReasoningTokens: int(message.Usage.OutputTokensDetails.ThinkingTokens),
+		CachedTokens:    int(message.Usage.CacheReadInputTokens), CacheCreationTokens: int(message.Usage.CacheCreationInputTokens),
+	}
+	generationResult.ResponseModel = string(message.Model)
+	generationResult.RequestID = message.ID
+	generationResult.FinishReason = string(message.StopReason)
+	generationResult.ToolCallCount = len(calls)
+	if message.JSON.Usage.Valid() {
+		generationResult.Usage = &usage
+	}
 	if m.debug != nil {
 		fields := map[string]any{"input_tokens": input, "output_tokens": output}
 		if _, hasPolicy := gai.ContentCapturePolicyFromContext(ctx); !hasPolicy && m.debug.IncludeSensitiveData() {
@@ -322,7 +338,7 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 		gai.AddDebugContent(ctx, m.debug, fields, "reasoning", gai.ContentKindReasoning, thinking)
 		m.debug.Emit(ctx, gai.DebugEvent{Name: "anthropic_generate_success", Source: "ai:anthropic.Model.Generate", Fields: fields})
 	}
-	return &ai.AIResponse{Text: text, Reasoning: thinking, ToolCalls: calls, Raw: json.RawMessage(message.RawJSON()), FinishReason: string(message.StopReason), InputTokens: input, OutputTokens: output, ReasoningTokens: int(message.Usage.OutputTokensDetails.ThinkingTokens)}, nil
+	return &ai.AIResponse{Text: text, Reasoning: thinking, ToolCalls: calls, Raw: json.RawMessage(message.RawJSON()), FinishReason: string(message.StopReason), InputTokens: input, OutputTokens: output, ReasoningTokens: usage.ReasoningTokens}, nil
 }
 
 func mapMessageContent(blocks []antropic.ContentBlockUnion) (string, string, []ai.ToolCall, error) {
@@ -372,10 +388,18 @@ func localError(err error) error {
 func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.Token {
 	out := make(chan ai.Token, 1)
 	go func() {
-		ctx, span := gai.StartOperationSpan(ctx, anthropicTracerName, "ai.anthropic", "ai.operation", "model.generate_stream", attribute.String("ai.provider", "anthropic"), attribute.String("ai.model", m.name), attribute.Int("ai.max_tokens", req.MaxTokens), attribute.Int("ai.prompt_length", len(req.Prompt)))
+		ctx := ctx
 		var streamErr error
-		defer func() { gai.EndSpan(span, streamErr); close(out) }()
+		var observation *ai.GenerationObservation
+		generationResult := ai.GenerationResult{}
+		defer func() {
+			generationResult.Err = streamErr
+			generationResult.HTTPStatus = anthropicHTTPStatus(streamErr)
+			observation.Finish(generationResult)
+			close(out)
+		}()
 		emit := func(token ai.Token) bool {
+			observation.ObserveToken(token)
 			if ai.SendToken(ctx, out, token) {
 				return true
 			}
@@ -394,7 +418,10 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			return
 		}
 		client := m.client.sdkClient()
-		stream := client.Messages.NewStreaming(ctx, payload)
+		generationCtx, startedObservation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "anthropic", Model: m.name, Streaming: true})
+		observation = startedObservation
+		ctx = generationCtx
+		stream := client.Messages.NewStreaming(generationCtx, payload)
 		defer stream.Close()
 		blocks := map[int64]*streamBlock{}
 		completion := ai.Completion{Provider: "anthropic"}
@@ -404,13 +431,24 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			case "message_start":
 				completion.RequestID = event.Message.ID
 				completion.Model = string(event.Message.Model)
+				if event.Message.JSON.Usage.Valid() {
+					completion.UsageReported = true
+					completion.Usage.InputTokens = int(event.Message.Usage.InputTokens + event.Message.Usage.CacheCreationInputTokens + event.Message.Usage.CacheReadInputTokens)
+					completion.Usage.CachedTokens = int(event.Message.Usage.CacheReadInputTokens)
+					completion.Usage.CacheCreationTokens = int(event.Message.Usage.CacheCreationInputTokens)
+				}
 			case "message_delta":
-				completion.Usage = ai.Usage{
-					InputTokens:         int(event.Usage.InputTokens + event.Usage.CacheCreationInputTokens + event.Usage.CacheReadInputTokens),
-					OutputTokens:        int(event.Usage.OutputTokens),
-					ReasoningTokens:     int(event.Usage.OutputTokensDetails.ThinkingTokens),
-					CachedTokens:        int(event.Usage.CacheReadInputTokens),
-					CacheCreationTokens: int(event.Usage.CacheCreationInputTokens),
+				completion.UsageReported = true
+				if input := int(event.Usage.InputTokens + event.Usage.CacheCreationInputTokens + event.Usage.CacheReadInputTokens); input != 0 {
+					completion.Usage.InputTokens = input
+				}
+				completion.Usage.OutputTokens = int(event.Usage.OutputTokens)
+				completion.Usage.ReasoningTokens = int(event.Usage.OutputTokensDetails.ThinkingTokens)
+				if event.Usage.CacheReadInputTokens != 0 {
+					completion.Usage.CachedTokens = int(event.Usage.CacheReadInputTokens)
+				}
+				if event.Usage.CacheCreationInputTokens != 0 {
+					completion.Usage.CacheCreationTokens = int(event.Usage.CacheCreationInputTokens)
 				}
 				completion.FinishReason = string(event.Delta.StopReason)
 				completion.Raw = append(completion.Raw[:0], []byte(event.RawJSON())...)
@@ -496,6 +534,14 @@ func streamToolCall(block *streamBlock) (*ai.ToolCall, error) {
 		id = ai.GenerateToolCallID(name)
 	}
 	return &ai.ToolCall{ID: id, Type: "function", Name: name, Args: append(json.RawMessage(nil), args...)}, nil
+}
+
+func anthropicHTTPStatus(err error) int {
+	var providerErr *Error
+	if errors.As(err, &providerErr) {
+		return providerErr.StatusCode
+	}
+	return 0
 }
 
 type Tokenizer struct {

@@ -11,9 +11,11 @@ import (
 	"testing"
 
 	"github.com/lace-ai/gai/ai"
+	"github.com/lace-ai/gai/internal/obstest"
 )
 
 func TestModelGenerateMapsCapabilitiesAndResponse(t *testing.T) {
+	recorder := obstest.Install(t)
 	var got map[string]any
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/chat/completions" {
@@ -61,6 +63,10 @@ func TestModelGenerateMapsCapabilitiesAndResponse(t *testing.T) {
 	}
 	if len(res.ToolCalls) != 1 || res.ToolCalls[0].ID != "call_1" || res.ToolCalls[0].Name != "search" || string(res.ToolCalls[0].Args) != `{"query":"go"}` {
 		t.Fatalf("unexpected tool calls: %#v", res.ToolCalls)
+	}
+	attrs := obstest.Attributes(obstest.RequireGenerationSpans(t, recorder, 1)[0])
+	if attrs["gen_ai.provider.name"].AsString() != "openai" || attrs["gai.gen_ai.response.tool_call_count"].AsInt64() != 1 {
+		t.Fatalf("generation attrs = %#v", attrs)
 	}
 }
 
@@ -110,6 +116,7 @@ func TestModelGenerateWithResponsesTransportMapsToolContinuationAndNoneEffort(t 
 }
 
 func TestModelResponsesTransportDisablesResponseStorage(t *testing.T) {
+	recorder := obstest.Install(t)
 	requests := make(chan map[string]any, 2)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/responses" {
@@ -152,6 +159,14 @@ func TestModelResponsesTransportDisablesResponseStorage(t *testing.T) {
 		if !ok || !slices.Contains(include, any("reasoning.encrypted_content")) {
 			t.Fatalf("%s request include = %#v, want reasoning.encrypted_content", path, request["include"])
 		}
+	}
+	spans := obstest.RequireGenerationSpans(t, recorder, 2)
+	streaming := map[bool]int{}
+	for _, span := range spans {
+		streaming[obstest.Attributes(span)["gai.gen_ai.streaming"].AsBool()]++
+	}
+	if streaming[false] != 1 || streaming[true] != 1 {
+		t.Fatalf("Responses generation spans by streaming mode = %#v", streaming)
 	}
 }
 
@@ -480,11 +495,12 @@ func TestNativeMessagesMapToolErrorPayload(t *testing.T) {
 }
 
 func TestModelGenerateStreamMapsTextAndToolCalls(t *testing.T) {
+	recorder := obstest.Install(t)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hello \"}}]}\n\n"))
 		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"search\",\"arguments\":\"{\\\"q\\\":\"}}]}}]}\n\n"))
-		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"go\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_no_usage\",\"model\":\"resolved-no-usage\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"go\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n"))
 		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 	}))
 	defer ts.Close()
@@ -505,9 +521,50 @@ func TestModelGenerateStreamMapsTextAndToolCalls(t *testing.T) {
 	if call := tokens[1].ToolCall; tokens[1].Type != ai.TokenTypeToolCall || call == nil || call.ID != "call_1" || call.Name != "search" || string(call.Args) != `{"q":"go"}` {
 		t.Fatalf("unexpected tool token: %#v", tokens[1])
 	}
+	attrs := obstest.Attributes(obstest.RequireGenerationSpans(t, recorder, 1)[0])
+	if attrs["gen_ai.response.id"].AsString() != "chatcmpl_no_usage" || attrs["gen_ai.response.model"].AsString() != "resolved-no-usage" {
+		t.Fatalf("generation attrs = %#v", attrs)
+	}
+	if got := attrs["gen_ai.response.finish_reasons"].AsStringSlice(); len(got) != 1 || got[0] != "tool_calls" {
+		t.Fatalf("finish reasons = %v", got)
+	}
+	if _, ok := attrs["gen_ai.usage.input_tokens"]; ok {
+		t.Fatal("stream without usage emitted usage attributes")
+	}
+}
+
+func TestModelGenerateStreamUsesMetadataAfterUsageChunk(t *testing.T) {
+	recorder := obstest.Install(t)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_early\",\"model\":\"early-model\",\"choices\":[],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2}}\n\n"))
+		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_final\",\"model\":\"resolved-final\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer ts.Close()
+
+	p := New("test-key", nil)
+	p.baseURL = ts.URL
+	m, err := p.Model(GPT41Mini)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for token := range m.GenerateStream(t.Context(), ai.AIRequest{Prompt: "hello"}) {
+		if token.Type == ai.TokenTypeErr {
+			t.Fatalf("stream error: %v", token.Err)
+		}
+	}
+	attrs := obstest.Attributes(obstest.RequireGenerationSpans(t, recorder, 1)[0])
+	if attrs["gen_ai.response.id"].AsString() != "chatcmpl_final" || attrs["gen_ai.response.model"].AsString() != "resolved-final" || attrs["gen_ai.usage.input_tokens"].AsInt64() != 5 {
+		t.Fatalf("generation attrs = %#v", attrs)
+	}
+	if got := attrs["gen_ai.response.finish_reasons"].AsStringSlice(); len(got) != 1 || got[0] != "stop" {
+		t.Fatalf("finish reasons = %v", got)
+	}
 }
 
 func TestModelGenerateStreamPreservesUsageOnlyTerminalChunk(t *testing.T) {
+	recorder := obstest.Install(t)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl_1\",\"model\":\"gpt-4.1-mini\",\"choices\":[{\"delta\":{\"content\":\"hello\"},\"finish_reason\":\"stop\"}]}\n\n"))
@@ -532,6 +589,10 @@ func TestModelGenerateStreamPreservesUsageOnlyTerminalChunk(t *testing.T) {
 	completion := tokens[1].Completion
 	if completion == nil || completion.Usage.InputTokens != 11 || completion.Usage.OutputTokens != 7 || completion.Usage.ReasoningTokens != 3 || completion.Usage.CachedTokens != 2 || completion.FinishReason != "stop" || completion.RequestID != "chatcmpl_1" || completion.Provider != "openai" || completion.Model != GPT41Mini {
 		t.Fatalf("completion = %#v", completion)
+	}
+	attrs := obstest.Attributes(obstest.RequireGenerationSpans(t, recorder, 1)[0])
+	if !attrs["gai.gen_ai.streaming"].AsBool() || attrs["gen_ai.usage.output_tokens"].AsInt64() != 7 {
+		t.Fatalf("generation attrs = %#v", attrs)
 	}
 }
 

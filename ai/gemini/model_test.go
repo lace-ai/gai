@@ -11,6 +11,7 @@ import (
 
 	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
+	"github.com/lace-ai/gai/internal/obstest"
 	"google.golang.org/genai"
 )
 
@@ -31,6 +32,7 @@ func TestModelDescriptorRejectsUnknownReasoningEffortBeforeTransport(t *testing.
 }
 
 func TestModelGenerateStreamEmitsCompletionForIdentityMetadata(t *testing.T) {
+	recorder := obstest.Install(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("method = %s, want POST", r.Method)
@@ -69,6 +71,10 @@ func TestModelGenerateStreamEmitsCompletionForIdentityMetadata(t *testing.T) {
 	}
 	if raw.ResponseID != "resp_1" {
 		t.Fatalf("completion raw responseId = %q, want resp_1", raw.ResponseID)
+	}
+	attrs := obstest.Attributes(obstest.RequireGenerationSpans(t, recorder, 1)[0])
+	if attrs["gen_ai.provider.name"].AsString() != "gcp.gemini" || attrs["ai.provider"].AsString() != "gemini" || !attrs["gai.gen_ai.streaming"].AsBool() || attrs["gen_ai.response.id"].AsString() != "resp_1" {
+		t.Fatalf("generation attrs = %#v", attrs)
 	}
 }
 
@@ -147,6 +153,7 @@ func TestNativeContentsPreservesThoughtSignatureOnFunctionCall(t *testing.T) {
 }
 
 func TestGenerateEmitsDebugEventOnGenerationFailure(t *testing.T) {
+	recorder := obstest.Install(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, `{"error":{"message":"generation failed"}}`, http.StatusInternalServerError)
 	}))
@@ -167,12 +174,19 @@ func TestGenerateEmitsDebugEventOnGenerationFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("Generate error = nil, want API error")
 	}
+	found := false
 	for _, event := range events {
 		if event.Name == "gemini_generate_content_failed" && event.Err != nil {
-			return
+			found = true
 		}
 	}
-	t.Fatalf("gemini_generate_content_failed event not emitted: %#v", events)
+	if !found {
+		t.Fatalf("gemini_generate_content_failed event not emitted: %#v", events)
+	}
+	spans := obstest.RequireGenerationSpans(t, recorder, 1)
+	if spans[0].Status().Code.String() != "Error" {
+		t.Fatalf("generation status = %s", spans[0].Status().Code)
+	}
 }
 
 func TestMapFunctionCallEmptyName(t *testing.T) {
