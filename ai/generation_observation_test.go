@@ -101,6 +101,18 @@ func TestGenerationObservationDistinguishesMissingAndReportedZeroUsage(t *testin
 	assertIntAttribute(t, reportedAttrs, "gen_ai.usage.output_tokens", 0)
 }
 
+func TestGenerationObservationFinalToolCallCountTakesPrecedence(t *testing.T) {
+	recorder, restore := installGenerationSpanRecorder(t)
+	defer restore()
+
+	_, observation := StartGenerationObservation(context.Background(), AIRequest{}, GenerationConfig{Provider: "test", Model: "m", Streaming: true})
+	observation.ObserveToken(Token{Type: TokenTypeToolCall, ToolCall: &ToolCall{Name: "search"}})
+	observation.Finish(GenerationResult{ToolCallCount: 1})
+
+	attrs := spanAttributes(generationSpan(t, recorder.Ended()).Attributes())
+	assertIntAttribute(t, attrs, "gai.gen_ai.response.tool_call_count", 1)
+}
+
 func TestGenerationObservationCreatesOneParentedSpanPerAttempt(t *testing.T) {
 	recorder, restore := installGenerationSpanRecorder(t)
 	defer restore()

@@ -164,7 +164,12 @@ func mergeGenerationResults(stream, final GenerationResult) GenerationResult {
 	if final.Usage == nil {
 		final.Usage = stream.Usage
 	}
-	final.ToolCallCount += stream.ToolCallCount
+	// A caller-provided final count is authoritative. Streaming observations are
+	// the fallback so providers may summarize their final result without
+	// double-counting tool-call tokens already seen by ObserveToken.
+	if final.ToolCallCount == 0 {
+		final.ToolCallCount = stream.ToolCallCount
+	}
 	return final
 }
 
