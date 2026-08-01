@@ -73,6 +73,21 @@ func TestGenerationObservationRecordsSemanticContract(t *testing.T) {
 	}
 }
 
+func TestGenerationObservationTimingBaselineDoesNotPredateSpan(t *testing.T) {
+	recorder, restore := installGenerationSpanRecorder(t)
+	defer restore()
+
+	_, observation := StartGenerationObservation(context.Background(), AIRequest{}, GenerationConfig{Provider: "test", Model: "m"})
+	started := recorder.Started()
+	if len(started) != 1 {
+		t.Fatalf("started spans = %d, want 1", len(started))
+	}
+	if observation.startedAt.Before(started[0].StartTime()) {
+		t.Fatalf("timing baseline %s predates span start %s", observation.startedAt, started[0].StartTime())
+	}
+	observation.Finish(GenerationResult{})
+}
+
 func TestGenerationObservationDistinguishesMissingAndReportedZeroUsage(t *testing.T) {
 	recorder, restore := installGenerationSpanRecorder(t)
 	defer restore()

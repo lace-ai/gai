@@ -50,7 +50,6 @@ type GenerationObservation struct {
 // it immediately before invoking the provider, after local validation and
 // request mapping have succeeded.
 func StartGenerationObservation(ctx context.Context, req AIRequest, config GenerationConfig) (context.Context, *GenerationObservation) {
-	startedAt := time.Now()
 	attrs := []attribute.KeyValue{
 		attribute.String("langfuse.observation.type", "generation"),
 		attribute.String("langfuse.observation.model.name", config.Model),
@@ -69,6 +68,7 @@ func StartGenerationObservation(ctx context.Context, req AIRequest, config Gener
 		attrs = append(attrs, attribute.String("langfuse.observation.model.parameters", parameters))
 	}
 	ctx, span := gai.StartClientOperationSpan(ctx, generationTracerName, "chat "+config.Model, "gen_ai.operation.name", "chat", attrs...)
+	startedAt := time.Now()
 	return ctx, &GenerationObservation{span: span, startedAt: startedAt}
 }
 
