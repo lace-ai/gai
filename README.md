@@ -405,6 +405,20 @@ span. Applications assembling their own Langfuse tracer provider can wrap a
 span processor with `langfuse.NewTraceContextSpanProcessor` to use the same
 mapping.
 
+Every OpenAI, Mistral, Gemini, and Anthropic model invocation also creates one
+`chat {requested_model}` client span. Streaming spans remain open until the
+stream ends or is canceled. They use the same `gen_ai.*` contract for requested
+and resolved models, finish reasons, request IDs, reported token usage, and
+provider HTTP status. Langfuse generation type, model parameters, usage
+details, and completion-start time are included where known. Prompts,
+completions, reasoning, tool arguments, and raw provider payloads are not
+attached to these spans.
+
+The older `ai.provider`, `ai.model`, `ai.max_tokens`, `ai.input_tokens`,
+`ai.output_tokens`, `ai.reasoning_tokens`, and `ai.tool_call_count` attributes
+remain during the semantic-attribute migration. New integrations should use
+the `gen_ai.*` attributes.
+
 ## Package map
 
 ```text

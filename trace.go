@@ -15,13 +15,24 @@ import (
 var errSpanContextNotFound = errors.New("span context not found in context")
 
 func StartOperationSpan(ctx context.Context, tracerName string, spanPrefix string, operationAttr string, operation string, attrs ...attribute.KeyValue) (context.Context, trace.Span) {
+	return startOperationSpan(ctx, tracerName, spanPrefix+"."+operation, operationAttr, operation, nil, attrs...)
+}
+
+// StartClientOperationSpan starts an operation span representing a call to a
+// remote system while preserving GAI trace-context attributes.
+func StartClientOperationSpan(ctx context.Context, tracerName string, spanName string, operationAttr string, operation string, attrs ...attribute.KeyValue) (context.Context, trace.Span) {
+	return startOperationSpan(ctx, tracerName, spanName, operationAttr, operation, []trace.SpanStartOption{trace.WithSpanKind(trace.SpanKindClient)}, attrs...)
+}
+
+func startOperationSpan(ctx context.Context, tracerName string, spanName string, operationAttr string, operation string, options []trace.SpanStartOption, attrs ...attribute.KeyValue) (context.Context, trace.Span) {
 	baseAttrs := []attribute.KeyValue{
 		attribute.String(operationAttr, operation),
 	}
 	baseAttrs = append(baseAttrs, attrs...)
 	baseAttrs = append(baseAttrs, traceContextAttributes(ctx)...)
 
-	return otel.Tracer(tracerName).Start(ctx, spanPrefix+"."+operation, trace.WithAttributes(baseAttrs...))
+	options = append(options, trace.WithAttributes(baseAttrs...))
+	return otel.Tracer(tracerName).Start(ctx, spanName, options...)
 }
 
 func EndSpan(span trace.Span, err error) {

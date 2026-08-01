@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/lace-ai/gai/ai"
+	"github.com/lace-ai/gai/internal/obstest"
 )
 
 func testModel(t *testing.T, handler http.HandlerFunc) *Model {
@@ -54,6 +55,7 @@ func array(t *testing.T, value any) []any {
 }
 
 func TestGenerateSendsAnthropicRequestAndMapsBlocksAndUsage(t *testing.T) {
+	recorder := obstest.Install(t)
 	m := testModel(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/messages" || r.Method != http.MethodPost {
 			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
@@ -80,6 +82,10 @@ func TestGenerateSendsAnthropicRequestAndMapsBlocksAndUsage(t *testing.T) {
 	}
 	if got.ToolCalls[0].ID != "toolu_1" || got.ToolCalls[0].Type != "function" || got.ToolCalls[0].Name != "search" || string(got.ToolCalls[0].Args) != `{"q":"x"}` {
 		t.Fatalf("unexpected tool call: %#v", got.ToolCalls[0])
+	}
+	attrs := obstest.Attributes(obstest.RequireGenerationSpans(t, recorder, 1)[0])
+	if attrs["gen_ai.provider.name"].AsString() != "anthropic" || attrs["gen_ai.usage.input_tokens"].AsInt64() != 15 || attrs["gai.gen_ai.response.tool_call_count"].AsInt64() != 1 {
+		t.Fatalf("generation attrs = %#v", attrs)
 	}
 }
 
@@ -286,6 +292,7 @@ func TestGenerateStreamMapsInterleavedBlocksAndToolJSON(t *testing.T) {
 }
 
 func TestGenerateStreamEmitsTerminalCompletionSnapshot(t *testing.T) {
+	recorder := obstest.Install(t)
 	m := testModel(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"claude-test\"}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"input_tokens\":10,\"cache_creation_input_tokens\":2,\"cache_read_input_tokens\":3,\"output_tokens\":4,\"output_tokens_details\":{\"thinking_tokens\":1}}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"))
@@ -303,9 +310,14 @@ func TestGenerateStreamEmitsTerminalCompletionSnapshot(t *testing.T) {
 	if completion.Usage.InputTokens != 15 || completion.Usage.OutputTokens != 4 || completion.Usage.ReasoningTokens != 1 || completion.Usage.CachedTokens != 3 || completion.Usage.CacheCreationTokens != 2 || !json.Valid(completion.Raw) {
 		t.Fatalf("completion usage = %#v, raw = %q", completion.Usage, completion.Raw)
 	}
+	attrs := obstest.Attributes(obstest.RequireGenerationSpans(t, recorder, 1)[0])
+	if !attrs["gai.gen_ai.streaming"].AsBool() || attrs["gen_ai.usage.input_tokens"].AsInt64() != 15 {
+		t.Fatalf("generation attrs = %#v", attrs)
+	}
 }
 
 func TestGenerateStreamErrorAndCancellation(t *testing.T) {
+	recorder := obstest.Install(t)
 	m := testModel(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte("event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"busy\"}}\n\n"))
@@ -343,6 +355,12 @@ func TestGenerateStreamErrorAndCancellation(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("stream did not close after cancellation")
+	}
+	spans := obstest.RequireGenerationSpansEventually(t, recorder, 2, time.Second)
+	for _, span := range spans {
+		if span.Status().Code.String() != "Error" {
+			t.Fatalf("generation status = %s, want Error", span.Status().Code)
+		}
 	}
 }
 

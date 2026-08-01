@@ -47,12 +47,15 @@ func (u *Usage) Add(other Usage) {
 
 // Completion is terminal metadata emitted by a streaming provider request.
 type Completion struct {
-	Usage        Usage
-	FinishReason string
-	RequestID    string
-	Provider     string
-	Model        string
-	Raw          json.RawMessage
+	Usage Usage
+	// UsageReported distinguishes an absent provider usage block from a
+	// provider-reported usage block whose counters are all zero.
+	UsageReported bool
+	FinishReason  string
+	RequestID     string
+	Provider      string
+	Model         string
+	Raw           json.RawMessage
 }
 
 // TokenType identifies the semantic kind of a streamed token.
@@ -142,9 +145,11 @@ func (r *AIResponse) AppendToken(t Token) {
 		}
 	case TokenTypeCompletion:
 		if t.Completion != nil {
-			r.InputTokens = t.Completion.Usage.InputTokens
-			r.OutputTokens = t.Completion.Usage.OutputTokens
-			r.ReasoningTokens = t.Completion.Usage.ReasoningTokens
+			if t.Completion.UsageReported {
+				r.InputTokens = t.Completion.Usage.InputTokens
+				r.OutputTokens = t.Completion.Usage.OutputTokens
+				r.ReasoningTokens = t.Completion.Usage.ReasoningTokens
+			}
 			r.FinishReason = t.Completion.FinishReason
 			r.Raw = append(r.Raw[:0], t.Completion.Raw...)
 		}

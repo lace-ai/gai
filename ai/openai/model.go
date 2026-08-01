@@ -3,6 +3,7 @@ package openai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -40,7 +41,7 @@ func (m *Model) Descriptor() ai.ModelDescriptor {
 	return openAIDescriptor(m.name)
 }
 
-func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (*ai.AIResponse, error) {
+func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (result *ai.AIResponse, err error) {
 	if err := ai.ValidateModelRequest(m, req); err != nil {
 		return nil, err
 	}
@@ -54,20 +55,37 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (*ai.AIResponse,
 	if err != nil {
 		return nil, err
 	}
+	ctx, observation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "openai", Model: m.name})
+	generationResult := ai.GenerationResult{}
+	defer func() {
+		generationResult.Err = err
+		generationResult.HTTPStatus = openAIHTTPStatus(err)
+		observation.Finish(generationResult)
+	}()
 	response, err := m.client(false).Chat.Completions.New(ctx, params)
 	if err != nil {
 		return nil, err
 	}
-	result := &ai.AIResponse{
+	result = &ai.AIResponse{
 		Raw:             json.RawMessage(response.RawJSON()),
 		InputTokens:     int(response.Usage.PromptTokens),
 		OutputTokens:    int(response.Usage.CompletionTokens),
 		ReasoningTokens: int(response.Usage.CompletionTokensDetails.ReasoningTokens),
 	}
+	generationResult.ResponseModel = response.Model
+	generationResult.RequestID = response.ID
+	if response.JSON.Usage.Valid() {
+		usage := ai.Usage{
+			InputTokens: result.InputTokens, OutputTokens: result.OutputTokens,
+			ReasoningTokens: result.ReasoningTokens, CachedTokens: int(response.Usage.PromptTokensDetails.CachedTokens),
+		}
+		generationResult.Usage = &usage
+	}
 	if len(response.Choices) == 0 {
 		return result, nil
 	}
 	message := response.Choices[0].Message
+	generationResult.FinishReason = response.Choices[0].FinishReason
 	result.Text = message.Content
 	for _, call := range message.ToolCalls {
 		args := json.RawMessage(strings.TrimSpace(call.Function.Arguments))
@@ -81,6 +99,7 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (*ai.AIResponse,
 			ID: call.ID, Type: "function", Name: call.Function.Name, Args: args,
 		})
 	}
+	generationResult.ToolCallCount = len(result.ToolCalls)
 	return result, nil
 }
 
@@ -105,6 +124,25 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			ai.SendToken(ctx, out, ai.Token{Type: ai.TokenTypeErr, Err: err, Text: err.Error()})
 			return
 		}
+		ctx, observation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "openai", Model: m.name, Streaming: true})
+		var streamErr error
+		generationResult := ai.GenerationResult{}
+		defer func() {
+			generationResult.Err = streamErr
+			generationResult.HTTPStatus = openAIHTTPStatus(streamErr)
+			observation.Finish(generationResult)
+		}()
+		emit := func(token ai.Token) bool {
+			if token.Type == ai.TokenTypeErr && token.Err != nil {
+				streamErr = token.Err
+			}
+			observation.ObserveToken(token)
+			if ai.SendToken(ctx, out, token) {
+				return true
+			}
+			streamErr = ctx.Err()
+			return false
+		}
 		stream := m.client(true).Chat.Completions.NewStreaming(ctx, params)
 		defer func() {
 			if err := stream.Close(); err != nil && m.provider.debug != nil {
@@ -117,6 +155,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 		}()
 		calls := map[int64]*streamToolCall{}
 		completion := ai.Completion{Provider: "openai"}
+		defer func() { mergeOpenAICompletionResult(&generationResult, completion) }()
 		for stream.Next() {
 			chunk := stream.Current()
 			if chunk.ID != "" {
@@ -127,6 +166,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			}
 			if len(chunk.Choices) == 0 {
 				if chunk.JSON.Usage.Valid() {
+					completion.UsageReported = true
 					completion.Usage = ai.Usage{
 						InputTokens:     int(chunk.Usage.PromptTokens),
 						OutputTokens:    int(chunk.Usage.CompletionTokens),
@@ -136,7 +176,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 					completion.Raw = append(completion.Raw[:0], []byte(chunk.RawJSON())...)
 					snapshot := completion
 					snapshot.Raw = append(json.RawMessage(nil), completion.Raw...)
-					if !ai.SendToken(ctx, out, ai.Token{Type: ai.TokenTypeCompletion, Completion: &snapshot}) {
+					if !emit(ai.Token{Type: ai.TokenTypeCompletion, Completion: &snapshot}) {
 						return
 					}
 				}
@@ -147,7 +187,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 				completion.FinishReason = string(choice.FinishReason)
 			}
 			if text := choice.Delta.Content; text != "" {
-				if !ai.SendToken(ctx, out, ai.Token{Type: ai.TokenTypeText, Data: []byte(text), Text: text}) {
+				if !emit(ai.Token{Type: ai.TokenTypeText, Data: []byte(text), Text: text}) {
 					return
 				}
 			}
@@ -163,18 +203,43 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 				call.arguments.WriteString(delta.Function.Arguments)
 			}
 			if choice.FinishReason == "tool_calls" {
-				if !sendStreamToolCalls(ctx, out, calls) {
+				if !sendStreamToolCalls(emit, calls) {
 					return
 				}
 			}
 		}
 		if err := stream.Err(); err != nil {
-			ai.SendToken(ctx, out, ai.Token{Type: ai.TokenTypeErr, Err: err, Text: err.Error()})
+			streamErr = err
+			emit(ai.Token{Type: ai.TokenTypeErr, Err: err, Text: err.Error()})
 			return
 		}
-		sendStreamToolCalls(ctx, out, calls)
+		sendStreamToolCalls(emit, calls)
 	}()
 	return out
+}
+
+func mergeOpenAICompletionResult(result *ai.GenerationResult, completion ai.Completion) {
+	if completion.Model != "" {
+		result.ResponseModel = completion.Model
+	}
+	if completion.RequestID != "" {
+		result.RequestID = completion.RequestID
+	}
+	if completion.FinishReason != "" {
+		result.FinishReason = completion.FinishReason
+	}
+	if completion.UsageReported {
+		usage := completion.Usage
+		result.Usage = &usage
+	}
+}
+
+func openAIHTTPStatus(err error) int {
+	var apiErr *sdk.Error
+	if errors.As(err, &apiErr) {
+		return apiErr.StatusCode
+	}
+	return 0
 }
 
 type streamToolCall struct {
@@ -183,7 +248,7 @@ type streamToolCall struct {
 	emitted             bool
 }
 
-func sendStreamToolCalls(ctx context.Context, out chan<- ai.Token, calls map[int64]*streamToolCall) bool {
+func sendStreamToolCalls(emit func(ai.Token) bool, calls map[int64]*streamToolCall) bool {
 	indices := make([]int64, 0, len(calls))
 	for index := range calls {
 		indices = append(indices, index)
@@ -202,10 +267,11 @@ func sendStreamToolCalls(ctx context.Context, out chan<- ai.Token, calls map[int
 		args := call.arguments.String()
 		if !json.Valid([]byte(args)) {
 			err := fmt.Errorf("invalid JSON arguments for tool %q", name)
-			return ai.SendToken(ctx, out, ai.Token{Type: ai.TokenTypeErr, Err: err, Text: err.Error()})
+			emit(ai.Token{Type: ai.TokenTypeErr, Err: err, Text: err.Error()})
+			return false
 		}
 		toolCall := &ai.ToolCall{ID: call.id.String(), Type: firstNonEmpty(call.typ, "function"), Name: name, Args: json.RawMessage(args)}
-		if !ai.SendToken(ctx, out, ai.Token{Type: ai.TokenTypeToolCall, Data: []byte(args), ToolCall: toolCall}) {
+		if !emit(ai.Token{Type: ai.TokenTypeToolCall, Data: []byte(args), ToolCall: toolCall}) {
 			return false
 		}
 	}
