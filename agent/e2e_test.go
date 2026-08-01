@@ -243,9 +243,15 @@ func TestAgentWorkflowStreamsRetriedAttemptTokens(t *testing.T) {
 		scripts: [][]ai.Token{
 			{
 				{Type: ai.TokenTypeText, Text: "partial"},
+				{Type: ai.TokenTypeCompletion, Completion: &ai.Completion{Usage: ai.Usage{InputTokens: 3, OutputTokens: 2}}},
+				{Type: ai.TokenTypeCompletion, Completion: &ai.Completion{Usage: ai.Usage{InputTokens: 4, OutputTokens: 3}}},
 				{Err: errors.New("retriable stream error")},
 			},
-			{{Type: ai.TokenTypeText, Text: "final"}},
+			{
+				{Type: ai.TokenTypeText, Text: "final"},
+				{Type: ai.TokenTypeCompletion, Completion: &ai.Completion{Usage: ai.Usage{InputTokens: 5, OutputTokens: 4}}},
+				{Type: ai.TokenTypeCompletion, Completion: &ai.Completion{Usage: ai.Usage{InputTokens: 6, OutputTokens: 5}}},
+			},
 		},
 	}
 	assistant := agent.New(agent.Definition{
@@ -278,6 +284,12 @@ func TestAgentWorkflowStreamsRetriedAttemptTokens(t *testing.T) {
 	}
 	if got := result.Text; got != "partialfinal" {
 		t.Fatalf("unexpected workflow result text: %q", got)
+	}
+	if result.Usage != (ai.Usage{InputTokens: 6, OutputTokens: 5}) {
+		t.Fatalf("accepted usage = %#v", result.Usage)
+	}
+	if result.BilledUsage != (ai.Usage{InputTokens: 10, OutputTokens: 8}) {
+		t.Fatalf("billed usage = %#v", result.BilledUsage)
 	}
 }
 
