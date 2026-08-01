@@ -6,6 +6,10 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/lace-ai/gai"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 func TestNewTracerProviderRejectsMissingCredentials(t *testing.T) {
@@ -51,5 +55,64 @@ func TestNewTracerProviderSendsLangfuseIngestionVersion(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for exported span")
+	}
+}
+
+func TestTraceContextSpanProcessorMapsEveryLangfuseField(t *testing.T) {
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(NewTraceContextSpanProcessor(recorder)))
+	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
+
+	ctx := gai.WithTraceContext(t.Context(), gai.TraceContext{
+		Name:        "chat",
+		UserID:      "user-1",
+		SessionID:   "session-1",
+		Tags:        []string{"mobile", "dogfood"},
+		Release:     "2026.08",
+		Environment: "staging",
+		Metadata: map[string]string{
+			"feature":     "lace-chat",
+			"tier":        "pro",
+			"invalid_key": "hidden",
+			"invalid-key": "hidden",
+			"invalid.key": "hidden",
+		},
+	})
+	_, span := provider.Tracer("langfuse-test").Start(ctx, "child")
+	span.End()
+
+	ended := recorder.Ended()
+	if len(ended) != 1 {
+		t.Fatalf("ended spans = %d, want 1", len(ended))
+	}
+	attributes := map[string]any{}
+	for _, attr := range ended[0].Attributes() {
+		attributes[string(attr.Key)] = attr.Value.AsInterface()
+	}
+	want := map[string]string{
+		"langfuse.trace.name":             "chat",
+		"langfuse.user.id":                "user-1",
+		"langfuse.session.id":             "session-1",
+		"langfuse.release":                "2026.08",
+		"langfuse.environment":            "staging",
+		"langfuse.trace.metadata.feature": "lace-chat",
+		"langfuse.trace.metadata.tier":    "pro",
+	}
+	for key, value := range want {
+		if attributes[key] != value {
+			t.Errorf("attribute %q = %#v, want %#v", key, attributes[key], value)
+		}
+	}
+	if _, exists := attributes["langfuse.trace.release"]; exists {
+		t.Fatalf("unexpected legacy release attribute in %#v", attributes)
+	}
+	for _, key := range []string{"langfuse.trace.metadata.invalid_key", "langfuse.trace.metadata.invalid-key", "langfuse.trace.metadata.invalid.key"} {
+		if _, exists := attributes[key]; exists {
+			t.Fatalf("invalid metadata key %q was mapped: %#v", key, attributes)
+		}
+	}
+	tags, ok := attributes["langfuse.trace.tags"].([]string)
+	if !ok || len(tags) != 2 || tags[0] != "mobile" || tags[1] != "dogfood" {
+		t.Fatalf("langfuse tags = %#v", attributes["langfuse.trace.tags"])
 	}
 }

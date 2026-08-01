@@ -57,7 +57,8 @@ func NewTracerProvider(ctx context.Context, config Config) (*sdktrace.TracerProv
 	if err != nil {
 		return nil, fmt.Errorf("create langfuse trace exporter: %w", err)
 	}
-	options := []sdktrace.TracerProviderOption{sdktrace.WithBatcher(exporter)}
+	batcher := sdktrace.NewBatchSpanProcessor(exporter)
+	options := []sdktrace.TracerProviderOption{sdktrace.WithSpanProcessor(NewTraceContextSpanProcessor(batcher))}
 	if serviceName := strings.TrimSpace(config.ServiceName); serviceName != "" {
 		options = append(options, sdktrace.WithResource(resource.NewWithAttributes("", attribute.String("service.name", serviceName))))
 	}

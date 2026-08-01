@@ -13,6 +13,9 @@ import (
 // RunInput contains the application input for one agent run.
 type RunInput struct {
 	ID string
+	// TraceContext explicitly selects approved trace-wide dimensions. Nil
+	// inherits a trace context already present in ctx; non-nil replaces it.
+	TraceContext *gai.TraceContext
 	// Prompt separates genuine user content from structured machine context.
 	Prompt gaictx.PromptInput
 	// MaxTokens overrides Definition.Limits.MaxTokens when it is positive.
@@ -84,6 +87,7 @@ func New(def Definition) *Agent {
 // Prompt construction happens before NewRun returns. Model execution and
 // middleware processing begin when Workflow.Run is called.
 func (a *Agent) NewRun(ctx context.Context, input RunInput) (*Workflow, error) {
+	ctx, input = resolveRunTraceContext(ctx, input)
 	ctx, obs := newRunCreationObserver(ctx, a, input)
 	if a != nil {
 		if err := validateMiddleware(a.def.Middleware); err != nil {
@@ -102,6 +106,16 @@ func (a *Agent) NewRun(ctx context.Context, input RunInput) (*Workflow, error) {
 	obs.Created(ctx)
 	obs.Finish(nil)
 	return workflow, nil
+}
+
+func resolveRunTraceContext(ctx context.Context, input RunInput) (context.Context, RunInput) {
+	if input.TraceContext != nil {
+		ctx = gai.WithTraceContext(ctx, *input.TraceContext)
+	}
+	if traceContext, ok := gai.TraceContextFromContext(ctx); ok {
+		input.TraceContext = &traceContext
+	}
+	return ctx, input
 }
 
 func (a *Agent) name() string {

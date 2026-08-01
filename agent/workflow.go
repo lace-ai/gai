@@ -175,6 +175,7 @@ func (w *Workflow) RunEvents(ctx context.Context) <-chan loop.Event {
 	if err := w.begin(); err != nil {
 		return failedEventStream(err)
 	}
+	ctx = applyWorkflowTraceContext(ctx, w)
 	ctx, runObs := newAgentRunObserver(ctx, w)
 	ctx, obs := newWorkflowObserver(ctx, w)
 	obs.Started(ctx)
@@ -188,6 +189,7 @@ func (w *Workflow) Run(ctx context.Context) (<-chan ai.Token, <-chan loop.Iterat
 	if err := w.begin(); err != nil {
 		return failedStream(err)
 	}
+	ctx = applyWorkflowTraceContext(ctx, w)
 	ctx, runObs := newAgentRunObserver(ctx, w)
 	ctx, obs := newWorkflowObserver(ctx, w)
 	events := w.Loop.Run(ctx)
@@ -200,6 +202,13 @@ func (w *Workflow) Run(ctx context.Context) (<-chan ai.Token, <-chan loop.Iterat
 	}
 	stream = w.captureFinal(ctx, stream, obs, runObs)
 	return stream.Tokens, stream.Statuses, stream.Errors
+}
+
+func applyWorkflowTraceContext(ctx context.Context, workflow *Workflow) context.Context {
+	if workflow == nil || workflow.result.Input.TraceContext == nil {
+		return ctx
+	}
+	return gai.WithTraceContext(ctx, *workflow.result.Input.TraceContext)
 }
 
 func loopEventsToStream(ctx context.Context, events <-chan loop.Event) Stream {
@@ -564,6 +573,17 @@ func tokenReasoning(tokens []ai.Token) string {
 
 func cloneRunInput(input RunInput) RunInput {
 	cloned := input
+	if input.TraceContext != nil {
+		traceContext := *input.TraceContext
+		traceContext.Tags = append([]string(nil), input.TraceContext.Tags...)
+		if input.TraceContext.Metadata != nil {
+			traceContext.Metadata = make(map[string]string, len(input.TraceContext.Metadata))
+			for key, value := range input.TraceContext.Metadata {
+				traceContext.Metadata[key] = value
+			}
+		}
+		cloned.TraceContext = &traceContext
+	}
 	cloned.Prompt = input.Prompt.Clone()
 	cloned.ResponseFormat = cloneResponseFormat(input.ResponseFormat)
 	if input.Meta != nil {
