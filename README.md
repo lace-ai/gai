@@ -395,6 +395,10 @@ oversized entries are omitted instead of truncated. Trace context uses an intern
 context value, not OpenTelemetry baggage, so GAI does not add user or session
 identifiers to outbound request headers.
 
+Environment values are trimmed and normalized to lowercase. They may contain
+letters, digits, hyphens, and underscores; values beginning with `langfuse` are
+reserved by Langfuse and omitted.
+
 The core library records provider-neutral `gai.trace.*` attributes. The
 Langfuse tracer provider maps them to Langfuse v4 trace attributes on every
 span. Applications assembling their own Langfuse tracer provider can wrap a

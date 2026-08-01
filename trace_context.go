@@ -24,11 +24,14 @@ const (
 // propagated through Go contexts and copied onto GAI spans, but is never added
 // to OpenTelemetry baggage or outbound request headers by GAI.
 type TraceContext struct {
-	Name        string
-	UserID      string
-	SessionID   string
-	Tags        []string
-	Release     string
+	Name      string
+	UserID    string
+	SessionID string
+	Tags      []string
+	Release   string
+	// Environment is normalized to lowercase and must otherwise contain only
+	// letters, digits, hyphens, or underscores. Values starting with "langfuse"
+	// are reserved and omitted.
 	Environment string
 	Metadata    map[string]string
 }
@@ -124,7 +127,11 @@ func normalizeTraceScalar(value string, maxBytes int) string {
 
 func normalizeTraceEnvironment(value string) string {
 	value = normalizeTraceScalar(value, maxTraceEnvironment)
-	if value == "" || strings.HasPrefix(value, "langfuse") {
+	if value == "" {
+		return ""
+	}
+	value = strings.ToLower(value)
+	if strings.HasPrefix(value, "langfuse") {
 		return ""
 	}
 	for _, r := range value {

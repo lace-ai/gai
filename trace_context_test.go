@@ -90,7 +90,7 @@ func TestTraceContextOmitsInvalidAndOversizedScalars(t *testing.T) {
 		UserID:      "user\nsecret",
 		SessionID:   string([]byte{0xff}),
 		Release:     "ok",
-		Environment: "Production",
+		Environment: "us-east.prod",
 	})
 	got, ok := TraceContextFromContext(ctx)
 	if !ok {
@@ -98,6 +98,27 @@ func TestTraceContextOmitsInvalidAndOversizedScalars(t *testing.T) {
 	}
 	if got.Name != "" || got.UserID != "" || got.SessionID != "" || got.Environment != "" || got.Release != "ok" {
 		t.Fatalf("invalid values were retained: %#v", got)
+	}
+}
+
+func TestTraceContextNormalizesEnvironmentToLowercase(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{input: "Production", want: "production"},
+		{input: " Staging ", want: "staging"},
+		{input: "prod-US", want: "prod-us"},
+		{input: "Langfuse-Cloud", want: ""},
+	}
+	for _, test := range tests {
+		t.Run(test.input, func(t *testing.T) {
+			ctx := WithTraceContext(t.Context(), TraceContext{Environment: test.input})
+			got, _ := TraceContextFromContext(ctx)
+			if got.Environment != test.want {
+				t.Fatalf("environment = %q, want %q", got.Environment, test.want)
+			}
+		})
 	}
 }
 
