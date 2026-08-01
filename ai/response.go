@@ -145,9 +145,11 @@ func (r *AIResponse) AppendToken(t Token) {
 		}
 	case TokenTypeCompletion:
 		if t.Completion != nil {
-			r.InputTokens = t.Completion.Usage.InputTokens
-			r.OutputTokens = t.Completion.Usage.OutputTokens
-			r.ReasoningTokens = t.Completion.Usage.ReasoningTokens
+			if t.Completion.UsageReported {
+				r.InputTokens = t.Completion.Usage.InputTokens
+				r.OutputTokens = t.Completion.Usage.OutputTokens
+				r.ReasoningTokens = t.Completion.Usage.ReasoningTokens
+			}
 			r.FinishReason = t.Completion.FinishReason
 			r.Raw = append(r.Raw[:0], t.Completion.Raw...)
 		}

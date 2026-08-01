@@ -13,6 +13,8 @@ import (
 )
 
 // Install installs an in-memory span recorder for the duration of the test.
+// It replaces the global OpenTelemetry tracer provider and must not be used
+// with t.Parallel() or concurrently with another Install call.
 func Install(t testing.TB) *tracetest.SpanRecorder {
 	t.Helper()
 	previous := otel.GetTracerProvider()

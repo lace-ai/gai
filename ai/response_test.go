@@ -54,14 +54,42 @@ func TestAIResponseAppendTokenCompletionUsesLatestUsage(t *testing.T) {
 	var response ai.AIResponse
 
 	response.AppendToken(ai.Token{Type: ai.TokenTypeCompletion, Completion: &ai.Completion{
-		Usage: ai.Usage{InputTokens: 10, OutputTokens: 4, ReasoningTokens: 2},
+		UsageReported: true,
+		Usage:         ai.Usage{InputTokens: 10, OutputTokens: 4, ReasoningTokens: 2},
 	}})
 	response.AppendToken(ai.Token{Type: ai.TokenTypeCompletion, Completion: &ai.Completion{
-		Usage: ai.Usage{InputTokens: 12, OutputTokens: 6, ReasoningTokens: 3},
+		UsageReported: true,
+		Usage:         ai.Usage{InputTokens: 12, OutputTokens: 6, ReasoningTokens: 3},
 	}})
 
 	if response.InputTokens != 12 || response.OutputTokens != 6 || response.ReasoningTokens != 3 {
 		t.Fatalf("completion usage should use the latest provider values, got %#v", response)
+	}
+}
+
+func TestAIResponseAppendTokenCompletionPreservesUnreportedUsage(t *testing.T) {
+	response := ai.AIResponse{InputTokens: 10, OutputTokens: 4, ReasoningTokens: 2}
+
+	response.AppendToken(ai.Token{Type: ai.TokenTypeCompletion, Completion: &ai.Completion{
+		FinishReason: "stop",
+		Raw:          json.RawMessage(`{"id":"response-1"}`),
+	}})
+
+	if response.InputTokens != 10 || response.OutputTokens != 4 || response.ReasoningTokens != 2 {
+		t.Fatalf("unreported completion usage should preserve accumulated values, got %#v", response)
+	}
+	if response.FinishReason != "stop" || string(response.Raw) != `{"id":"response-1"}` {
+		t.Fatalf("completion metadata should still be updated, got %#v", response)
+	}
+}
+
+func TestAIResponseAppendTokenCompletionAcceptsReportedZeroUsage(t *testing.T) {
+	response := ai.AIResponse{InputTokens: 10, OutputTokens: 4, ReasoningTokens: 2}
+
+	response.AppendToken(ai.Token{Type: ai.TokenTypeCompletion, Completion: &ai.Completion{UsageReported: true}})
+
+	if response.InputTokens != 0 || response.OutputTokens != 0 || response.ReasoningTokens != 0 {
+		t.Fatalf("reported zero usage should replace accumulated values, got %#v", response)
 	}
 }
 

@@ -3,6 +3,7 @@ package gemini
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -58,6 +59,18 @@ func geminiAdapterDescriptor(model string) ai.ModelDescriptor {
 		Tokenizer: ai.TokenizerDescriptor{Available: ai.FeatureSupportSupported, Fidelity: ai.TokenizerFidelityExact}}
 }
 
+func geminiHTTPStatus(err error) int {
+	var apiErr *genai.APIError
+	if errors.As(err, &apiErr) && apiErr != nil {
+		return apiErr.Code
+	}
+	var apiErrValue genai.APIError
+	if errors.As(err, &apiErrValue) {
+		return apiErrValue.Code
+	}
+	return 0
+}
+
 func (m *Model) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -96,6 +109,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 					generationResult.Usage = &usage
 				}
 			}
+			generationResult.HTTPStatus = geminiHTTPStatus(streamErr)
 			generationResult.Err = streamErr
 			observation.Finish(generationResult)
 		}()
@@ -340,6 +354,7 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 	ctx, observation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "gemini", Model: m.name})
 	generationResult := ai.GenerationResult{}
 	defer func() {
+		generationResult.HTTPStatus = geminiHTTPStatus(err)
 		generationResult.Err = err
 		observation.Finish(generationResult)
 	}()

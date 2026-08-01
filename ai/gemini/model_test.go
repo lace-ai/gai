@@ -192,7 +192,7 @@ func TestNativeContentsPreservesThoughtSignatureOnFunctionCall(t *testing.T) {
 func TestGenerateEmitsDebugEventOnGenerationFailure(t *testing.T) {
 	recorder := obstest.Install(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, `{"error":{"message":"generation failed"}}`, http.StatusInternalServerError)
+		http.Error(w, `{"error":{"code":429,"message":"generation failed"}}`, http.StatusTooManyRequests)
 	}))
 	defer server.Close()
 
@@ -223,6 +223,41 @@ func TestGenerateEmitsDebugEventOnGenerationFailure(t *testing.T) {
 	spans := obstest.RequireGenerationSpans(t, recorder, 1)
 	if spans[0].Status().Code.String() != "Error" {
 		t.Fatalf("generation status = %s", spans[0].Status().Code)
+	}
+	attrs := obstest.Attributes(spans[0])
+	if attrs["http.response.status_code"].AsInt64() != http.StatusTooManyRequests {
+		t.Fatalf("HTTP status attribute = %d, want %d", attrs["http.response.status_code"].AsInt64(), http.StatusTooManyRequests)
+	}
+}
+
+func TestModelGenerateStreamRecordsAPIErrorStatus(t *testing.T) {
+	recorder := obstest.Install(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, `{"error":{"code":429,"message":"rate limited"}}`, http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+
+	provider := New("test-api-key", nil)
+	provider.httpClient = server.Client()
+	provider.baseURL = server.URL
+	model, err := provider.Model("gemini-test")
+	if err != nil {
+		t.Fatalf("Model error: %v", err)
+	}
+
+	var streamErr error
+	for token := range model.GenerateStream(t.Context(), ai.AIRequest{Prompt: "hello"}) {
+		if token.Type == ai.TokenTypeErr {
+			streamErr = token.Err
+		}
+	}
+	if streamErr == nil {
+		t.Fatal("stream error = nil, want API error")
+	}
+	span := obstest.RequireGenerationSpans(t, recorder, 1)[0]
+	attrs := obstest.Attributes(span)
+	if attrs["http.response.status_code"].AsInt64() != http.StatusTooManyRequests {
+		t.Fatalf("HTTP status attribute = %d, want %d", attrs["http.response.status_code"].AsInt64(), http.StatusTooManyRequests)
 	}
 }
 
