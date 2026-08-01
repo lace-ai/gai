@@ -37,6 +37,7 @@ func TestModelGenerateStreamEmitsCompletionForIdentityMetadata(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte("data: {\"responseId\":\"resp_1\",\"modelVersion\":\"gemini-test\"}\n\n"))
+		_, _ = w.Write([]byte("data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"hello\"}]}}]}\n\n"))
 	}))
 	defer server.Close()
 
@@ -59,6 +60,15 @@ func TestModelGenerateStreamEmitsCompletionForIdentityMetadata(t *testing.T) {
 	}
 	if completion == nil || completion.Provider != "gemini" || completion.RequestID != "resp_1" || completion.Model != "gemini-test" || !json.Valid(completion.Raw) {
 		t.Fatalf("completion = %#v", completion)
+	}
+	var raw struct {
+		ResponseID string `json:"responseId"`
+	}
+	if err := json.Unmarshal(completion.Raw, &raw); err != nil {
+		t.Fatalf("unmarshal completion raw: %v", err)
+	}
+	if raw.ResponseID != "resp_1" {
+		t.Fatalf("completion raw responseId = %q, want resp_1", raw.ResponseID)
 	}
 }
 

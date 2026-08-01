@@ -158,13 +158,16 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			if resp == nil {
 				continue
 			}
+			responseHasCompletion := false
 			if resp.ResponseID != "" {
 				completion.RequestID = resp.ResponseID
 				hasCompletion = true
+				responseHasCompletion = true
 			}
 			if resp.ModelVersion != "" {
 				completion.Model = resp.ModelVersion
 				hasCompletion = true
+				responseHasCompletion = true
 			}
 			if resp.UsageMetadata != nil {
 				completion.Usage = ai.Usage{
@@ -175,12 +178,14 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 					ToolUseTokens:   int(resp.UsageMetadata.ToolUsePromptTokenCount),
 				}
 				hasCompletion = true
+				responseHasCompletion = true
 			}
 			if len(resp.Candidates) > 0 && resp.Candidates[0] != nil && resp.Candidates[0].FinishReason != "" {
 				completion.FinishReason = string(resp.Candidates[0].FinishReason)
 				hasCompletion = true
+				responseHasCompletion = true
 			}
-			if hasCompletion {
+			if responseHasCompletion {
 				raw, marshalErr := json.Marshal(resp)
 				if marshalErr != nil {
 					streamErr = fmt.Errorf("encode Gemini completion metadata: %w", marshalErr)
