@@ -53,7 +53,7 @@ func mistralAdapterDescriptor(model string) ai.ModelDescriptor {
 	return ai.ModelDescriptor{Model: model, NativeMessages: ai.FeatureSupportSupported, NativeTools: ai.FeatureSupportSupported,
 		ToolChoiceModes: []ai.ToolChoiceMode{ai.ToolChoiceAuto, ai.ToolChoiceNone, ai.ToolChoiceRequired},
 		Multimodal:      ai.FeatureSupportUnsupported,
-		Usage:           ai.FeatureSupportSupported, FinishReason: ai.FeatureSupportSupported, StreamingUsage: ai.FeatureSupportUnsupported,
+		Usage:           ai.FeatureSupportSupported, FinishReason: ai.FeatureSupportSupported, StreamingUsage: ai.FeatureSupportSupported,
 		ToolCalling: ai.FeatureSupportSupported,
 		JSONOutput:  ai.FeatureSupportSupported, JSONSchemaOutput: ai.FeatureSupportSupported,
 		Reasoning: ai.FeatureSupportUnsupported, ReasoningEffort: ai.FeatureSupportUnsupported,
@@ -72,6 +72,11 @@ type chatCompletionRequest struct {
 	Tools          []chatToolRequest    `json:"tools,omitempty"`
 	ToolChoice     any                  `json:"tool_choice,omitempty"`
 	ResponseFormat *chatResponseFormat  `json:"response_format,omitempty"`
+	StreamOptions  *chatStreamOptions   `json:"stream_options,omitempty"`
+}
+
+type chatStreamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 type chatMessageRequest struct {
@@ -141,6 +146,9 @@ func buildChatCompletionRequest(req ai.AIRequest, modelName string, stream bool)
 			},
 		},
 		Stream: stream,
+	}
+	if stream {
+		payload.StreamOptions = &chatStreamOptions{IncludeUsage: true}
 	}
 	if len(req.Messages) > 0 {
 		payload.Messages = mapNativeMessages(req.Messages)
@@ -365,6 +373,8 @@ func (t *Tokenizer) CountTokens(ctx context.Context, text string) (tokens int, e
 }
 
 type chatCompletionStreamResponse struct {
+	ID      string `json:"id"`
+	Model   string `json:"model"`
 	Choices []struct {
 		Delta struct {
 			Content   json.RawMessage `json:"content"`
@@ -372,6 +382,10 @@ type chatCompletionStreamResponse struct {
 		} `json:"delta"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
+	Usage *struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+	} `json:"usage"`
 }
 
 type mistralStreamFunctionCall struct {
@@ -657,6 +671,20 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 		reader := bufio.NewReader(res.Body)
 		var eventData strings.Builder
 		var toolCallAccumulator mistralToolCallAccumulator
+		completion := ai.Completion{Provider: "mistral"}
+		hasCompletion := false
+		emitCompletion := func() error {
+			if !hasCompletion {
+				return nil
+			}
+			snapshot := completion
+			snapshot.Raw = append(json.RawMessage(nil), completion.Raw...)
+			if !emit(ai.Token{Type: ai.TokenTypeCompletion, Completion: &snapshot}) {
+				return ctx.Err()
+			}
+			hasCompletion = false
+			return nil
+		}
 
 		flushEvent := func() error {
 			event := strings.TrimSpace(eventData.String())
@@ -674,6 +702,9 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 						return ctx.Err()
 					}
 				}
+				if err := emitCompletion(); err != nil {
+					return err
+				}
 				return io.EOF
 			}
 
@@ -681,8 +712,30 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			if err := json.Unmarshal([]byte(event), &chunk); err != nil {
 				return fmt.Errorf("decode stream chunk: %w", err)
 			}
+			if chunk.ID != "" {
+				completion.RequestID = chunk.ID
+				hasCompletion = true
+			}
+			if chunk.Model != "" {
+				completion.Model = chunk.Model
+				hasCompletion = true
+			}
+			if chunk.Usage != nil {
+				completion.Usage = ai.Usage{InputTokens: chunk.Usage.PromptTokens, OutputTokens: chunk.Usage.CompletionTokens}
+				hasCompletion = true
+			}
 			if len(chunk.Choices) == 0 {
+				if hasCompletion {
+					completion.Raw = append(completion.Raw[:0], []byte(event)...)
+				}
 				return nil
+			}
+			if chunk.Choices[0].FinishReason != "" {
+				completion.FinishReason = chunk.Choices[0].FinishReason
+				hasCompletion = true
+			}
+			if hasCompletion {
+				completion.Raw = append(completion.Raw[:0], []byte(event)...)
 			}
 
 			text, err := extractStreamText(chunk.Choices[0].Delta.Content)

@@ -285,6 +285,26 @@ func TestGenerateStreamMapsInterleavedBlocksAndToolJSON(t *testing.T) {
 	}
 }
 
+func TestGenerateStreamEmitsTerminalCompletionSnapshot(t *testing.T) {
+	m := testModel(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"claude-test\"}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"input_tokens\":10,\"cache_creation_input_tokens\":2,\"cache_read_input_tokens\":3,\"output_tokens\":4,\"output_tokens_details\":{\"thinking_tokens\":1}}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"))
+	})
+
+	var completion *ai.Completion
+	for token := range m.GenerateStream(t.Context(), ai.AIRequest{Prompt: "hello"}) {
+		if token.Type == ai.TokenTypeCompletion {
+			completion = token.Completion
+		}
+	}
+	if completion == nil || completion.Provider != "anthropic" || completion.RequestID != "msg_1" || completion.Model != "claude-test" || completion.FinishReason != "end_turn" {
+		t.Fatalf("completion = %#v", completion)
+	}
+	if completion.Usage.InputTokens != 15 || completion.Usage.OutputTokens != 4 || completion.Usage.ReasoningTokens != 1 || completion.Usage.CachedTokens != 3 || completion.Usage.CacheCreationTokens != 2 || !json.Valid(completion.Raw) {
+		t.Fatalf("completion usage = %#v, raw = %q", completion.Usage, completion.Raw)
+	}
+}
+
 func TestGenerateStreamErrorAndCancellation(t *testing.T) {
 	m := testModel(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

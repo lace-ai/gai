@@ -30,6 +30,48 @@ func TestModelDescriptorRejectsUnknownReasoningEffortBeforeTransport(t *testing.
 	}
 }
 
+func TestModelGenerateStreamEmitsCompletionForIdentityMetadata(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want POST", r.Method)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"responseId\":\"resp_1\",\"modelVersion\":\"gemini-test\"}\n\n"))
+		_, _ = w.Write([]byte("data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"hello\"}]}}]}\n\n"))
+	}))
+	defer server.Close()
+
+	provider := New("test-api-key", nil)
+	provider.baseURL = server.URL
+	provider.httpClient = server.Client()
+	model, err := provider.Model("gemini-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var completion *ai.Completion
+	for token := range model.GenerateStream(t.Context(), ai.AIRequest{Prompt: "hello"}) {
+		if token.Err != nil {
+			t.Fatalf("unexpected stream error: %v", token.Err)
+		}
+		if token.Type == ai.TokenTypeCompletion {
+			completion = token.Completion
+		}
+	}
+	if completion == nil || completion.Provider != "gemini" || completion.RequestID != "resp_1" || completion.Model != "gemini-test" || !json.Valid(completion.Raw) {
+		t.Fatalf("completion = %#v", completion)
+	}
+	var raw struct {
+		ResponseID string `json:"responseId"`
+	}
+	if err := json.Unmarshal(completion.Raw, &raw); err != nil {
+		t.Fatalf("unmarshal completion raw: %v", err)
+	}
+	if raw.ResponseID != "resp_1" {
+		t.Fatalf("completion raw responseId = %q, want resp_1", raw.ResponseID)
+	}
+}
+
 func TestMapFunctionCall(t *testing.T) {
 	got, err := mapFunctionCall(&genai.FunctionCall{
 		ID:   "call_1",
