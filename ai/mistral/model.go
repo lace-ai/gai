@@ -344,7 +344,7 @@ func (t *Tokenizer) CountTokens(ctx context.Context, text string) (tokens int, e
 			fields := map[string]any{
 				"status_code": res.StatusCode,
 			}
-			if t.debug.IncludeSensitiveData() {
+			if _, hasPolicy := gai.ContentCapturePolicyFromContext(ctx); !hasPolicy && t.debug.IncludeSensitiveData() {
 				fields["response"] = string(resBody)
 			}
 			t.debug.Emit(ctx, gai.DebugEvent{
@@ -353,7 +353,7 @@ func (t *Tokenizer) CountTokens(ctx context.Context, text string) (tokens int, e
 				Fields: fields,
 			})
 		}
-		return 0, fmt.Errorf("mistral token count failed (status %d): %s", res.StatusCode, string(resBody))
+		return 0, newHTTPError("token count", res.StatusCode, resBody)
 	}
 	span.SetAttributes(attribute.Int("http.response.status_code", res.StatusCode))
 
@@ -495,14 +495,13 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 
 	go func() {
 		var streamErr error
-		if m.debug != nil && m.debug.IncludeSensitiveData() {
+		if gai.DebugContentEnabled(ctx, m.debug, gai.ContentKindPrompt) {
+			fields := map[string]any{"max_tokens": req.MaxTokens}
+			gai.AddDebugContent(ctx, m.debug, fields, "prompt", gai.ContentKindPrompt, req.Prompt)
 			m.debug.Emit(ctx, gai.DebugEvent{
 				Name:   "mistral_stream_request",
 				Source: "ai:mistral.Model.GenerateStream",
-				Fields: map[string]any{
-					"prompt":     req.Prompt,
-					"max_tokens": req.MaxTokens,
-				},
+				Fields: fields,
 			})
 		}
 		textTokenCount := 0
@@ -544,7 +543,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 				fields := map[string]any{
 					"error": err.Error(),
 				}
-				if m.debug.IncludeSensitiveData() {
+				if _, hasPolicy := gai.ContentCapturePolicyFromContext(ctx); !hasPolicy && m.debug.IncludeSensitiveData() {
 					fields["payload"] = payload
 				}
 				m.debug.Emit(ctx, gai.DebugEvent{
@@ -636,7 +635,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 				fields := map[string]any{
 					"status_code": res.StatusCode,
 				}
-				if m.debug.IncludeSensitiveData() {
+				if _, hasPolicy := gai.ContentCapturePolicyFromContext(ctx); !hasPolicy && m.debug.IncludeSensitiveData() {
 					fields["response"] = string(resBody)
 				}
 				m.debug.Emit(ctx, gai.DebugEvent{
@@ -645,7 +644,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 					Fields: fields,
 				})
 			}
-			streamErr = fmt.Errorf("mistral chat stream failed (status %d): %s", res.StatusCode, string(resBody))
+			streamErr = newHTTPError("chat stream", res.StatusCode, resBody)
 			if !emit(ai.Token{
 				Err:  streamErr,
 				Type: ai.TokenTypeErr,
@@ -706,9 +705,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 						fields := map[string]any{
 							"error": mapErr.Error(),
 						}
-						if m.debug.IncludeSensitiveData() {
-							fields["tool_calls"] = string(chunk.Choices[0].Delta.ToolCalls)
-						}
+						gai.AddDebugContent(ctx, m.debug, fields, "tool_calls", gai.ContentKindToolInput, chunk.Choices[0].Delta.ToolCalls)
 						m.debug.Emit(ctx, gai.DebugEvent{
 							Name:   "mistral_stream_tool_calls_mapping_failed",
 							Source: "ai:mistral.Model.GenerateStream",
@@ -721,9 +718,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 				}
 				if m.debug != nil {
 					fields := map[string]any{}
-					if m.debug.IncludeSensitiveData() {
-						fields["tool_calls"] = calls
-					}
+					gai.AddDebugContent(ctx, m.debug, fields, "tool_calls", gai.ContentKindToolInput, calls)
 					m.debug.Emit(ctx, gai.DebugEvent{
 						Name:   "mistral_stream_tool_calls_mapped",
 						Source: "ai:mistral.Model.GenerateStream",
@@ -880,14 +875,13 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 	if err := ai.ValidateModelRequest(m, req); err != nil {
 		return nil, err
 	}
-	if m.debug != nil && m.debug.IncludeSensitiveData() {
+	if gai.DebugContentEnabled(ctx, m.debug, gai.ContentKindPrompt) {
+		fields := map[string]any{"max_tokens": req.MaxTokens}
+		gai.AddDebugContent(ctx, m.debug, fields, "prompt", gai.ContentKindPrompt, req.Prompt)
 		m.debug.Emit(ctx, gai.DebugEvent{
 			Name:   "mistral_generate_request",
 			Source: "ai:mistral.Model.Generate",
-			Fields: map[string]any{
-				"prompt":     req.Prompt,
-				"max_tokens": req.MaxTokens,
-			},
+			Fields: fields,
 		})
 	}
 
@@ -927,7 +921,7 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 
 	if res.StatusCode >= http.StatusMultipleChoices {
 		span.SetAttributes(attribute.Int("http.response.status_code", res.StatusCode))
-		return nil, fmt.Errorf("mistral chat completion failed (status %d): %s", res.StatusCode, string(resBody))
+		return nil, newHTTPError("chat completion", res.StatusCode, resBody)
 	}
 	span.SetAttributes(attribute.Int("http.response.status_code", res.StatusCode))
 
@@ -946,16 +940,19 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 		attribute.Int("ai.input_tokens", parsed.Usage.PromptTokens),
 		attribute.Int("ai.output_tokens", parsed.Usage.CompletionTokens),
 	)
-	if m.debug != nil && m.debug.IncludeSensitiveData() {
+	if m.debug != nil {
+		fields := map[string]any{
+			"input_tokens":  parsed.Usage.PromptTokens,
+			"output_tokens": parsed.Usage.CompletionTokens,
+		}
+		if _, hasPolicy := gai.ContentCapturePolicyFromContext(ctx); !hasPolicy && m.debug.IncludeSensitiveData() {
+			fields["response"] = parsed
+		}
+		gai.AddDebugContent(ctx, m.debug, fields, "response_text", gai.ContentKindCompletion, parsed.Choices[0].Message.Content)
 		m.debug.Emit(ctx, gai.DebugEvent{
 			Name:   "mistral_generate_response",
 			Source: "ai:mistral.Model.Generate",
-			Fields: map[string]any{
-				"response":      parsed,
-				"response_text": parsed.Choices[0].Message.Content,
-				"input_tokens":  parsed.Usage.PromptTokens,
-				"output_tokens": parsed.Usage.CompletionTokens,
-			},
+			Fields: fields,
 		})
 	}
 

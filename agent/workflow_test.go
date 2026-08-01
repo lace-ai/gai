@@ -32,8 +32,12 @@ type consumedWorkflow struct {
 }
 
 func consumeWorkflow(t *testing.T, workflow *agent.Workflow) consumedWorkflow {
+	return consumeWorkflowContext(t, workflow, context.Background())
+}
+
+func consumeWorkflowContext(t *testing.T, workflow *agent.Workflow, ctx context.Context) consumedWorkflow {
 	t.Helper()
-	tokens, statuses, errs := workflow.Run(context.Background())
+	tokens, statuses, errs := workflow.Run(ctx)
 	var consumed consumedWorkflow
 	var wg sync.WaitGroup
 	wg.Add(3)

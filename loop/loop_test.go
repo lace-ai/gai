@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
 	gaictx "github.com/lace-ai/gai/context"
 	"github.com/lace-ai/gai/loop"
@@ -45,6 +46,15 @@ type countingPromptBuilder struct {
 
 type failingToolResponseProcessor struct {
 	err error
+}
+
+type sentinelErrorTool struct{}
+
+func (sentinelErrorTool) Name() string              { return "failure" }
+func (sentinelErrorTool) Description() string       { return "Returns a test error." }
+func (sentinelErrorTool) Params() ai.ToolParameters { return loop.NewEchoTool().Params() }
+func (sentinelErrorTool) Function(context.Context, *ai.ToolCall) *loop.ToolResponse {
+	return loop.NewToolError(errors.New("tool-output-sentinel-secret"))
 }
 
 func (p failingToolResponseProcessor) Process(req ai.ToolCall, res *loop.ToolResponse) error {
@@ -1244,7 +1254,13 @@ func TestLoopCreatesToolSpans(t *testing.T) {
 		{{Type: ai.TokenTypeText, Text: "done"}},
 	}}
 	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
-	if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
+	ctx := gai.WithContentCapturePolicy(context.Background(), gai.ContentCapturePolicy{
+		ToolInput: gai.CaptureEnabled, ToolOutput: gai.CaptureEnabled,
+		Redact: func(_ context.Context, _ gai.ContentKind, value []byte) ([]byte, error) {
+			return []byte(strings.ReplaceAll(string(value), "payload", "[redacted]")), nil
+		},
+	})
+	if err := loopError(collectLoopEvents(t, l, ctx)); err != nil {
 		t.Fatalf("unexpected loop error: %v", err)
 	}
 
@@ -1259,9 +1275,86 @@ func TestLoopCreatesToolSpans(t *testing.T) {
 		if attributes["tool.name"] != "echo" || attributes["tool.call_id"] != "call-1" || attributes["tool.status"] != "success" {
 			t.Fatalf("unexpected tool span attributes: %#v", attributes)
 		}
+		if attributes["tool.input"] != `{"text":"[redacted]"}` || attributes["tool.output"] != "[redacted]" {
+			t.Fatalf("tool span did not use the content policy: %#v", attributes)
+		}
+		if attributes["tool.input.redaction_applied"] != true || attributes["tool.output.redaction_applied"] != true {
+			t.Fatalf("tool span is missing redaction metadata: %#v", attributes)
+		}
 		return
 	}
 	t.Fatalf("expected loop.tool span, got %#v", recorder.Ended())
+}
+
+func TestLoopToolErrorDoesNotLeakIntoSpan(t *testing.T) {
+	tests := []struct {
+		name         string
+		ctx          func() context.Context
+		wantRedacted bool
+	}{
+		{name: "default policy", ctx: context.Background},
+		{
+			name: "enabled with redaction",
+			ctx: func() context.Context {
+				return gai.WithContentCapturePolicy(context.Background(), gai.ContentCapturePolicy{
+					ToolOutput: gai.CaptureEnabled,
+					Redact: func(_ context.Context, _ gai.ContentKind, value []byte) ([]byte, error) {
+						return []byte(strings.ReplaceAll(string(value), "sentinel-secret", "[redacted]")), nil
+					},
+				})
+			},
+			wantRedacted: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			previousProvider := otel.GetTracerProvider()
+			recorder := tracetest.NewSpanRecorder()
+			provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+			otel.SetTracerProvider(provider)
+			defer func() {
+				_ = provider.Shutdown(context.Background())
+				otel.SetTracerProvider(previousProvider)
+			}()
+
+			model := &scriptedStreamModel{sequences: [][]ai.Token{
+				{{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-error", Type: "function", Name: "failure", Args: json.RawMessage(`{"text":"payload"}`)}}},
+				{{Type: ai.TokenTypeText, Text: "done"}},
+			}}
+			l := loop.New(model, []loop.Tool{sentinelErrorTool{}}, testPromptBuilder(), nil)
+			if err := loopError(collectLoopEvents(t, l, tt.ctx())); err != nil {
+				t.Fatalf("unexpected loop error: %v", err)
+			}
+
+			var observed strings.Builder
+			for _, span := range recorder.Ended() {
+				if span.Name() != "loop.tool" {
+					continue
+				}
+				observed.WriteString(span.Status().Description)
+				for _, attr := range span.Attributes() {
+					observed.WriteString(string(attr.Key))
+					observed.WriteString(attr.Value.String())
+				}
+				for _, event := range span.Events() {
+					observed.WriteString(event.Name)
+					for _, attr := range event.Attributes {
+						observed.WriteString(string(attr.Key))
+						observed.WriteString(attr.Value.String())
+					}
+				}
+			}
+			if strings.Contains(observed.String(), "sentinel-secret") {
+				t.Fatalf("raw tool error reached OTel: %s", observed.String())
+			}
+			if !tt.wantRedacted && strings.Contains(observed.String(), "tool-output-") {
+				t.Fatalf("disabled tool output reached OTel: %s", observed.String())
+			}
+			if got := strings.Contains(observed.String(), "[redacted]"); got != tt.wantRedacted {
+				t.Fatalf("redacted tool output presence = %v, want %v: %s", got, tt.wantRedacted, observed.String())
+			}
+		})
+	}
 }
 
 func TestIterationDeltaMessagesSkipsThoughtOnlyResponses(t *testing.T) {

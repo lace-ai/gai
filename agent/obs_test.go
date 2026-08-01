@@ -3,6 +3,7 @@ package agent_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 
@@ -141,6 +142,42 @@ func TestAgentRunSpanIsParentOfWorkflow(t *testing.T) {
 	}
 	if _, leaked := attributes["agent.meta.session_id"]; leaked {
 		t.Fatalf("run span leaked metadata value: %#v", attributes)
+	}
+}
+
+func TestAgentContentCapturePolicySeparatesPromptCompletionAndReasoning(t *testing.T) {
+	sink := &agentDebugSink{}
+	a := agent.New(agent.Definition{
+		Name:      "primary",
+		DebugSink: sink,
+		Model: &mocks.MockModel{Responses: []mocks.MockModelResponse{{Res: ai.AIResponse{
+			Text: "answer-secret", Reasoning: "reason-secret",
+		}}}},
+		Prompt: func(_ context.Context, _ agent.RunInput) (gaictx.PromptBuilder, error) {
+			return &testPromptBuilder{}, nil
+		},
+	})
+	ctx := gai.WithContentCapturePolicy(t.Context(), gai.ContentCapturePolicy{
+		Prompt: gai.CaptureEnabled, Completion: gai.CaptureEnabled, Reasoning: gai.CaptureEnabled,
+		Redact: func(_ context.Context, _ gai.ContentKind, value []byte) ([]byte, error) {
+			return []byte(strings.ReplaceAll(string(value), "secret", "[redacted]")), nil
+		},
+	})
+	workflow, err := a.NewRun(ctx, agent.RunInput{Prompt: gaictx.PromptInput{User: gaictx.NewTextContent("question-secret")}})
+	if err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	if consumed := consumeWorkflowContext(t, workflow, ctx); len(consumed.errs) != 0 {
+		t.Fatalf("workflow errors: %v", consumed.errs)
+	}
+
+	created, ok := sink.event("agent_run_created")
+	if !ok || created.Fields["user_input"] != "question-[redacted]" {
+		t.Fatalf("captured prompt = %#v", created.Fields)
+	}
+	finished, ok := sink.event("agent_workflow_finished")
+	if !ok || finished.Fields["output_text"] != "answer-[redacted]" || finished.Fields["reasoning"] != "reason-[redacted]" {
+		t.Fatalf("captured output = %#v", finished.Fields)
 	}
 }
 

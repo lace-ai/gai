@@ -312,6 +312,155 @@ func TestRendererDebugStructureOmitsContentForNonSensitiveSink(t *testing.T) {
 	}
 }
 
+func TestRenderersClassifyStructuredContentIndependently(t *testing.T) {
+	tests := []struct {
+		name     string
+		renderer func(*rendererDebugSink) gaictx.Renderer
+	}{
+		{name: "xml", renderer: func(sink *rendererDebugSink) gaictx.Renderer { return &gaictx.XMLRenderer{DebugSink: sink} }},
+		{name: "simple", renderer: func(sink *rendererDebugSink) gaictx.Renderer { return &gaictx.SimpleRenderer{DebugSink: sink} }},
+	}
+	mixedHistory := renderTestPart{name: "history", node: gaictx.RenderNode{
+		Type: "history",
+		Children: []gaictx.RenderNode{
+			{Type: string(gaictx.RoleUser), Value: "memory-only-value"},
+			{
+				Type:   gaictx.ContentTypeToolResult,
+				Fields: []gaictx.RenderField{{Key: "name", Value: "search-tool"}},
+				Children: []gaictx.RenderNode{
+					{Type: "result", Value: "tool-output-value"},
+				},
+			},
+		},
+	}}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			policyTests := []struct {
+				name            string
+				policy          gai.ContentCapturePolicy
+				wantValues      []string
+				unwantedValues  []string
+				wantFinalPrompt bool
+			}{
+				{
+					name: "memory only", policy: gai.ContentCapturePolicy{Memory: gai.CaptureEnabled},
+					wantValues: []string{"memory-only-value"}, unwantedValues: []string{"search-tool", "tool-output-value"},
+				},
+				{
+					name: "tool output only", policy: gai.ContentCapturePolicy{ToolOutput: gai.CaptureEnabled},
+					wantValues: []string{"search-tool", "tool-output-value"}, unwantedValues: []string{"memory-only-value"},
+				},
+				{
+					name: "prompt only", policy: gai.ContentCapturePolicy{Prompt: gai.CaptureEnabled},
+					unwantedValues: []string{"memory-only-value", "search-tool", "tool-output-value"}, wantFinalPrompt: true,
+				},
+			}
+			for _, policyTest := range policyTests {
+				t.Run(policyTest.name, func(t *testing.T) {
+					sink := &rendererDebugSink{}
+					ctx := gai.WithContentCapturePolicy(t.Context(), policyTest.policy)
+					if _, err := tt.renderer(sink).Render(ctx, []gaictx.Part{mixedHistory}); err != nil {
+						t.Fatalf("Render failed: %v", err)
+					}
+					partEvent := sink.events[1]
+					if _, ok := partEvent.Fields["rendered"]; ok {
+						t.Fatalf("mixed part exposed aggregate rendered content: %#v", partEvent.Fields)
+					}
+					values := rendererCapturedValues(partEvent.Fields["node"])
+					for _, want := range policyTest.wantValues {
+						if !values[want] {
+							t.Errorf("missing captured value %q in %#v", want, values)
+						}
+					}
+					for _, unwanted := range policyTest.unwantedValues {
+						if values[unwanted] {
+							t.Errorf("unexpected captured value %q in %#v", unwanted, values)
+						}
+					}
+					finalEvent := sink.events[len(sink.events)-1]
+					_, hasPrompt := finalEvent.Fields["prompt"]
+					if hasPrompt != policyTest.wantFinalPrompt {
+						t.Fatalf("final prompt presence = %v, want %v: %#v", hasPrompt, policyTest.wantFinalPrompt, finalEvent.Fields)
+					}
+				})
+			}
+
+			sink := &rendererDebugSink{}
+			ctx := gai.WithContentCapturePolicy(t.Context(), gai.ContentCapturePolicy{ToolOutput: gai.CaptureEnabled})
+			toolMessage := renderTestPart{name: "message", node: gaictx.RenderNode{Type: string(gaictx.RoleTool), Value: "direct-tool-output"}}
+			if _, err := tt.renderer(sink).Render(ctx, []gaictx.Part{toolMessage}); err != nil {
+				t.Fatalf("Render direct tool message: %v", err)
+			}
+			partEvent := sink.events[1]
+			if partEvent.Fields["rendered_content_kind"] != string(gai.ContentKindToolOutput) {
+				t.Fatalf("direct tool aggregate kind = %#v", partEvent.Fields)
+			}
+			if values := rendererCapturedValues(partEvent.Fields["node"]); !values["direct-tool-output"] {
+				t.Fatalf("direct tool output was not captured: %#v", values)
+			}
+
+			for _, nodeType := range []string{"arguments", "result", "error", "summary"} {
+				t.Run("generic "+nodeType+" remains prompt", func(t *testing.T) {
+					part := renderTestPart{name: nodeType, node: gaictx.RenderNode{Type: nodeType, Value: "generic-prompt-value"}}
+
+					promptSink := &rendererDebugSink{}
+					promptCtx := gai.WithContentCapturePolicy(t.Context(), gai.ContentCapturePolicy{Prompt: gai.CaptureEnabled})
+					if _, err := tt.renderer(promptSink).Render(promptCtx, []gaictx.Part{part}); err != nil {
+						t.Fatalf("Render generic prompt node: %v", err)
+					}
+					promptPartEvent := promptSink.events[1]
+					if promptPartEvent.Fields["rendered_content_kind"] != string(gai.ContentKindPrompt) {
+						t.Fatalf("generic node aggregate kind = %#v", promptPartEvent.Fields)
+					}
+					if values := rendererCapturedValues(promptPartEvent.Fields["node"]); !values["generic-prompt-value"] {
+						t.Fatalf("generic prompt node was not captured: %#v", values)
+					}
+
+					toolSink := &rendererDebugSink{}
+					toolCtx := gai.WithContentCapturePolicy(t.Context(), gai.ContentCapturePolicy{ToolOutput: gai.CaptureEnabled})
+					if _, err := tt.renderer(toolSink).Render(toolCtx, []gaictx.Part{part}); err != nil {
+						t.Fatalf("Render generic node with tool policy: %v", err)
+					}
+					toolPartEvent := toolSink.events[1]
+					if _, ok := toolPartEvent.Fields["rendered"]; ok {
+						t.Fatalf("generic prompt aggregate captured as tool output: %#v", toolPartEvent.Fields)
+					}
+					if values := rendererCapturedValues(toolPartEvent.Fields["node"]); values["generic-prompt-value"] {
+						t.Fatalf("generic prompt node captured as tool output: %#v", values)
+					}
+				})
+			}
+		})
+	}
+}
+
+func rendererCapturedValues(value any) map[string]bool {
+	values := map[string]bool{}
+	var visit func(any)
+	visit = func(value any) {
+		switch value := value.(type) {
+		case map[string]any:
+			if content, ok := value["value"].(string); ok {
+				values[content] = true
+			}
+			for _, nested := range value {
+				visit(nested)
+			}
+		case []map[string]any:
+			for _, nested := range value {
+				visit(nested)
+			}
+		case []any:
+			for _, nested := range value {
+				visit(nested)
+			}
+		}
+	}
+	visit(value)
+	return values
+}
+
 func TestRenderersNotifyRenderResultCallback(t *testing.T) {
 	t.Parallel()
 

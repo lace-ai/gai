@@ -78,14 +78,13 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			attribute.Int("ai.prompt_length", len(prompt)),
 		)
 		var streamErr error
-		if m.debug != nil && m.debug.IncludeSensitiveData() {
+		if gai.DebugContentEnabled(ctx, m.debug, gai.ContentKindPrompt) {
+			fields := map[string]any{"max_tokens": req.MaxTokens}
+			gai.AddDebugContent(ctx, m.debug, fields, "prompt", gai.ContentKindPrompt, req.Prompt)
 			m.debug.Emit(ctx, gai.DebugEvent{
 				Name:   "gemini_stream_request",
 				Source: "ai:gemini.Model.GenerateStream",
-				Fields: map[string]any{
-					"prompt":     req.Prompt,
-					"max_tokens": req.MaxTokens,
-				},
+				Fields: fields,
 			})
 		}
 		textTokenCount := 0
@@ -184,7 +183,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 							fields := map[string]any{
 								"error": err.Error(),
 							}
-							if m.debug.IncludeSensitiveData() {
+							if _, hasPolicy := gai.ContentCapturePolicyFromContext(ctx); !hasPolicy && m.debug.IncludeSensitiveData() {
 								fields["part"] = string(rawPart)
 							}
 							m.debug.Emit(ctx, gai.DebugEvent{
@@ -205,9 +204,9 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 							fields := map[string]any{
 								"error": err.Error(),
 							}
-							if m.debug.IncludeSensitiveData() {
+							if gai.DebugContentEnabled(ctx, m.debug, gai.ContentKindToolInput) {
 								fields["function_call_name"] = part.FunctionCall.Name
-								fields["function_call_args"] = fmt.Sprintf("%v", part.FunctionCall.Args)
+								gai.AddDebugContent(ctx, m.debug, fields, "function_call_args", gai.ContentKindToolInput, part.FunctionCall.Args)
 							}
 							m.debug.Emit(ctx, gai.DebugEvent{
 								Name:   "gemini_stream_function_call_mapping_failed",
@@ -222,9 +221,9 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 					toolCall.ThoughtSignature = append([]byte(nil), part.ThoughtSignature...)
 					if m.debug != nil {
 						fields := map[string]any{}
-						if m.debug.IncludeSensitiveData() {
+						if gai.DebugContentEnabled(ctx, m.debug, gai.ContentKindToolInput) {
 							fields["tool_call_id"] = toolCall.ID
-							fields["tool_call_args"] = string(toolCall.Args)
+							gai.AddDebugContent(ctx, m.debug, fields, "tool_call_args", gai.ContentKindToolInput, toolCall.Args)
 						}
 						m.debug.Emit(ctx, gai.DebugEvent{
 							Name:   "gemini_stream_function_call_mapped",
@@ -260,14 +259,13 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 	if err := ai.ValidateModelRequest(m, req); err != nil {
 		return nil, err
 	}
-	if m.debug != nil && m.debug.IncludeSensitiveData() {
+	if gai.DebugContentEnabled(ctx, m.debug, gai.ContentKindPrompt) {
+		fields := map[string]any{"max_tokens": req.MaxTokens}
+		gai.AddDebugContent(ctx, m.debug, fields, "prompt", gai.ContentKindPrompt, req.Prompt)
 		m.debug.Emit(ctx, gai.DebugEvent{
 			Name:   "gemini_generate_request",
 			Source: "ai:gemini.Model.Generate",
-			Fields: map[string]any{
-				"prompt":     req.Prompt,
-				"max_tokens": req.MaxTokens,
-			},
+			Fields: fields,
 		})
 	}
 
@@ -331,24 +329,22 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 		attribute.Int("ai.reasoning_tokens", reasoningTokens),
 	)
 
+	text, reasoning, toolCalls, err := mapGenerateContentResponse(result)
+	if err != nil {
+		return nil, err
+	}
 	if m.debug != nil {
 		fields := map[string]any{
 			"input_tokens":  inputTokens,
 			"output_tokens": outputTokens,
 		}
-		if m.debug.IncludeSensitiveData() {
-			fields["response_text"] = result.Text()
-		}
+		gai.AddDebugContent(ctx, m.debug, fields, "response_text", gai.ContentKindCompletion, text)
+		gai.AddDebugContent(ctx, m.debug, fields, "reasoning", gai.ContentKindReasoning, reasoning)
 		m.debug.Emit(ctx, gai.DebugEvent{
 			Name:   "gemini_generate_content_success",
 			Source: "ai:gemini.Model.Generate",
 			Fields: fields,
 		})
-	}
-
-	text, reasoning, toolCalls, err := mapGenerateContentResponse(result)
-	if err != nil {
-		return nil, err
 	}
 	raw, _ := json.Marshal(result)
 	return &ai.AIResponse{

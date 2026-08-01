@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
 )
 
@@ -75,6 +76,52 @@ func TestModelGenerate(t *testing.T) {
 	}
 	if res.InputTokens != 11 || res.OutputTokens != 7 {
 		t.Fatalf("unexpected usage mapping: %+v", res)
+	}
+}
+
+func TestModelGenerateUsesContentCapturePolicy(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"answer-secret"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":2}}`))
+	}))
+	defer ts.Close()
+
+	var events []gai.DebugEvent
+	p := New("api-key-must-not-appear", gai.DebugSinkFunc(func(_ context.Context, event gai.DebugEvent) {
+		events = append(events, event)
+	}))
+	p.baseURL = ts.URL
+	m, err := p.Model(MistralSmallLatest)
+	if err != nil {
+		t.Fatalf("Model error: %v", err)
+	}
+	ctx := gai.WithContentCapturePolicy(t.Context(), gai.ContentCapturePolicy{
+		Prompt: gai.CaptureEnabled, Completion: gai.CaptureEnabled,
+		Redact: func(_ context.Context, _ gai.ContentKind, value []byte) ([]byte, error) {
+			return []byte(strings.ReplaceAll(string(value), "secret", "[redacted]")), nil
+		},
+	})
+	if _, err := m.Generate(ctx, ai.AIRequest{Prompt: "question-secret"}); err != nil {
+		t.Fatalf("Generate error: %v", err)
+	}
+
+	var request, response gai.DebugEvent
+	for _, event := range events {
+		switch event.Name {
+		case "mistral_generate_request":
+			request = event
+		case "mistral_generate_response":
+			response = event
+		}
+	}
+	if request.Fields["prompt"] != "question-[redacted]" || response.Fields["response_text"] != "answer-[redacted]" {
+		t.Fatalf("unexpected capture events: request=%#v response=%#v", request.Fields, response.Fields)
+	}
+	if _, ok := response.Fields["response"]; ok {
+		t.Fatalf("policy exposed aggregate provider response: %#v", response.Fields)
+	}
+	if strings.Contains(fmt.Sprint(events), "api-key-must-not-appear") || strings.Contains(fmt.Sprint(events), "answer-secret") {
+		t.Fatalf("raw content or credentials reached debug events: %#v", events)
 	}
 }
 
@@ -388,6 +435,13 @@ func TestModelTokenizerCountTokensHTTPError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "mistral token count failed (status 400)") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(err.Error(), "bad request") {
+		t.Fatalf("safe error string exposed response content: %v", err)
+	}
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) || string(httpErr.ResponseBody()) != "bad request\n" {
+		t.Fatalf("typed error did not preserve explicit diagnostics: %#v", err)
 	}
 }
 

@@ -293,8 +293,13 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 	if err != nil {
 		return nil, err
 	}
-	if m.debug != nil && m.debug.IncludeSensitiveData() {
-		m.debug.Emit(ctx, gai.DebugEvent{Name: "anthropic_generate_request", Source: "ai:anthropic.Model.Generate", Fields: map[string]any{"payload": payload}})
+	if gai.DebugContentEnabled(ctx, m.debug, gai.ContentKindPrompt) {
+		fields := map[string]any{}
+		if _, hasPolicy := gai.ContentCapturePolicyFromContext(ctx); !hasPolicy && m.debug.IncludeSensitiveData() {
+			fields["payload"] = payload
+		}
+		gai.AddDebugContent(ctx, m.debug, fields, "prompt", gai.ContentKindPrompt, req.Prompt)
+		m.debug.Emit(ctx, gai.DebugEvent{Name: "anthropic_generate_request", Source: "ai:anthropic.Model.Generate", Fields: fields})
 	}
 	client := m.client.sdkClient()
 	message, err := client.Messages.New(ctx, payload)
@@ -310,9 +315,11 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 	span.SetAttributes(attribute.Int("ai.input_tokens", input), attribute.Int("ai.output_tokens", output))
 	if m.debug != nil {
 		fields := map[string]any{"input_tokens": input, "output_tokens": output}
-		if m.debug.IncludeSensitiveData() {
+		if _, hasPolicy := gai.ContentCapturePolicyFromContext(ctx); !hasPolicy && m.debug.IncludeSensitiveData() {
 			fields["response"] = message.RawJSON()
 		}
+		gai.AddDebugContent(ctx, m.debug, fields, "response_text", gai.ContentKindCompletion, text)
+		gai.AddDebugContent(ctx, m.debug, fields, "reasoning", gai.ContentKindReasoning, thinking)
 		m.debug.Emit(ctx, gai.DebugEvent{Name: "anthropic_generate_success", Source: "ai:anthropic.Model.Generate", Fields: fields})
 	}
 	return &ai.AIResponse{Text: text, Reasoning: thinking, ToolCalls: calls, Raw: json.RawMessage(message.RawJSON()), FinishReason: string(message.StopReason), InputTokens: input, OutputTokens: output, ReasoningTokens: int(message.Usage.OutputTokensDetails.ThinkingTokens)}, nil

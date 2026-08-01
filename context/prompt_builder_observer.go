@@ -183,7 +183,7 @@ func (o *promptBuilderObserver) RenderFailed(ctx context.Context, stats promptRe
 	}, err)
 }
 
-func (o *promptBuilderObserver) RenderFinished(ctx context.Context, stats promptRenderStats, sensitiveFields map[string]any) {
+func (o *promptBuilderObserver) RenderFinished(ctx context.Context, stats promptRenderStats, prompt string, legacySensitiveFields map[string]any) {
 	fields := map[string]any{
 		"part_count":            stats.PartCount,
 		"system_parts":          stats.SystemPartCount,
@@ -192,9 +192,11 @@ func (o *promptBuilderObserver) RenderFinished(ctx context.Context, stats prompt
 		"conversation_messages": stats.ConversationMessageCount,
 		"prompt_chars":          stats.PromptChars,
 	}
-	if o.includeSensitiveData() {
-		for key, value := range sensitiveFields {
-			fields[key] = value
+	if _, hasPolicy := gai.ContentCapturePolicyFromContext(ctx); hasPolicy {
+		gai.AddDebugContent(ctx, o.debug, fields, "prompt", gai.ContentKindPrompt, prompt)
+	} else {
+		for key, value := range legacySensitiveFields {
+			gai.AddDebugContent(ctx, o.debug, fields, key, gai.ContentKindPrompt, value)
 		}
 	}
 	o.emit(ctx, "prompt_builder_render_finished", fields, nil)
@@ -206,10 +208,6 @@ func (o *promptBuilderObserver) TokenCountSkipped(ctx context.Context, fields ma
 
 func (o *promptBuilderObserver) TokenCountFailed(ctx context.Context, fields map[string]any, err error) {
 	o.emit(ctx, "prompt_builder_token_count_failed", fields, err)
-}
-
-func (o *promptBuilderObserver) includeSensitiveData() bool {
-	return o != nil && o.debug != nil && o.debug.IncludeSensitiveData()
 }
 
 func (o *promptBuilderObserver) emit(ctx context.Context, name string, fields map[string]any, err error) {

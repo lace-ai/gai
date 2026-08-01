@@ -2,6 +2,7 @@ package exa
 
 import (
 	"context"
+	"errors"
 
 	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/loop"
@@ -10,6 +11,8 @@ import (
 )
 
 const exaTracerName = "github.com/lace-ai/gai/loop/tools/exa"
+
+var errObservedExaSearch = errors.New("Exa search failed")
 
 type searchObserver struct {
 	debug      gai.DebugSink
@@ -48,14 +51,16 @@ func (o *searchObserver) Finish(err error) {
 	if len(attrs) > 0 {
 		o.span.SetAttributes(attrs...)
 	}
-	gai.EndSpan(o.span, err)
+	if err != nil {
+		gai.EndSpan(o.span, errObservedExaSearch)
+		return
+	}
+	gai.EndSpan(o.span, nil)
 }
 
 func (o *searchObserver) Started(ctx context.Context, query string) {
 	fields := o.baseFields()
-	if o != nil && o.debug != nil && o.debug.IncludeSensitiveData() {
-		fields["query"] = query
-	}
+	gai.AddDebugContent(ctx, o.debug, fields, "query", gai.ContentKindToolInput, query)
 	o.emit(ctx, "exa_search_started", fields, nil)
 }
 
@@ -110,7 +115,14 @@ func (o *searchObserver) Failure(ctx context.Context, stage string, err error) *
 	if o != nil && o.requestID != "" {
 		fields["request_id"] = o.requestID
 	}
-	o.emit(ctx, "exa_search_failed", fields, err)
+	if err != nil {
+		gai.AddDebugContent(ctx, o.debug, fields, "error_output", gai.ContentKindToolOutput, err.Error())
+	}
+	observedErr := error(errObservedExaSearch)
+	if _, hasPolicy := gai.ContentCapturePolicyFromContext(ctx); !hasPolicy && o != nil && o.debug != nil && o.debug.IncludeSensitiveData() {
+		observedErr = err
+	}
+	o.emit(ctx, "exa_search_failed", fields, observedErr)
 	return loop.NewToolError(err)
 }
 

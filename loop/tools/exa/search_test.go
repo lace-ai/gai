@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -216,6 +217,16 @@ func TestSearchToolTracing(t *testing.T) {
 	}
 	if searchSpan.Status().Code != codes.Error {
 		t.Fatalf("span status = %v, want error", searchSpan.Status().Code)
+	}
+	if strings.Contains(searchSpan.Status().Description, "rate limited") {
+		t.Fatalf("span status leaked provider response content: %q", searchSpan.Status().Description)
+	}
+	for _, event := range searchSpan.Events() {
+		for _, attr := range event.Attributes {
+			if strings.Contains(attr.Value.String(), "rate limited") {
+				t.Fatalf("span event leaked provider response content: %#v", event)
+			}
+		}
 	}
 	attrs := attributeMap(searchSpan.Attributes())
 	if attrs["tool.name"].AsString() != "web_search" || attrs["http.response.status_code"].AsInt64() != http.StatusTooManyRequests {

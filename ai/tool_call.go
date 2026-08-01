@@ -203,9 +203,7 @@ func DetectToolCallsInStream(ctx context.Context, in <-chan Token, debug gai.Deb
 					fields := map[string]any{
 						"reason": fmt.Sprintf("inString=%v objDepth=%d arrDepth=%d", inString, objDepth, arrDepth),
 					}
-					if debug.IncludeSensitiveData() {
-						fields["data"] = string(joinTokenData(pending))
-					}
+					gai.AddDebugContent(ctx, debug, fields, "data", gai.ContentKindCompletion, joinTokenData(pending))
 					debug.Emit(ctx, gai.DebugEvent{
 						Name:   "tool_call_stream_non_tool_call",
 						Source: "ai:DetectToolCallsInStream.maybeToolCall",
@@ -226,9 +224,7 @@ func DetectToolCallsInStream(ctx context.Context, in <-chan Token, debug gai.Deb
 						"type": tc.Type,
 						"name": tc.Name,
 					}
-					if debug.IncludeSensitiveData() {
-						fields["args"] = string(tc.Args)
-					}
+					gai.AddDebugContent(ctx, debug, fields, "args", gai.ContentKindToolInput, tc.Args)
 					debug.Emit(ctx, gai.DebugEvent{
 						Name:   "tool_call_stream_tool_call_detected",
 						Source: "ai:DetectToolCallsInStream.maybeToolCall",
@@ -250,9 +246,7 @@ func DetectToolCallsInStream(ctx context.Context, in <-chan Token, debug gai.Deb
 					fields := map[string]any{
 						"reason": "parse failed",
 					}
-					if debug.IncludeSensitiveData() {
-						fields["data"] = string(payload)
-					}
+					gai.AddDebugContent(ctx, debug, fields, "data", gai.ContentKindCompletion, payload)
 					debug.Emit(ctx, gai.DebugEvent{
 						Name:   "tool_call_stream_tool_call_parse_failed",
 						Source: "ai:DetectToolCallsInStream.maybeToolCall",
@@ -302,9 +296,7 @@ func DetectToolCallsInStream(ctx context.Context, in <-chan Token, debug gai.Deb
 						if b == '{' {
 							if debug != nil {
 								fields := map[string]any{}
-								if debug.IncludeSensitiveData() {
-									fields["data"] = string(tokenStr.String())
-								}
+								gai.AddDebugContent(ctx, debug, fields, "data", gai.ContentKindCompletion, tokenStr.String())
 								debug.Emit(ctx, gai.DebugEvent{
 									Name:   "tool_call_stream_json_candidate",
 									Source: "ai:DetectToolCallsInStream",
@@ -328,9 +320,7 @@ func DetectToolCallsInStream(ctx context.Context, in <-chan Token, debug gai.Deb
 							tokenStr.WriteByte(b)
 							if debug != nil {
 								fields := map[string]any{}
-								if debug.IncludeSensitiveData() {
-									fields["data"] = string(tokenStr.String())
-								}
+								gai.AddDebugContent(ctx, debug, fields, "data", gai.ContentKindCompletion, tokenStr.String())
 								debug.Emit(ctx, gai.DebugEvent{
 									Name:   "tool_call_stream_json_candidate_after_newlines",
 									Source: "ai:DetectToolCallsInStream",
@@ -398,9 +388,7 @@ func DetectToolCallsInStream(ctx context.Context, in <-chan Token, debug gai.Deb
 
 		if debug != nil {
 			fields := map[string]any{}
-			if debug.IncludeSensitiveData() {
-				fields["pending_data"] = string(joinTokenData(pending))
-			}
+			gai.AddDebugContent(ctx, debug, fields, "pending_data", gai.ContentKindCompletion, joinTokenData(pending))
 			debug.Emit(ctx, gai.DebugEvent{
 				Name:   "tool_call_stream_end_of_stream",
 				Source: "ai:DetectToolCallsInStream",
