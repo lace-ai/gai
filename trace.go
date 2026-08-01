@@ -19,6 +19,7 @@ func StartOperationSpan(ctx context.Context, tracerName string, spanPrefix strin
 		attribute.String(operationAttr, operation),
 	}
 	baseAttrs = append(baseAttrs, attrs...)
+	baseAttrs = append(baseAttrs, traceContextAttributes(ctx)...)
 
 	return otel.Tracer(tracerName).Start(ctx, spanPrefix+"."+operation, trace.WithAttributes(baseAttrs...))
 }

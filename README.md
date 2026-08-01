@@ -364,6 +364,43 @@ otel.SetTracerProvider(provider)
 
 The caller owns provider shutdown so the final batch can be flushed and any export error can be observed.
 
+Trace-wide filtering dimensions are opt-in and separate from `RunInput.Meta`:
+
+```go
+traceContext := &gai.TraceContext{
+  Name:        "lace-chat",
+  UserID:      userID,
+  SessionID:   conversationID,
+  Tags:        []string{"mobile"},
+  Release:     version,
+  Environment: "production",
+  Metadata: map[string]string{
+    "feature": "chat",
+  },
+}
+
+workflow, err := assistant.NewRun(ctx, agent.RunInput{
+  TraceContext: traceContext,
+  Prompt:       input,
+  Meta:         applicationData, // values are still never exported implicitly
+})
+```
+
+`RunInput.TraceContext == nil` inherits trace dimensions already installed with
+`gai.WithTraceContext`; a non-nil value replaces them as a complete set. GAI
+copies and validates the value before asynchronous work starts. Scalar values
+are limited to 200 bytes, tags to 32 values of 200 bytes, and selected metadata
+to 32 entries with 64-byte alphanumeric keys and 200-byte values. Invalid or
+oversized entries are omitted instead of truncated. Trace context uses an internal Go
+context value, not OpenTelemetry baggage, so GAI does not add user or session
+identifiers to outbound request headers.
+
+The core library records provider-neutral `gai.trace.*` attributes. The
+Langfuse tracer provider maps them to Langfuse v4 trace attributes on every
+span. Applications assembling their own Langfuse tracer provider can wrap a
+span processor with `langfuse.NewTraceContextSpanProcessor` to use the same
+mapping.
+
 ## Package map
 
 ```text
