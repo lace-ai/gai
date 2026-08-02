@@ -473,7 +473,13 @@ func (l *Loop) executeToolCalls(ctx context.Context, iteration *Iteration, toolC
 				}
 			}
 			if events != nil {
-				_ = sendEvent(ctx, events, ToolResultEvent(iterationCount, attemptID, retryCount, tc.call, toolRes, duration))
+				if err := sendEvent(ctx, events, ToolResultEvent(iterationCount, attemptID, retryCount, tc.call, toolRes, duration)); err != nil {
+					toolErrMu.Lock()
+					if toolErr == nil {
+						toolErr = err
+					}
+					toolErrMu.Unlock()
+				}
 			}
 		}(tc)
 	}

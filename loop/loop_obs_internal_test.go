@@ -329,6 +329,40 @@ func TestExecuteToolCallsEmitsToolEvents(t *testing.T) {
 	}
 }
 
+func TestExecuteToolCallsReturnsCanceledWhenToolResultEventCannotBeSent(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	release := make(chan struct{})
+	tool := observedTestTool{name: "event", call: func(context.Context, *ai.ToolCall) *ToolResponse {
+		<-release
+		return NewToolSuccess("ok")
+	}}
+	l := &Loop{Tools: []Tool{tool}}
+	iteration := &Iteration{Parts: make([]IterationPart, 1)}
+	calls := []pendingToolCall{{
+		partIndex: 0,
+		call:      ai.ToolCall{ID: "call-event", Type: "function", Name: "event", Args: json.RawMessage(`{}`)},
+	}}
+	events := make(chan Event)
+	done := make(chan error, 1)
+	go func() { done <- l.executeToolCalls(ctx, iteration, calls, events, 3, 4, 5) }()
+
+	if event := <-events; event.Type != EventToolStart {
+		t.Fatalf("first tool event = %v, want %v", event.Type, EventToolStart)
+	}
+	close(release)
+	cancel()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("executeToolCalls error = %v, want context cancellation", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("executeToolCalls did not return after context cancellation")
+	}
+}
+
 func requireToolSpans(t testing.TB, recorder *tracetest.SpanRecorder, count int) []sdktrace.ReadOnlySpan {
 	t.Helper()
 	spans := make([]sdktrace.ReadOnlySpan, 0, count)
