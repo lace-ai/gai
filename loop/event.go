@@ -2,6 +2,7 @@ package loop
 
 import (
 	"context"
+	"time"
 
 	"github.com/lace-ai/gai/ai"
 )
@@ -18,6 +19,12 @@ const (
 	EventRetry EventType = "retry"
 	// EventIterationDone carries a completed agent iteration.
 	EventIterationDone EventType = "iteration_done"
+	// EventToolStart reports that a tool invocation has started.
+	EventToolStart EventType = "tool_start"
+	// EventToolResult reports a successful tool completion.
+	EventToolResult EventType = "tool_result"
+	// EventToolError reports a failed tool completion.
+	EventToolError EventType = "tool_error"
 	// EventDone reports successful loop completion.
 	EventDone EventType = "done"
 	// EventError reports terminal loop failure.
@@ -35,9 +42,12 @@ type Event struct {
 	RetryCount     int
 	PartCount      int
 
-	Token     *ai.Token
-	Iteration *Iteration
-	Err       error
+	Token        *ai.Token
+	Iteration    *Iteration
+	ToolCall     *ai.ToolCall
+	ToolResponse *ToolResponse
+	Duration     time.Duration
+	Err          error
 }
 
 func AttemptStartEvent(iteration, attempt, retry int) Event {
@@ -83,6 +93,23 @@ func IterationDoneEvent(iteration Iteration, attempt, retry int) Event {
 
 func DoneEvent() Event {
 	return Event{Type: EventDone}
+}
+
+func ToolStartEvent(iteration, attempt, retry int, call ai.ToolCall) Event {
+	return Event{Type: EventToolStart, IterationCount: iteration, AttemptID: attempt, RetryCount: retry, ToolCall: &call}
+}
+
+func ToolResultEvent(iteration, attempt, retry int, call ai.ToolCall, response *ToolResponse, duration time.Duration) Event {
+	eventType := EventToolResult
+	var err error
+	if response != nil && response.ErrorValue() != nil {
+		eventType, err = EventToolError, response.ErrorValue()
+	}
+	return Event{Type: eventType, IterationCount: iteration, AttemptID: attempt, RetryCount: retry, ToolCall: &call, ToolResponse: response, Duration: duration, Err: err}
+}
+
+func ToolErrorEvent(iteration, attempt, retry int, call ai.ToolCall, response *ToolResponse, duration time.Duration, err error) Event {
+	return Event{Type: EventToolError, IterationCount: iteration, AttemptID: attempt, RetryCount: retry, ToolCall: &call, ToolResponse: response, Duration: duration, Err: err}
 }
 
 func ErrorEvent(err error) Event {

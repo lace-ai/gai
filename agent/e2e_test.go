@@ -279,11 +279,17 @@ func TestAgentWorkflowStreamsRetriedAttemptTokens(t *testing.T) {
 		t.Fatalf("expected a discardable retry status, got %#v", consumed.statuses)
 	}
 	result := workflow.Result()
-	if got := result.Primary.Text; got != "partialfinal" {
-		t.Fatalf("unexpected primary result text: %q", got)
+	if got := result.Primary.Text; got != "final" {
+		t.Fatalf("unexpected canonical primary result text: %q", got)
 	}
-	if got := result.Text; got != "partialfinal" {
-		t.Fatalf("unexpected workflow result text: %q", got)
+	if got := result.Text; got != "final" {
+		t.Fatalf("unexpected canonical workflow result text: %q", got)
+	}
+	if got := result.Primary.AttemptedText; got != "partialfinal" {
+		t.Fatalf("unexpected primary diagnostic text: %q", got)
+	}
+	if got := result.AttemptedText; got != "partialfinal" {
+		t.Fatalf("unexpected workflow diagnostic text: %q", got)
 	}
 	if result.Usage != (ai.Usage{InputTokens: 6, OutputTokens: 5}) {
 		t.Fatalf("accepted usage = %#v", result.Usage)

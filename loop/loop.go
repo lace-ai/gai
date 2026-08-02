@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/lace-ai/gai/ai"
 	gaictx "github.com/lace-ai/gai/context"
@@ -363,7 +364,7 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 				iterState.finish(nil)
 			}
 
-			if err := l.executeToolCalls(iterCtx, &iteration, toolCalls); err != nil {
+			if err := l.executeToolCalls(iterCtx, &iteration, toolCalls, events, iteration.Count, iterState.attemptID(), runState.retryCount); err != nil {
 				if cancelErr := cancellationError(iterCtx, err); cancelErr != nil {
 					sendAttemptCanceled(ctx, events, runState, iteration.Count, iterState.attemptID(), runState.retryCount, &iteration, cancelErr)
 					cancel()
@@ -442,26 +443,52 @@ func userMessageForIteration(promptBuilder gaictx.PromptBuilder, index int) *gai
 // executeToolCalls records tool responses on iteration. Tool execution
 // failures are stored in ToolResponse.Err and are not returned. Only framework
 // or tool-response processing failures are returned.
-func (l *Loop) executeToolCalls(ctx context.Context, iteration *Iteration, toolCalls []pendingToolCall) error {
+func (l *Loop) executeToolCalls(ctx context.Context, iteration *Iteration, toolCalls []pendingToolCall, events chan<- Event, iterationCount, attemptID, retryCount int) error {
 	var wg sync.WaitGroup
 	var toolErr error
 	var toolErrMu sync.Mutex
 
 	for _, tc := range toolCalls {
+		if events != nil {
+			if err := sendEvent(ctx, events, ToolStartEvent(iterationCount, attemptID, retryCount, tc.call)); err != nil {
+				return err
+			}
+		}
 		wg.Add(1)
 		go func(tc pendingToolCall) {
 			defer wg.Done()
 
+			started := time.Now()
 			toolRes := callObservedTool(ctx, tc.call, l.Tools)
+			duration := time.Since(started)
 			iteration.Parts[tc.partIndex].ToolResp = toolRes
 			if l.ToolResponseProcessor != nil {
 				if err := l.ToolResponseProcessor.Process(tc.call, toolRes); err != nil {
+					processErr := fmt.Errorf("%w: %w", ErrToolResponseProcess, err)
 					toolErrMu.Lock()
 					if toolErr == nil {
-						toolErr = fmt.Errorf("%w: %w", ErrToolResponseProcess, err)
+						toolErr = processErr
 					}
 					toolErrMu.Unlock()
+					if events != nil {
+						if err := sendEvent(ctx, events, ToolErrorEvent(iterationCount, attemptID, retryCount, tc.call, toolRes, duration, processErr)); err != nil {
+							toolErrMu.Lock()
+							if toolErr == nil {
+								toolErr = err
+							}
+							toolErrMu.Unlock()
+						}
+					}
 					return
+				}
+			}
+			if events != nil {
+				if err := sendEvent(ctx, events, ToolResultEvent(iterationCount, attemptID, retryCount, tc.call, toolRes, duration)); err != nil {
+					toolErrMu.Lock()
+					if toolErr == nil {
+						toolErr = err
+					}
+					toolErrMu.Unlock()
 				}
 			}
 		}(tc)
