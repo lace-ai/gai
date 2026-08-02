@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/lace-ai/gai/ai"
 	gaictx "github.com/lace-ai/gai/context"
@@ -363,7 +364,7 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 				iterState.finish(nil)
 			}
 
-			if err := l.executeToolCalls(iterCtx, &iteration, toolCalls); err != nil {
+			if err := l.executeToolCalls(iterCtx, &iteration, toolCalls, events, iteration.Count, iterState.attemptID(), runState.retryCount); err != nil {
 				if cancelErr := cancellationError(iterCtx, err); cancelErr != nil {
 					sendAttemptCanceled(ctx, events, runState, iteration.Count, iterState.attemptID(), runState.retryCount, &iteration, cancelErr)
 					cancel()
@@ -442,17 +443,32 @@ func userMessageForIteration(promptBuilder gaictx.PromptBuilder, index int) *gai
 // executeToolCalls records tool responses on iteration. Tool execution
 // failures are stored in ToolResponse.Err and are not returned. Only framework
 // or tool-response processing failures are returned.
-func (l *Loop) executeToolCalls(ctx context.Context, iteration *Iteration, toolCalls []pendingToolCall) error {
+func (l *Loop) executeToolCalls(ctx context.Context, iteration *Iteration, toolCalls []pendingToolCall, eventArgs ...any) error {
+	var events chan<- Event
+	var iterationCount, attemptID, retryCount int
+	if len(eventArgs) == 4 {
+		events, _ = eventArgs[0].(chan<- Event)
+		iterationCount, _ = eventArgs[1].(int)
+		attemptID, _ = eventArgs[2].(int)
+		retryCount, _ = eventArgs[3].(int)
+	}
 	var wg sync.WaitGroup
 	var toolErr error
 	var toolErrMu sync.Mutex
 
 	for _, tc := range toolCalls {
+		if events != nil {
+			if err := sendEvent(ctx, events, ToolStartEvent(iterationCount, attemptID, retryCount, tc.call)); err != nil {
+				return err
+			}
+		}
 		wg.Add(1)
 		go func(tc pendingToolCall) {
 			defer wg.Done()
 
+			started := time.Now()
 			toolRes := callObservedTool(ctx, tc.call, l.Tools)
+			duration := time.Since(started)
 			iteration.Parts[tc.partIndex].ToolResp = toolRes
 			if l.ToolResponseProcessor != nil {
 				if err := l.ToolResponseProcessor.Process(tc.call, toolRes); err != nil {
@@ -463,6 +479,9 @@ func (l *Loop) executeToolCalls(ctx context.Context, iteration *Iteration, toolC
 					toolErrMu.Unlock()
 					return
 				}
+			}
+			if events != nil {
+				_ = sendEvent(ctx, events, ToolResultEvent(iterationCount, attemptID, retryCount, tc.call, toolRes, duration))
 			}
 		}(tc)
 	}

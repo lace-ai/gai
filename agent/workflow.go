@@ -32,17 +32,16 @@ type Stream struct {
 	Errors <-chan error
 }
 
-// AgentResult is the captured result of one agent execution. Text contains only
-// the concatenated text-token content, Reasoning contains thought-token content,
-// and Tokens retains the complete token stream. Because tokens are captured in
-// real time, a retried attempt's partial output remains present; use the ordered
-// loop Event stream when exact per-attempt rollback is required.
+// AgentResult contains canonical accepted output. AttemptedTokens and
+// AttemptedText retain the raw real-time stream, including discarded retries.
 type AgentResult struct {
-	Tokens     []ai.Token
-	Text       string
-	Reasoning  string
-	Messages   []gaictx.Message
-	Iterations []loop.Iteration
+	Tokens          []ai.Token
+	Text            string
+	Reasoning       string
+	AttemptedTokens []ai.Token
+	AttemptedText   string
+	Messages        []gaictx.Message
+	Iterations      []loop.Iteration
 	// Usage totals accepted iteration usage. BilledUsage includes discarded retries.
 	Usage       ai.Usage
 	BilledUsage ai.Usage
@@ -62,15 +61,16 @@ type StageResult struct {
 }
 
 // WorkflowResult is a snapshot of the complete workflow state. Primary never
-// changes, while Tokens, Text, and Reasoning represent the output after the
-// latest stage. These fields retain real-time partial output from retried
-// attempts; buffering to omit it would sacrifice real-time streaming.
+// changes, while Tokens, Text, and Reasoning represent canonical output after
+// the latest stage. AttemptedTokens and AttemptedText retain raw diagnostics.
 type WorkflowResult struct {
-	Input     RunInput
-	Primary   AgentResult
-	Tokens    []ai.Token
-	Text      string
-	Reasoning string
+	Input           RunInput
+	Primary         AgentResult
+	Tokens          []ai.Token
+	Text            string
+	Reasoning       string
+	AttemptedTokens []ai.Token
+	AttemptedText   string
 	// Usage totals accepted iteration usage. BilledUsage includes discarded retries.
 	Usage       ai.Usage
 	BilledUsage ai.Usage
@@ -302,9 +302,11 @@ func (w *Workflow) capturePrimary(ctx context.Context, upstream Stream, obs *wor
 	return captureStream(ctx, upstream, func(captured capturedStream) {
 		canceled, cancellationErr := captured.cancellation()
 		result := AgentResult{
-			Tokens:          cloneTokens(captured.Tokens),
-			Text:            tokenText(captured.Tokens),
-			Reasoning:       tokenReasoning(captured.Tokens),
+			Tokens:          iterationTokens(w.Loop.Iterations),
+			Text:            iterationText(w.Loop.Iterations),
+			Reasoning:       iterationReasoning(w.Loop.Iterations),
+			AttemptedTokens: cloneTokens(captured.Tokens),
+			AttemptedText:   tokenText(captured.Tokens),
 			Messages:        cloneMessages(w.Loop.Messages()),
 			Iterations:      cloneIterations(w.Loop.Iterations),
 			Usage:           iterationUsage(w.Loop.Iterations),
@@ -315,9 +317,11 @@ func (w *Workflow) capturePrimary(ctx context.Context, upstream Stream, obs *wor
 		}
 		w.mu.Lock()
 		w.result.Primary = result
-		w.result.Tokens = cloneTokens(captured.Tokens)
+		w.result.Tokens = cloneTokens(result.Tokens)
 		w.result.Text = result.Text
 		w.result.Reasoning = result.Reasoning
+		w.result.AttemptedTokens = cloneTokens(captured.Tokens)
+		w.result.AttemptedText = tokenText(captured.Tokens)
 		w.result.Usage = result.Usage
 		w.result.BilledUsage = result.BilledUsage
 		w.result.Errors = append([]error(nil), captured.Errors...)
@@ -332,9 +336,8 @@ func (w *Workflow) captureFinal(ctx context.Context, upstream Stream, obs *workf
 	return captureStream(ctx, upstream, func(captured capturedStream) {
 		canceled, cancellationErr := captured.cancellation()
 		w.mu.Lock()
-		w.result.Tokens = cloneTokens(captured.Tokens)
-		w.result.Text = tokenText(captured.Tokens)
-		w.result.Reasoning = tokenReasoning(captured.Tokens)
+		w.result.AttemptedTokens = cloneTokens(captured.Tokens)
+		w.result.AttemptedText = tokenText(captured.Tokens)
 		w.result.Errors = append([]error(nil), captured.Errors...)
 		if canceled {
 			w.result.Canceled = true
@@ -571,6 +574,31 @@ func tokenReasoning(tokens []ai.Token) string {
 	return string(reasoning)
 }
 
+func iterationTokens(iterations []loop.Iteration) []ai.Token {
+	var tokens []ai.Token
+	for _, iteration := range iterations {
+		for _, part := range iteration.Parts {
+			if part.Response != nil {
+				if part.Response.Reasoning != "" {
+					tokens = append(tokens, ai.Token{Type: ai.TokenTypeThought, Text: part.Response.Reasoning})
+				}
+				if part.Response.Text != "" {
+					tokens = append(tokens, ai.Token{Type: ai.TokenTypeText, Text: part.Response.Text})
+				}
+			}
+			if part.ToolReq != nil {
+				tokens = append(tokens, ai.Token{Type: ai.TokenTypeToolCall, ToolCall: cloneToolCall(part.ToolReq)})
+			}
+		}
+	}
+	return tokens
+}
+
+func iterationText(iterations []loop.Iteration) string { return tokenText(iterationTokens(iterations)) }
+func iterationReasoning(iterations []loop.Iteration) string {
+	return tokenReasoning(iterationTokens(iterations))
+}
+
 func cloneRunInput(input RunInput) RunInput {
 	cloned := input
 	if input.TraceContext != nil {
@@ -690,6 +718,7 @@ func cloneToolResponse(response *loop.ToolResponse) *loop.ToolResponse {
 
 func cloneAgentResult(result AgentResult) AgentResult {
 	result.Tokens = cloneTokens(result.Tokens)
+	result.AttemptedTokens = cloneTokens(result.AttemptedTokens)
 	result.Messages = cloneMessages(result.Messages)
 	result.Iterations = cloneIterations(result.Iterations)
 	result.Errors = append([]error(nil), result.Errors...)
@@ -705,6 +734,7 @@ func cloneWorkflowResult(result WorkflowResult) WorkflowResult {
 	result.Input = cloneRunInput(result.Input)
 	result.Primary = cloneAgentResult(result.Primary)
 	result.Tokens = cloneTokens(result.Tokens)
+	result.AttemptedTokens = cloneTokens(result.AttemptedTokens)
 	result.Errors = append([]error(nil), result.Errors...)
 	result.Stages = append([]StageResult(nil), result.Stages...)
 	for i := range result.Stages {
