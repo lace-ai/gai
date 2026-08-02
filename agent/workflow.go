@@ -301,10 +301,11 @@ func (w *Workflow) Result() WorkflowResult {
 func (w *Workflow) capturePrimary(ctx context.Context, upstream Stream, obs *workflowObserver) Stream {
 	return captureStream(ctx, upstream, func(captured capturedStream) {
 		canceled, cancellationErr := captured.cancellation()
+		tokens := iterationTokens(w.Loop.Iterations)
 		result := AgentResult{
-			Tokens:          iterationTokens(w.Loop.Iterations),
-			Text:            iterationText(w.Loop.Iterations),
-			Reasoning:       iterationReasoning(w.Loop.Iterations),
+			Tokens:          tokens,
+			Text:            tokenText(tokens),
+			Reasoning:       tokenReasoning(tokens),
 			AttemptedTokens: cloneTokens(captured.Tokens),
 			AttemptedText:   tokenText(captured.Tokens),
 			Messages:        cloneMessages(w.Loop.Messages()),
