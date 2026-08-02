@@ -464,11 +464,21 @@ func (l *Loop) executeToolCalls(ctx context.Context, iteration *Iteration, toolC
 			iteration.Parts[tc.partIndex].ToolResp = toolRes
 			if l.ToolResponseProcessor != nil {
 				if err := l.ToolResponseProcessor.Process(tc.call, toolRes); err != nil {
+					processErr := fmt.Errorf("%w: %w", ErrToolResponseProcess, err)
 					toolErrMu.Lock()
 					if toolErr == nil {
-						toolErr = fmt.Errorf("%w: %w", ErrToolResponseProcess, err)
+						toolErr = processErr
 					}
 					toolErrMu.Unlock()
+					if events != nil {
+						if err := sendEvent(ctx, events, ToolErrorEvent(iterationCount, attemptID, retryCount, tc.call, toolRes, duration, processErr)); err != nil {
+							toolErrMu.Lock()
+							if toolErr == nil {
+								toolErr = err
+							}
+							toolErrMu.Unlock()
+						}
+					}
 					return
 				}
 			}

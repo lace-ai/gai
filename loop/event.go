@@ -108,6 +108,10 @@ func ToolResultEvent(iteration, attempt, retry int, call ai.ToolCall, response *
 	return Event{Type: eventType, IterationCount: iteration, AttemptID: attempt, RetryCount: retry, ToolCall: &call, ToolResponse: response, Duration: duration, Err: err}
 }
 
+func ToolErrorEvent(iteration, attempt, retry int, call ai.ToolCall, response *ToolResponse, duration time.Duration, err error) Event {
+	return Event{Type: EventToolError, IterationCount: iteration, AttemptID: attempt, RetryCount: retry, ToolCall: &call, ToolResponse: response, Duration: duration, Err: err}
+}
+
 func ErrorEvent(err error) Event {
 	return Event{Type: EventError, Err: err}
 }

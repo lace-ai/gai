@@ -22,6 +22,12 @@ type observedTestTool struct {
 	call func(context.Context, *ai.ToolCall) *ToolResponse
 }
 
+type toolResponseProcessorFunc func(ai.ToolCall, *ToolResponse) error
+
+func (f toolResponseProcessorFunc) Process(call ai.ToolCall, response *ToolResponse) error {
+	return f(call, response)
+}
+
 func (t observedTestTool) Name() string              { return t.name }
 func (t observedTestTool) Description() string       { return "Test tool." }
 func (t observedTestTool) Params() ai.ToolParameters { return NewEchoTool().Params() }
@@ -326,6 +332,45 @@ func TestExecuteToolCallsEmitsToolEvents(t *testing.T) {
 		if event.IterationCount != 3 || event.AttemptID != 4 || event.RetryCount != 5 || event.ToolCall == nil || event.ToolCall.ID != "call-event" {
 			t.Fatalf("tool event = %#v", event)
 		}
+	}
+}
+
+func TestExecuteToolCallsEmitsToolErrorWhenResponseProcessingFails(t *testing.T) {
+	processorErr := errors.New("reject tool response")
+	tool := observedTestTool{name: "event", call: func(context.Context, *ai.ToolCall) *ToolResponse {
+		return NewToolSuccess("ok")
+	}}
+	l := &Loop{
+		Tools: []Tool{tool},
+		ToolResponseProcessor: toolResponseProcessorFunc(func(ai.ToolCall, *ToolResponse) error {
+			return processorErr
+		}),
+	}
+	iteration := &Iteration{Parts: make([]IterationPart, 1)}
+	calls := []pendingToolCall{{
+		partIndex: 0,
+		call:      ai.ToolCall{ID: "call-event", Type: "function", Name: "event", Args: json.RawMessage(`{}`)},
+	}}
+	events := make(chan Event, 2)
+
+	err := l.executeToolCalls(t.Context(), iteration, calls, events, 3, 4, 5)
+	if !errors.Is(err, ErrToolResponseProcess) || !errors.Is(err, processorErr) {
+		t.Fatalf("executeToolCalls error = %v, want wrapped processor error", err)
+	}
+	close(events)
+
+	got := make([]Event, 0, 2)
+	for event := range events {
+		got = append(got, event)
+	}
+	if len(got) != 2 {
+		t.Fatalf("tool events = %#v, want start and error", got)
+	}
+	if got[0].Type != EventToolStart || got[1].Type != EventToolError {
+		t.Fatalf("tool event types = %v, %v; want %v, %v", got[0].Type, got[1].Type, EventToolStart, EventToolError)
+	}
+	if got[1].ToolCall == nil || got[1].ToolCall.ID != "call-event" || !errors.Is(got[1].Err, processorErr) {
+		t.Fatalf("tool error event = %#v", got[1])
 	}
 }
 
