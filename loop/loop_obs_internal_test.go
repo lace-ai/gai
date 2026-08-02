@@ -264,7 +264,7 @@ func TestExecuteToolCallsCreatesConcurrentChildSpans(t *testing.T) {
 	}
 	ctx, parent := otel.Tracer("test").Start(t.Context(), "loop.iteration")
 	done := make(chan error, 1)
-	go func() { done <- l.executeToolCalls(ctx, iteration, calls) }()
+	go func() { done <- l.executeToolCalls(ctx, iteration, calls, nil, 0, 0, 0) }()
 
 	seen := map[string]bool{}
 	for range calls {
@@ -291,6 +291,40 @@ func TestExecuteToolCallsCreatesConcurrentChildSpans(t *testing.T) {
 		}
 		if obstest.Attributes(span)["gai.tool.outcome"].AsString() != toolOutcomeSuccess {
 			t.Fatalf("tool span outcome = %#v", obstest.Attributes(span))
+		}
+	}
+}
+
+func TestExecuteToolCallsEmitsToolEvents(t *testing.T) {
+	tool := observedTestTool{name: "event", call: func(context.Context, *ai.ToolCall) *ToolResponse {
+		return NewToolSuccess("ok")
+	}}
+	l := &Loop{Tools: []Tool{tool}}
+	iteration := &Iteration{Parts: make([]IterationPart, 1)}
+	calls := []pendingToolCall{{
+		partIndex: 0,
+		call:      ai.ToolCall{ID: "call-event", Type: "function", Name: "event", Args: json.RawMessage(`{}`)},
+	}}
+	events := make(chan Event, 2)
+
+	if err := l.executeToolCalls(t.Context(), iteration, calls, events, 3, 4, 5); err != nil {
+		t.Fatalf("executeToolCalls error: %v", err)
+	}
+	close(events)
+
+	var got []Event
+	for event := range events {
+		got = append(got, event)
+	}
+	if len(got) != 2 {
+		t.Fatalf("tool events = %#v, want start and result", got)
+	}
+	if got[0].Type != EventToolStart || got[1].Type != EventToolResult {
+		t.Fatalf("tool event types = %v, %v; want %v, %v", got[0].Type, got[1].Type, EventToolStart, EventToolResult)
+	}
+	for _, event := range got {
+		if event.IterationCount != 3 || event.AttemptID != 4 || event.RetryCount != 5 || event.ToolCall == nil || event.ToolCall.ID != "call-event" {
+			t.Fatalf("tool event = %#v", event)
 		}
 	}
 }

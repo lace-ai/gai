@@ -443,15 +443,7 @@ func userMessageForIteration(promptBuilder gaictx.PromptBuilder, index int) *gai
 // executeToolCalls records tool responses on iteration. Tool execution
 // failures are stored in ToolResponse.Err and are not returned. Only framework
 // or tool-response processing failures are returned.
-func (l *Loop) executeToolCalls(ctx context.Context, iteration *Iteration, toolCalls []pendingToolCall, eventArgs ...any) error {
-	var events chan<- Event
-	var iterationCount, attemptID, retryCount int
-	if len(eventArgs) == 4 {
-		events, _ = eventArgs[0].(chan<- Event)
-		iterationCount, _ = eventArgs[1].(int)
-		attemptID, _ = eventArgs[2].(int)
-		retryCount, _ = eventArgs[3].(int)
-	}
+func (l *Loop) executeToolCalls(ctx context.Context, iteration *Iteration, toolCalls []pendingToolCall, events chan<- Event, iterationCount, attemptID, retryCount int) error {
 	var wg sync.WaitGroup
 	var toolErr error
 	var toolErrMu sync.Mutex
