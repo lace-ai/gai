@@ -884,6 +884,13 @@ func TestOpenAIDescriptorUsesReasoningFamilyOverlay(t *testing.T) {
 	}
 }
 
+func TestModelTokenizerIsNilWhenTokenizationIsUnavailable(t *testing.T) {
+	m := &Model{name: GPT41}
+	if tokenizer := m.Tokenizer(); tokenizer != nil {
+		t.Fatalf("Tokenizer() = %T, want nil when tokenization is unavailable", tokenizer)
+	}
+}
+
 func TestModelDescriptorDoesNotAdvertiseUnsupportedTokenizer(t *testing.T) {
 	d := openAIDescriptor(GPT41)
 	if d.Tokenizer.Available != ai.FeatureSupportUnsupported || d.Tokenizer.Fidelity != ai.TokenizerFidelityUnknown {
