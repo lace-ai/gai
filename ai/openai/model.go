@@ -32,7 +32,9 @@ func (m *Model) NativeTools() bool { return true }
 
 func (m *Model) Close() error { return nil }
 
-func (m *Model) Tokenizer() ai.Tokenizer { return tokenizer{modelName: m.name} }
+// Tokenizer returns nil because OpenAI tokenization is not implemented by this provider.
+// This prevents callers from installing an unusable tokenizer into prompt or history flows.
+func (m *Model) Tokenizer() ai.Tokenizer { return nil }
 
 func (m *Model) Descriptor() ai.ModelDescriptor {
 	if facts, ok := m.provider.catalog.Lookup(m.name); ok {
@@ -490,18 +492,6 @@ func (m *Model) client(streaming bool) *sdk.Client {
 	}
 	client := sdk.NewClient(option.WithAPIKey(m.provider.apiKey), option.WithBaseURL(m.provider.baseURL), option.WithHTTPClient(httpClient), option.WithMaxRetries(0))
 	return &client
-}
-
-type tokenizer struct{ modelName string }
-
-func (t tokenizer) ID() string { return "openai." + t.modelName }
-
-func (tokenizer) CountTokens(context.Context, string) (int, error) {
-	return 0, ai.ErrTokenizerUnsupported
-}
-
-func (tokenizer) Tokenize(context.Context, string) ([]string, error) {
-	return nil, ai.ErrTokenizerUnsupported
 }
 
 func firstNonEmpty(values ...string) string {
