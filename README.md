@@ -490,6 +490,8 @@ go test ./loop/...
 go test ./examples/order-support
 ```
 
+GitHub Actions runs build, vet, tests, race detection for concurrency-sensitive packages, static analysis, coverage artifact generation, and public API compatibility checks on pull requests. Dependency vulnerability scanning runs weekly on Mondays at 03:17 UTC and can also be started manually from the Actions tab.
+
 ## Contributing
 
 Issues and pull requests are welcome. For a new provider or tool, include tests and document its constructor, supported behavior, and required environment variables.
