@@ -46,6 +46,20 @@ type NativeMessageBuilder interface {
 	BuildRequest(ctx context.Context, conv Conversation) (string, []ai.RequestMessage, error)
 }
 
+// ContextSourceReplacer optionally replaces all context sources with a name.
+// PromptBuilder implementations that do not provide it remain compatible with
+// consumers that only append or prepend prompt context.
+type ContextSourceReplacer interface {
+	ReplaceContextSource(ctx context.Context, name string, source ContextSource) error
+}
+
+// ContextSourceRemover optionally removes all context sources with a name.
+// PromptBuilder implementations that do not provide it remain compatible with
+// consumers that only append or prepend prompt context.
+type ContextSourceRemover interface {
+	RemoveContextSource(ctx context.Context, name string) error
+}
+
 // NativeConversation exposes provider-neutral conversation history alongside
 // the rendered conversation used to construct a compatibility prompt.
 type NativeConversation interface {
@@ -146,6 +160,65 @@ func (b *Builder) PrependContextSource(ctx context.Context, source ContextSource
 		setter.SetTokenizer(b.tokenizer)
 	}
 	b.ContextSources = append([]ContextSource{source}, b.ContextSources...)
+	return nil
+}
+
+// ReplaceContextSource replaces all sources named name with source, preserving
+// the position of the first matching source.
+func (b *Builder) ReplaceContextSource(ctx context.Context, name string, source ContextSource) error {
+	name = strings.TrimSpace(name)
+	if b == nil {
+		return ErrPromptBuilderNil
+	}
+	if name == "" || source == nil {
+		return ErrPromptSource
+	}
+	if setter, ok := source.(TokenizerSetter); ok && b.tokenizer != nil {
+		setter.SetTokenizer(b.tokenizer)
+	}
+
+	sources := make([]ContextSource, 0, len(b.ContextSources))
+	replaced := false
+	for _, existing := range b.ContextSources {
+		if existing != nil && existing.Name() == name {
+			if !replaced {
+				sources = append(sources, source)
+				replaced = true
+			}
+			continue
+		}
+		sources = append(sources, existing)
+	}
+	if !replaced {
+		return ErrPromptSource
+	}
+	b.ContextSources = sources
+	return nil
+}
+
+// RemoveContextSource removes all sources named name.
+func (b *Builder) RemoveContextSource(ctx context.Context, name string) error {
+	name = strings.TrimSpace(name)
+	if b == nil {
+		return ErrPromptBuilderNil
+	}
+	if name == "" {
+		return ErrPromptSource
+	}
+
+	sources := make([]ContextSource, 0, len(b.ContextSources))
+	removed := false
+	for _, existing := range b.ContextSources {
+		if existing != nil && existing.Name() == name {
+			removed = true
+			continue
+		}
+		sources = append(sources, existing)
+	}
+	if !removed {
+		return ErrPromptSource
+	}
+	b.ContextSources = sources
 	return nil
 }
 

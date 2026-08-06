@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
@@ -183,13 +184,32 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 	}
 	promptBuilder.SetInput(input.Prompt)
 	nativeTools := usesNativeTools(a.def.Model)
-	if len(tools) > 0 && !nativeTools && !hasContextSource(promptBuilder, "tool_definitions") {
-		toolSource, err := tooldefinitions.New(nil, tools, a.def.DebugSink, a.def.ToolDefinitionOptions...)
-		if err != nil {
-			return nil, err
-		}
-		if err := promptBuilder.PrependContextSource(ctx, toolSource); err != nil {
-			return nil, err
+	if !nativeTools {
+		hasToolDefinitions := hasContextSource(promptBuilder, "tool_definitions")
+		if input.Execution.Tools != nil && hasToolDefinitions && len(tools) == 0 {
+			remover, ok := promptBuilder.(gaictx.ContextSourceRemover)
+			if !ok {
+				return nil, fmt.Errorf("prompt builder cannot remove tool definitions for execution tool override")
+			}
+			if err := remover.RemoveContextSource(ctx, "tool_definitions"); err != nil {
+				return nil, err
+			}
+		} else if len(tools) > 0 && (!hasToolDefinitions || input.Execution.Tools != nil) {
+			toolSource, err := tooldefinitions.New(nil, tools, a.def.DebugSink, a.def.ToolDefinitionOptions...)
+			if err != nil {
+				return nil, err
+			}
+			if hasToolDefinitions {
+				replacer, ok := promptBuilder.(gaictx.ContextSourceReplacer)
+				if !ok {
+					return nil, fmt.Errorf("prompt builder cannot replace tool definitions for execution tool override")
+				}
+				if err := replacer.ReplaceContextSource(ctx, "tool_definitions", toolSource); err != nil {
+					return nil, err
+				}
+			} else if err := promptBuilder.PrependContextSource(ctx, toolSource); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if setter, ok := promptBuilder.(gaictx.TokenizerSetter); ok {
