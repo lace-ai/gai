@@ -22,8 +22,25 @@ type RunInput struct {
 	MaxTokens int
 	// ResponseFormat requests the output shape for every model call in this run.
 	ResponseFormat ai.ResponseFormat
+	// Execution overrides selected definition-level execution settings for this run.
+	// Tools replaces Definition.Tools when non-nil; an empty non-nil slice disables
+	// definition-level tools. Nil inherits Definition.Tools.
+	Execution ExecutionConfig
 	// Meta carries application data such as user, session, or request IDs.
 	Meta map[string]any
+}
+
+// ExecutionConfig provides optional configuration for one workflow.
+//
+// Tool slices are copied when NewRun is called, preserving tool membership and
+// order for that workflow. Tool implementations themselves must remain safe for
+// concurrent use.
+type ExecutionConfig struct {
+	Tools []loop.Tool
+	// ToolChoice overrides the provider tool-choice setting when non-nil.
+	ToolChoice *ai.ToolChoice
+	// Reasoning overrides Definition.Reasoning when non-nil.
+	Reasoning *ai.ReasoningConfig
 }
 
 // Prompt creates the prompt builder used by one run.
@@ -149,6 +166,13 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 	if a.def.Prompt == nil {
 		return nil, loop.ErrPromptNotConfigured
 	}
+	tools := cloneTools(a.def.Tools)
+	if input.Execution.Tools != nil {
+		tools = cloneTools(input.Execution.Tools)
+	}
+	if _, err := loop.ToolDefinitions(tools); err != nil {
+		return nil, err
+	}
 
 	promptBuilder, err := a.def.Prompt(ctx, input)
 	if err != nil {
@@ -159,8 +183,8 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 	}
 	promptBuilder.SetInput(input.Prompt)
 	nativeTools := usesNativeTools(a.def.Model)
-	if len(a.def.Tools) > 0 && !nativeTools && !hasContextSource(promptBuilder, "tool_definitions") {
-		toolSource, err := tooldefinitions.New(nil, a.def.Tools, a.def.DebugSink, a.def.ToolDefinitionOptions...)
+	if len(tools) > 0 && !nativeTools && !hasContextSource(promptBuilder, "tool_definitions") {
+		toolSource, err := tooldefinitions.New(nil, tools, a.def.DebugSink, a.def.ToolDefinitionOptions...)
 		if err != nil {
 			return nil, err
 		}
@@ -178,7 +202,7 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 		}
 	}
 
-	l := loop.New(a.def.Model, a.def.Tools, promptBuilder, a.def.ToolResponseProcessor)
+	l := loop.New(a.def.Model, tools, promptBuilder, a.def.ToolResponseProcessor)
 	if !nativeTools {
 		l.ToolTransport = loop.ToolTransportText
 	}
@@ -195,7 +219,26 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 	}
 	l.ResponseFormat = cloneResponseFormat(input.ResponseFormat)
 	l.Reasoning = a.def.Reasoning
+	if input.Execution.ToolChoice != nil {
+		l.ToolChoice = cloneToolChoice(*input.Execution.ToolChoice)
+	}
+	if input.Execution.Reasoning != nil {
+		l.Reasoning = *input.Execution.Reasoning
+	}
 	return l, nil
+}
+
+func cloneTools(tools []loop.Tool) []loop.Tool {
+	if tools == nil {
+		return nil
+	}
+	return append([]loop.Tool(nil), tools...)
+}
+
+func cloneToolChoice(choice ai.ToolChoice) ai.ToolChoice {
+	cloned := choice
+	cloned.Names = append([]string(nil), choice.Names...)
+	return cloned
 }
 
 func usesNativeTools(model ai.Model) bool {

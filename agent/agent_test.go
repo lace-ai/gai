@@ -3,7 +3,9 @@ package agent_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/lace-ai/gai/agent"
@@ -160,6 +162,127 @@ func TestAgentNewRunCreatesLoop(t *testing.T) {
 	if builder == nil || builder.tokenizer == nil {
 		t.Fatal("expected model tokenizer to be set on prompt builder")
 	}
+}
+
+func TestAgentNewRunExecutionOverridesSnapshotToolsAndConfiguration(t *testing.T) {
+	t.Parallel()
+
+	definitionTool := loop.NewEchoTool()
+	runTool := namedTool{name: "run_tool"}
+	assistant := agent.New(agent.Definition{
+		Model:     nativeToolWorkflowModel{scriptedWorkflowModel: &scriptedWorkflowModel{}},
+		Tools:     []loop.Tool{definitionTool},
+		Reasoning: ai.ReasoningConfig{Effort: ai.ReasoningEffortLow},
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return &testPromptBuilder{}, nil
+		},
+	})
+	input := textRunInput("hello")
+	input.Execution = agent.ExecutionConfig{
+		Tools:      []loop.Tool{runTool},
+		ToolChoice: &ai.ToolChoice{Mode: ai.ToolChoiceRequired, Names: []string{"run_tool"}},
+		Reasoning:  &ai.ReasoningConfig{Enabled: true, Effort: ai.ReasoningEffortHigh},
+	}
+
+	workflow, err := assistant.NewRun(context.Background(), input)
+	if err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	input.Execution.Tools[0] = definitionTool
+	input.Execution.ToolChoice.Names[0] = "changed"
+	input.Execution.Reasoning.Effort = ai.ReasoningEffortLow
+
+	if len(workflow.Loop.Tools) != 1 || workflow.Loop.Tools[0] != runTool {
+		t.Fatalf("loop tools = %#v, want execution tool snapshot", workflow.Loop.Tools)
+	}
+	if got := workflow.Loop.ToolChoice; !reflect.DeepEqual(got, ai.ToolChoice{Mode: ai.ToolChoiceRequired, Names: []string{"run_tool"}}) {
+		t.Fatalf("tool choice = %#v", got)
+	}
+	if got := workflow.Loop.Reasoning; got != (ai.ReasoningConfig{Enabled: true, Effort: ai.ReasoningEffortHigh}) {
+		t.Fatalf("reasoning = %#v", got)
+	}
+}
+
+func TestAgentNewRunRejectsDuplicateExecutionToolNamesBeforeRun(t *testing.T) {
+	t.Parallel()
+
+	tool := loop.NewEchoTool()
+	assistant := agent.New(agent.Definition{
+		Model: nativeToolWorkflowModel{scriptedWorkflowModel: &scriptedWorkflowModel{}},
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return &testPromptBuilder{}, nil
+		},
+	})
+	input := textRunInput("hello")
+	input.Execution.Tools = []loop.Tool{tool, tool}
+
+	_, err := assistant.NewRun(context.Background(), input)
+	if err == nil || !strings.Contains(err.Error(), "duplicate tool name") {
+		t.Fatalf("NewRun error = %v, want duplicate tool name", err)
+	}
+}
+
+func TestAgentConcurrentRunsUseIndependentExecutionToolSets(t *testing.T) {
+	t.Parallel()
+
+	model := nativeToolWorkflowModel{scriptedWorkflowModel: &scriptedWorkflowModel{
+		scripts: [][]ai.Token{{{Type: ai.TokenTypeText, Text: "done"}}, {{Type: ai.TokenTypeText, Text: "done"}}},
+	}}
+	assistant := agent.New(agent.Definition{
+		Model: model,
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return &testPromptBuilder{}, nil
+		},
+	})
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	for _, name := range []string{"first", "second"} {
+		wg.Add(1)
+		go func(name string) {
+			defer wg.Done()
+			input := textRunInput("hello")
+			input.Execution.Tools = []loop.Tool{namedTool{name: name}}
+			workflow, err := assistant.NewRun(context.Background(), input)
+			if err == nil {
+				consumeWorkflow(t, workflow)
+			}
+			errs <- err
+		}(name)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("NewRun failed: %v", err)
+		}
+	}
+
+	requests := model.Requests()
+	if len(requests) != 2 {
+		t.Fatalf("requests = %d, want 2", len(requests))
+	}
+	names := map[string]bool{}
+	for _, request := range requests {
+		if len(request.Tools) != 1 {
+			t.Fatalf("request tools = %#v", request.Tools)
+		}
+		names[request.Tools[0].Name] = true
+	}
+	if !names["first"] || !names["second"] {
+		t.Fatalf("request tool names = %#v", names)
+	}
+}
+
+type namedTool struct{ name string }
+
+func (t namedTool) Name() string        { return t.name }
+func (t namedTool) Description() string { return "test tool" }
+func (t namedTool) Params() ai.ToolParameters {
+	return ai.ToolParameters{}
+}
+func (t namedTool) Function(context.Context, *ai.ToolCall) *loop.ToolResponse {
+	return loop.NewToolSuccess("ok")
 }
 
 func TestAgentToolsAutomaticallyAddPromptContract(t *testing.T) {
