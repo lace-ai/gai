@@ -281,7 +281,13 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 					return
 				}
 
-				request := renderedPromptRequest(prompt, l.MaxTokens, toolDefinitions, l.ToolChoice, l.ResponseFormat, l.Reasoning)
+				toolChoice := l.ToolChoice
+				if l.ToolTransport == ToolTransportText {
+					// Text transport exposes tools through the rendered prompt, not
+					// AIRequest.Tools. Provider-native tool choice is therefore invalid.
+					toolChoice = ai.ToolChoice{}
+				}
+				request := renderedPromptRequest(prompt, l.MaxTokens, toolDefinitions, toolChoice, l.ResponseFormat, l.Reasoning)
 				request.Messages = nativeMessages
 
 				tokens := l.Model.GenerateStream(iterCtx, request)

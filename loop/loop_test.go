@@ -1014,11 +1014,12 @@ func TestLoopFallsBackToBuildPromptEveryIteration(t *testing.T) {
 
 func TestLoopToolTransportControlsProviderToolDefinitions(t *testing.T) {
 	tests := []struct {
-		name      string
-		transport loop.ToolTransportMode
-		wantTools bool
+		name       string
+		transport  loop.ToolTransportMode
+		wantTools  bool
+		wantChoice bool
 	}{
-		{name: "default native transport", wantTools: true},
+		{name: "default native transport", wantTools: true, wantChoice: true},
 		{name: "text transport", transport: loop.ToolTransportText},
 	}
 
@@ -1027,6 +1028,7 @@ func TestLoopToolTransportControlsProviderToolDefinitions(t *testing.T) {
 			model := &scriptedStreamModel{sequences: [][]ai.Token{{{Type: ai.TokenTypeText, Text: "done"}}}}
 			l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
 			l.ToolTransport = tt.transport
+			l.ToolChoice = ai.ToolChoice{Mode: ai.ToolChoiceRequired}
 
 			if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
 				t.Fatalf("unexpected loop error: %v", err)
@@ -1037,6 +1039,12 @@ func TestLoopToolTransportControlsProviderToolDefinitions(t *testing.T) {
 			}
 			if got := len(requests[0].Tools) > 0; got != tt.wantTools {
 				t.Fatalf("request tools = %#v, want present=%t", requests[0].Tools, tt.wantTools)
+			}
+			if got := requests[0].ToolChoice.Mode != ""; got != tt.wantChoice {
+				t.Fatalf("request tool choice = %#v, want present=%t", requests[0].ToolChoice, tt.wantChoice)
+			}
+			if err := requests[0].Validate(); err != nil {
+				t.Fatalf("request must validate: %v", err)
 			}
 			if len(l.Tools) != 1 || l.Tools[0].Name() != "echo" {
 				t.Fatalf("loop lost executable tools: %#v", l.Tools)
