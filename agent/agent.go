@@ -191,6 +191,11 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 	}
 	promptBuilder.SetInput(input.Prompt)
 	nativeTools := usesNativeTools(a.def.Model)
+	if !nativeTools && input.Execution.ToolChoice != nil {
+		if err := validateTextToolChoice(*input.Execution.ToolChoice, tools); err != nil {
+			return nil, err
+		}
+	}
 	if !nativeTools {
 		hasToolDefinitions := hasContextSource(promptBuilder, "tool_definitions")
 		if input.Execution.Tools != nil && hasToolDefinitions && len(tools) == 0 {
@@ -285,6 +290,25 @@ func textToolChoiceInstruction(choice ai.ToolChoice) string {
 		return "You must make at least one tool call before producing a normal response."
 	}
 	return "You must make at least one tool call before producing a normal response. You may call only these selected tools: " + strings.Join(choice.Names, ", ") + "."
+}
+
+func validateTextToolChoice(choice ai.ToolChoice, tools []loop.Tool) error {
+	if choice.Mode != ai.ToolChoiceRequired {
+		return nil
+	}
+	if len(tools) == 0 {
+		return fmt.Errorf("required text tool choice requires at least one tool")
+	}
+	available := make(map[string]struct{}, len(tools))
+	for _, tool := range tools {
+		available[tool.Name()] = struct{}{}
+	}
+	for _, name := range choice.Names {
+		if _, ok := available[name]; !ok {
+			return fmt.Errorf("required text tool %q is not configured", name)
+		}
+	}
+	return nil
 }
 
 func usesNativeTools(model ai.Model) bool {

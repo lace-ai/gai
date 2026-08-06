@@ -608,6 +608,43 @@ func TestAgentTextTransportRequiresSelectedToolInPrompt(t *testing.T) {
 	}
 }
 
+func TestAgentTextTransportRejectsUnsatisfiableRequiredToolChoice(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name   string
+		tools  []loop.Tool
+		choice ai.ToolChoice
+	}{
+		{
+			name:   "no tools",
+			tools:  nil,
+			choice: ai.ToolChoice{Mode: ai.ToolChoiceRequired},
+		},
+		{
+			name:   "selected tool is unavailable",
+			tools:  []loop.Tool{namedTool{name: "search"}},
+			choice: ai.ToolChoice{Mode: ai.ToolChoiceRequired, Names: []string{"weather"}},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			assistant := agent.New(agent.Definition{
+				Model: disabledNativeToolWorkflowModel{&scriptedWorkflowModel{}},
+				Tools: tt.tools,
+				Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+					return gaictx.New(gaictx.Definition{Renderer: &gaictx.SimpleRenderer{}}), nil
+				},
+			})
+			input := textRunInput("use a tool")
+			input.Execution.ToolChoice = &tt.choice
+
+			if _, err := assistant.NewRun(context.Background(), input); err == nil {
+				t.Fatal("NewRun succeeded with an unsatisfiable required tool choice")
+			}
+		})
+	}
+}
+
 func TestAgentDoesNotDuplicateExistingToolDefinitions(t *testing.T) {
 	t.Parallel()
 
