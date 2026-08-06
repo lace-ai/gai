@@ -191,6 +191,7 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 	}
 	promptBuilder.SetInput(input.Prompt)
 	nativeTools := usesNativeTools(a.def.Model)
+	textToolsDisabled := !nativeTools && input.Execution.ToolChoice != nil && input.Execution.ToolChoice.Mode == ai.ToolChoiceNone
 	if !nativeTools && input.Execution.ToolChoice != nil {
 		if err := validateTextToolChoice(*input.Execution.ToolChoice, tools); err != nil {
 			return nil, err
@@ -199,7 +200,7 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 	}
 	if !nativeTools {
 		hasToolDefinitions := hasContextSource(promptBuilder, "tool_definitions")
-		if input.Execution.Tools != nil && hasToolDefinitions && len(tools) == 0 {
+		if (input.Execution.Tools != nil || textToolsDisabled) && hasToolDefinitions && len(tools) == 0 {
 			remover, ok := promptBuilder.(gaictx.ContextSourceRemover)
 			if !ok {
 				return nil, fmt.Errorf("prompt builder cannot remove tool definitions for execution tool override")
@@ -313,6 +314,9 @@ func validateTextToolChoice(choice ai.ToolChoice, tools []loop.Tool) error {
 }
 
 func selectedTextTools(choice ai.ToolChoice, tools []loop.Tool) []loop.Tool {
+	if choice.Mode == ai.ToolChoiceNone {
+		return []loop.Tool{}
+	}
 	if choice.Mode != ai.ToolChoiceRequired || len(choice.Names) == 0 {
 		return tools
 	}

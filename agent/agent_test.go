@@ -667,6 +667,56 @@ func TestAgentTextTransportDoesNotExecuteUnselectedRequiredTool(t *testing.T) {
 	}
 }
 
+func TestAgentTextTransportDoesNotAdvertiseOrExecuteDisabledTools(t *testing.T) {
+	disabled := &recordingTool{name: "search"}
+	model := &scriptedWorkflowModel{scripts: [][]ai.Token{
+		{{
+			Type: ai.TokenTypeToolCall,
+			ToolCall: &ai.ToolCall{
+				ID:   "call-1",
+				Type: "function",
+				Name: "search",
+				Args: []byte(`{}`),
+			},
+		}},
+		{},
+	}}
+	assistant := agent.New(agent.Definition{
+		Model: disabledNativeToolWorkflowModel{model},
+		Tools: []loop.Tool{disabled},
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return gaictx.New(gaictx.Definition{Renderer: &gaictx.SimpleRenderer{}}), nil
+		},
+	})
+	input := textRunInput("do not use tools")
+	input.Execution.ToolChoice = &ai.ToolChoice{Mode: ai.ToolChoiceNone}
+
+	workflow, err := assistant.NewRun(context.Background(), input)
+	if err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	if _, err := workflow.Loop.PromptBuilder.BuildContext(context.Background()); err != nil {
+		t.Fatalf("BuildContext failed: %v", err)
+	}
+	prompt, err := workflow.Loop.PromptBuilder.BuildPrompt(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("BuildPrompt failed: %v", err)
+	}
+	if strings.Contains(prompt, "tool: search") {
+		t.Fatalf("prompt advertised disabled tool:\n%s", prompt)
+	}
+	consumed := consumeWorkflow(t, workflow)
+	if len(consumed.errs) != 0 {
+		t.Fatalf("workflow errors: %v", consumed.errs)
+	}
+	if disabled.calls != 0 {
+		t.Fatalf("disabled tool was called %d times", disabled.calls)
+	}
+	if len(workflow.Loop.Tools) != 0 {
+		t.Fatalf("executable tools = %#v, want none", workflow.Loop.Tools)
+	}
+}
+
 func TestAgentTextTransportRejectsUnsatisfiableRequiredToolChoice(t *testing.T) {
 	t.Parallel()
 
