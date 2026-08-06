@@ -564,6 +564,45 @@ func TestAgentToolDefinitionOptionsCustomizeAutomaticPromptContract(t *testing.T
 	}
 }
 
+func TestAgentTextTransportRequiresSelectedToolInPrompt(t *testing.T) {
+	t.Parallel()
+
+	builder := gaictx.New(gaictx.Definition{Renderer: &gaictx.SimpleRenderer{}})
+	assistant := agent.New(agent.Definition{
+		Model: disabledNativeToolWorkflowModel{&scriptedWorkflowModel{}},
+		Tools: []loop.Tool{
+			namedTool{name: "search"},
+			namedTool{name: "weather"},
+		},
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return builder, nil
+		},
+	})
+
+	input := textRunInput("find the weather")
+	input.Execution.ToolChoice = &ai.ToolChoice{
+		Mode:  ai.ToolChoiceRequired,
+		Names: []string{"weather"},
+	}
+	run, err := assistant.NewRun(context.Background(), input)
+	if err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	if _, err := run.Loop.PromptBuilder.BuildContext(context.Background()); err != nil {
+		t.Fatalf("BuildContext failed: %v", err)
+	}
+	prompt, err := run.Loop.PromptBuilder.BuildPrompt(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("BuildPrompt failed: %v", err)
+	}
+	if !strings.Contains(prompt, "You must make at least one tool call before producing a normal response.") {
+		t.Fatalf("prompt missing required-tool instruction:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "You may call only these selected tools: weather.") {
+		t.Fatalf("prompt missing selected-tool restriction:\n%s", prompt)
+	}
+}
+
 func TestAgentDoesNotDuplicateExistingToolDefinitions(t *testing.T) {
 	t.Parallel()
 
