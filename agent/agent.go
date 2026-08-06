@@ -208,7 +208,7 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 			if err := remover.RemoveContextSource(ctx, "tool_definitions"); err != nil {
 				return nil, err
 			}
-		} else if len(tools) > 0 && (!hasToolDefinitions || input.Execution.Tools != nil) {
+		} else if len(tools) > 0 && (!hasToolDefinitions || input.Execution.Tools != nil || (input.Execution.ToolChoice != nil && input.Execution.ToolChoice.Mode == ai.ToolChoiceRequired && len(input.Execution.ToolChoice.Names) > 0)) {
 			toolSource, err := tooldefinitions.New(nil, tools, a.def.DebugSink, a.def.ToolDefinitionOptions...)
 			if err != nil {
 				return nil, err

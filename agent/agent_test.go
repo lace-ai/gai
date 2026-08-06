@@ -623,6 +623,51 @@ func TestAgentTextTransportRequiresSelectedToolInPrompt(t *testing.T) {
 	}
 }
 
+func TestAgentTextTransportSelectedToolsReplaceExistingPromptToolDefinitions(t *testing.T) {
+	t.Parallel()
+
+	search := namedTool{name: "search"}
+	weather := namedTool{name: "weather"}
+	staleSource, err := tooldefinitions.New(&gaictx.SimpleRenderer{}, []loop.Tool{search, weather}, nil)
+	if err != nil {
+		t.Fatalf("new stale tool source: %v", err)
+	}
+	builder := gaictx.New(gaictx.Definition{
+		Renderer:       &gaictx.SimpleRenderer{},
+		ContextSources: []gaictx.ContextSource{staleSource},
+	})
+	assistant := agent.New(agent.Definition{
+		Model: disabledNativeToolWorkflowModel{&scriptedWorkflowModel{}},
+		Tools: []loop.Tool{search, weather},
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return builder, nil
+		},
+	})
+
+	input := textRunInput("find the weather")
+	input.Execution.ToolChoice = &ai.ToolChoice{
+		Mode:  ai.ToolChoiceRequired,
+		Names: []string{"weather"},
+	}
+	run, err := assistant.NewRun(context.Background(), input)
+	if err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	if _, err := run.Loop.PromptBuilder.BuildContext(context.Background()); err != nil {
+		t.Fatalf("BuildContext failed: %v", err)
+	}
+	prompt, err := run.Loop.PromptBuilder.BuildPrompt(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("BuildPrompt failed: %v", err)
+	}
+	if strings.Contains(prompt, "tool: search") {
+		t.Fatalf("prompt advertised unselected tool:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "tool: weather") {
+		t.Fatalf("prompt omitted selected tool:\n%s", prompt)
+	}
+}
+
 func TestAgentTextTransportDoesNotExecuteUnselectedRequiredTool(t *testing.T) {
 	selected := &recordingTool{name: "weather"}
 	unselected := &recordingTool{name: "search"}
