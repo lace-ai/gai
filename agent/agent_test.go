@@ -319,6 +319,21 @@ func (t namedTool) Function(context.Context, *ai.ToolCall) *loop.ToolResponse {
 	return loop.NewToolSuccess("ok")
 }
 
+type recordingTool struct {
+	name  string
+	calls int
+}
+
+func (t *recordingTool) Name() string        { return t.name }
+func (t *recordingTool) Description() string { return "test tool" }
+func (t *recordingTool) Params() ai.ToolParameters {
+	return ai.ToolParameters{}
+}
+func (t *recordingTool) Function(context.Context, *ai.ToolCall) *loop.ToolResponse {
+	t.calls++
+	return loop.NewToolSuccess("called")
+}
+
 func TestAgentToolsAutomaticallyAddPromptContract(t *testing.T) {
 	t.Parallel()
 
@@ -605,6 +620,50 @@ func TestAgentTextTransportRequiresSelectedToolInPrompt(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "You may call only these selected tools: weather.") {
 		t.Fatalf("prompt missing selected-tool restriction:\n%s", prompt)
+	}
+}
+
+func TestAgentTextTransportDoesNotExecuteUnselectedRequiredTool(t *testing.T) {
+	selected := &recordingTool{name: "weather"}
+	unselected := &recordingTool{name: "search"}
+	model := &scriptedWorkflowModel{scripts: [][]ai.Token{
+		{{
+			Type: ai.TokenTypeToolCall,
+			ToolCall: &ai.ToolCall{
+				ID:   "call-1",
+				Type: "function",
+				Name: "search",
+				Args: []byte(`{}`),
+			},
+		}},
+		{},
+	}}
+	assistant := agent.New(agent.Definition{
+		Model: disabledNativeToolWorkflowModel{model},
+		Tools: []loop.Tool{selected, unselected},
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return gaictx.New(gaictx.Definition{Renderer: &gaictx.SimpleRenderer{}}), nil
+		},
+	})
+	input := textRunInput("use weather")
+	input.Execution.ToolChoice = &ai.ToolChoice{Mode: ai.ToolChoiceRequired, Names: []string{"weather"}}
+
+	workflow, err := assistant.NewRun(context.Background(), input)
+	if err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	consumed := consumeWorkflow(t, workflow)
+	if len(consumed.errs) != 0 {
+		t.Fatalf("workflow errors: %v", consumed.errs)
+	}
+	if unselected.calls != 0 {
+		t.Fatalf("unselected tool was called %d times", unselected.calls)
+	}
+	if selected.calls != 0 {
+		t.Fatalf("selected tool was called %d times", selected.calls)
+	}
+	if len(workflow.Loop.Tools) != 1 || workflow.Loop.Tools[0].Name() != "weather" {
+		t.Fatalf("executable tools = %#v, want only weather", workflow.Loop.Tools)
 	}
 }
 

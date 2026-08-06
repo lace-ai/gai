@@ -195,6 +195,7 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 		if err := validateTextToolChoice(*input.Execution.ToolChoice, tools); err != nil {
 			return nil, err
 		}
+		tools = selectedTextTools(*input.Execution.ToolChoice, tools)
 	}
 	if !nativeTools {
 		hasToolDefinitions := hasContextSource(promptBuilder, "tool_definitions")
@@ -309,6 +310,23 @@ func validateTextToolChoice(choice ai.ToolChoice, tools []loop.Tool) error {
 		}
 	}
 	return nil
+}
+
+func selectedTextTools(choice ai.ToolChoice, tools []loop.Tool) []loop.Tool {
+	if choice.Mode != ai.ToolChoiceRequired || len(choice.Names) == 0 {
+		return tools
+	}
+	selected := make(map[string]struct{}, len(choice.Names))
+	for _, name := range choice.Names {
+		selected[name] = struct{}{}
+	}
+	filtered := make([]loop.Tool, 0, len(choice.Names))
+	for _, tool := range tools {
+		if _, ok := selected[tool.Name()]; ok {
+			filtered = append(filtered, tool)
+		}
+	}
+	return filtered
 }
 
 func usesNativeTools(model ai.Model) bool {
