@@ -338,8 +338,9 @@ func TestAgentToolsAutomaticallyAddPromptContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRun failed: %v", err)
 	}
-	if len(builder.ContextSources) != 2 || builder.ContextSources[0].Name() != "tool_definitions" || builder.ContextSources[1].Name() != "application_context" {
-		t.Fatalf("tool definitions were not prepended: %+v", builder.ContextSources)
+	runBuilder := run.Loop.PromptBuilder.(*gaictx.Builder)
+	if len(runBuilder.ContextSources) != 2 || runBuilder.ContextSources[0].Name() != "tool_definitions" || runBuilder.ContextSources[1].Name() != "application_context" {
+		t.Fatalf("tool definitions were not prepended: %+v", runBuilder.ContextSources)
 	}
 	if _, err := run.Loop.PromptBuilder.BuildContext(context.Background()); err != nil {
 		t.Fatalf("BuildContext failed: %v", err)
@@ -414,8 +415,9 @@ func TestAgentNativeToolModelWithoutSupportAddsPromptToolProtocol(t *testing.T) 
 	if err != nil {
 		t.Fatalf("NewRun failed: %v", err)
 	}
-	if len(builder.ContextSources) != 1 || builder.ContextSources[0].Name() != "tool_definitions" {
-		t.Fatalf("disabled native tool model did not add prompt tool protocol: %+v", builder.ContextSources)
+	runBuilder := run.Loop.PromptBuilder.(*gaictx.Builder)
+	if len(runBuilder.ContextSources) != 1 || runBuilder.ContextSources[0].Name() != "tool_definitions" {
+		t.Fatalf("disabled native tool model did not add prompt tool protocol: %+v", runBuilder.ContextSources)
 	}
 	if _, err := run.Loop.PromptBuilder.BuildContext(context.Background()); err != nil {
 		t.Fatalf("BuildContext failed: %v", err)
@@ -458,12 +460,14 @@ func TestAgentModelDescriberControlsPromptToolProtocol(t *testing.T) {
 				},
 			})
 
-			if _, err := assistant.NewRun(context.Background(), textRunInput("use echo")); err != nil {
+			run, err := assistant.NewRun(context.Background(), textRunInput("use echo"))
+			if err != nil {
 				t.Fatalf("NewRun failed: %v", err)
 			}
-			hasPromptProtocol := len(builder.ContextSources) == 1 && builder.ContextSources[0].Name() == "tool_definitions"
+			runBuilder := run.Loop.PromptBuilder.(*gaictx.Builder)
+			hasPromptProtocol := len(runBuilder.ContextSources) == 1 && runBuilder.ContextSources[0].Name() == "tool_definitions"
 			if hasPromptProtocol != tt.wantPromptProtocol {
-				t.Fatalf("prompt protocol = %t, want %t; sources: %+v", hasPromptProtocol, tt.wantPromptProtocol, builder.ContextSources)
+				t.Fatalf("prompt protocol = %t, want %t; sources: %+v", hasPromptProtocol, tt.wantPromptProtocol, runBuilder.ContextSources)
 			}
 		})
 	}
@@ -515,8 +519,9 @@ func TestAgentResolvesToolTransportForPromptAndRequest(t *testing.T) {
 			if len(consumed.errs) != 0 {
 				t.Fatalf("workflow errors: %v", consumed.errs)
 			}
-			if got := len(builder.ContextSources) == 1 && builder.ContextSources[0].Name() == "tool_definitions"; got != tt.wantPromptProtocol {
-				t.Fatalf("prompt protocol = %t, want %t; sources: %+v", got, tt.wantPromptProtocol, builder.ContextSources)
+			runBuilder := workflow.Loop.PromptBuilder.(*gaictx.Builder)
+			if got := len(runBuilder.ContextSources) == 1 && runBuilder.ContextSources[0].Name() == "tool_definitions"; got != tt.wantPromptProtocol {
+				t.Fatalf("prompt protocol = %t, want %t; sources: %+v", got, tt.wantPromptProtocol, runBuilder.ContextSources)
 			}
 			requests := model.Requests()
 			if len(requests) != 1 {
@@ -666,8 +671,9 @@ func TestAgentExecutionToolsReplaceExistingPromptToolDefinitions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRun failed: %v", err)
 	}
-	if len(builder.ContextSources) != 1 || builder.ContextSources[0].Name() != "tool_definitions" {
-		t.Fatalf("context sources = %+v, want one tool-definitions source", builder.ContextSources)
+	runBuilder := run.Loop.PromptBuilder.(*gaictx.Builder)
+	if len(runBuilder.ContextSources) != 1 || runBuilder.ContextSources[0].Name() != "tool_definitions" {
+		t.Fatalf("context sources = %+v, want one tool-definitions source", runBuilder.ContextSources)
 	}
 	if _, err := run.Loop.PromptBuilder.BuildContext(context.Background()); err != nil {
 		t.Fatalf("BuildContext failed: %v", err)
@@ -681,6 +687,62 @@ func TestAgentExecutionToolsReplaceExistingPromptToolDefinitions(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "tool: run_tool") {
 		t.Fatalf("prompt missing run-level tool:\n%s", prompt)
+	}
+}
+
+func TestAgentExecutionToolOverridesDoNotMutateSharedPromptBuilder(t *testing.T) {
+	t.Parallel()
+
+	definitionTool := namedTool{name: "definition_tool"}
+	runTool := namedTool{name: "run_tool"}
+	staleSource, err := tooldefinitions.New(&gaictx.SimpleRenderer{}, []loop.Tool{definitionTool}, nil)
+	if err != nil {
+		t.Fatalf("new stale tool source: %v", err)
+	}
+	builder := gaictx.New(gaictx.Definition{
+		Renderer:       &gaictx.SimpleRenderer{},
+		ContextSources: []gaictx.ContextSource{staleSource},
+	})
+	assistant := agent.New(agent.Definition{
+		Model: disabledNativeToolWorkflowModel{&scriptedWorkflowModel{}},
+		Tools: []loop.Tool{definitionTool},
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return builder, nil
+		},
+	})
+
+	firstInput := textRunInput("use the run tool")
+	firstInput.Execution.Tools = []loop.Tool{runTool}
+	first, err := assistant.NewRun(context.Background(), firstInput)
+	if err != nil {
+		t.Fatalf("first NewRun failed: %v", err)
+	}
+
+	secondInput := textRunInput("do not use tools")
+	secondInput.Execution.Tools = []loop.Tool{}
+	second, err := assistant.NewRun(context.Background(), secondInput)
+	if err != nil {
+		t.Fatalf("second NewRun failed: %v", err)
+	}
+
+	for name, run := range map[string]*agent.Workflow{"first": first, "second": second} {
+		if _, err := run.Loop.PromptBuilder.BuildContext(context.Background()); err != nil {
+			t.Fatalf("%s BuildContext failed: %v", name, err)
+		}
+	}
+	firstPrompt, err := first.Loop.PromptBuilder.BuildPrompt(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("first BuildPrompt failed: %v", err)
+	}
+	secondPrompt, err := second.Loop.PromptBuilder.BuildPrompt(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("second BuildPrompt failed: %v", err)
+	}
+	if strings.Contains(firstPrompt, "tool: definition_tool") || !strings.Contains(firstPrompt, "tool: run_tool") {
+		t.Fatalf("first prompt tool definitions = %q", firstPrompt)
+	}
+	if strings.Contains(secondPrompt, "tool: definition_tool") || strings.Contains(secondPrompt, "tool: run_tool") {
+		t.Fatalf("second prompt tool definitions = %q", secondPrompt)
 	}
 }
 
@@ -710,8 +772,9 @@ func TestAgentExecutionEmptyToolsRemoveExistingPromptToolDefinitions(t *testing.
 	if err != nil {
 		t.Fatalf("NewRun failed: %v", err)
 	}
-	if len(builder.ContextSources) != 0 {
-		t.Fatalf("context sources = %+v, want no tool definitions", builder.ContextSources)
+	runBuilder := run.Loop.PromptBuilder.(*gaictx.Builder)
+	if len(runBuilder.ContextSources) != 0 {
+		t.Fatalf("context sources = %+v, want no tool definitions", runBuilder.ContextSources)
 	}
 	if _, err := run.Loop.PromptBuilder.BuildContext(context.Background()); err != nil {
 		t.Fatalf("BuildContext failed: %v", err)

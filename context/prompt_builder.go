@@ -39,6 +39,13 @@ type PromptBuilder interface {
 	SetInput(input PromptInput)
 }
 
+// PromptBuilderCloner is optionally implemented by builders that can provide
+// an independent copy for a workflow. Agent uses it to isolate per-run prompt
+// configuration when a Prompt callback returns the same builder more than once.
+type PromptBuilderCloner interface {
+	ClonePromptBuilder() PromptBuilder
+}
+
 // NativeMessageBuilder optionally constructs both representations of a model
 // request. PromptBuilder implementations that do not provide it continue to
 // use the rendered prompt as their request input.
@@ -140,6 +147,27 @@ func NewBuilder(renderer Renderer, tokenBudget int) *Builder {
 		Renderer:    renderer,
 		TokenBudget: tokenBudget,
 	})
+}
+
+// ClonePromptBuilder returns an independent builder copy suitable for one
+// workflow. Context sources and render components are shared because they are
+// configured dependencies; the slices that hold run-specific builder state are
+// copied.
+func (b *Builder) ClonePromptBuilder() PromptBuilder {
+	if b == nil {
+		return (*Builder)(nil)
+	}
+	cloned := *b
+	cloned.SystemInstructions = make([]Part, len(b.SystemInstructions))
+	copy(cloned.SystemInstructions, b.SystemInstructions)
+	cloned.ContextSources = make([]ContextSource, len(b.ContextSources))
+	copy(cloned.ContextSources, b.ContextSources)
+	cloned.ContextParts = make([]Part, len(b.ContextParts))
+	copy(cloned.ContextParts, b.ContextParts)
+	cloned.Iteration = make([]Part, len(b.Iteration))
+	copy(cloned.Iteration, b.Iteration)
+	cloned.input = b.input.Clone()
+	return &cloned
 }
 
 func (b *Builder) SetDebugSink(debugSink gai.DebugSink) {
