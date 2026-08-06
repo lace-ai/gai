@@ -252,7 +252,9 @@ func cloneTools(tools []loop.Tool) []loop.Tool {
 	if tools == nil {
 		return nil
 	}
-	return append([]loop.Tool(nil), tools...)
+	cloned := make([]loop.Tool, len(tools))
+	copy(cloned, tools)
+	return cloned
 }
 
 func cloneToolChoice(choice ai.ToolChoice) ai.ToolChoice {

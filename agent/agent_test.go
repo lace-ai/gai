@@ -164,6 +164,40 @@ func TestAgentNewRunCreatesLoop(t *testing.T) {
 	}
 }
 
+func TestAgentNewRunPreservesNilAndEmptyExecutionToolOverrides(t *testing.T) {
+	t.Parallel()
+
+	definitionTool := loop.NewEchoTool()
+	assistant := agent.New(agent.Definition{
+		Model: nativeToolWorkflowModel{scriptedWorkflowModel: &scriptedWorkflowModel{}},
+		Tools: []loop.Tool{definitionTool},
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return &testPromptBuilder{}, nil
+		},
+	})
+
+	inherited, err := assistant.NewRun(context.Background(), textRunInput("inherit tools"))
+	if err != nil {
+		t.Fatalf("NewRun with nil tools failed: %v", err)
+	}
+	if len(inherited.Loop.Tools) != 1 || inherited.Loop.Tools[0] != definitionTool {
+		t.Fatalf("nil execution tools = %#v, want definition tools", inherited.Loop.Tools)
+	}
+
+	disabledInput := textRunInput("disable tools")
+	disabledInput.Execution.Tools = []loop.Tool{}
+	disabled, err := assistant.NewRun(context.Background(), disabledInput)
+	if err != nil {
+		t.Fatalf("NewRun with empty tools failed: %v", err)
+	}
+	if disabled.Loop.Tools == nil {
+		t.Fatal("empty execution tools became nil, which would restore definition tools when reused")
+	}
+	if len(disabled.Loop.Tools) != 0 {
+		t.Fatalf("empty execution tools = %#v, want no tools", disabled.Loop.Tools)
+	}
+}
+
 func TestAgentNewRunExecutionOverridesSnapshotToolsAndConfiguration(t *testing.T) {
 	t.Parallel()
 
