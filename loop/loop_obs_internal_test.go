@@ -427,13 +427,13 @@ func toolSpanText(span sdktrace.ReadOnlySpan) string {
 	text.WriteString(span.Status().Description)
 	for _, attr := range span.Attributes() {
 		text.WriteString(string(attr.Key))
-		text.WriteString(attr.Value.Emit())
+		text.WriteString(attr.Value.String())
 	}
 	for _, event := range span.Events() {
 		text.WriteString(event.Name)
 		for _, attr := range event.Attributes {
 			text.WriteString(string(attr.Key))
-			text.WriteString(attr.Value.Emit())
+			text.WriteString(attr.Value.String())
 		}
 	}
 	return text.String()

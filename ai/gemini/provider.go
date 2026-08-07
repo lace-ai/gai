@@ -184,12 +184,6 @@ func (p *Provider) getClient(ctx context.Context) (*genai.Client, error) {
 	})
 }
 
-func fallbackModels() []string {
-	out := make([]string, len(models))
-	copy(out, models)
-	return out
-}
-
 func containsModel(models []string, name string) bool {
 	for _, modelName := range models {
 		if modelName == name {

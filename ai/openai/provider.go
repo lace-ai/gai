@@ -194,12 +194,6 @@ func isChatCapableModel(name string) bool {
 	return name != "gpt-5.6-auto"
 }
 
-func fallbackModels() []string {
-	out := make([]string, len(models))
-	copy(out, models)
-	return out
-}
-
 func (p *Provider) fallbackDescriptors() []ai.ModelDescriptor {
 	descriptors := make([]ai.ModelDescriptor, 0, len(models))
 	for _, model := range models {

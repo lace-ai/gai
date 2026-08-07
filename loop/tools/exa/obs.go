@@ -12,7 +12,7 @@ import (
 
 const exaTracerName = "github.com/lace-ai/gai/loop/tools/exa"
 
-var errObservedExaSearch = errors.New("Exa search failed")
+var errObservedExaSearch = errors.New("exa search failed")
 
 type searchObserver struct {
 	debug      gai.DebugSink

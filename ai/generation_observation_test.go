@@ -19,7 +19,7 @@ func TestGenerationObservationRecordsSemanticContract(t *testing.T) {
 	defer restore()
 
 	ctx, parent := otel.Tracer("test").Start(context.Background(), "parent")
-	ctx, observation := StartGenerationObservation(ctx, AIRequest{
+	_, observation := StartGenerationObservation(ctx, AIRequest{
 		Prompt: "private prompt", MaxTokens: 42,
 		ResponseFormat: ResponseFormat{Type: ResponseFormatJSONSchema},
 	}, GenerationConfig{Provider: "test-provider", Model: "requested-model", Streaming: true})
@@ -67,7 +67,7 @@ func TestGenerationObservationRecordsSemanticContract(t *testing.T) {
 		t.Fatalf("span kind = %s, want client", span.SpanKind())
 	}
 	for key, value := range attrs {
-		if strings.Contains(value.Emit(), "private prompt") || strings.Contains(value.Emit(), "private completion") {
+		if strings.Contains(value.String(), "private prompt") || strings.Contains(value.String(), "private completion") {
 			t.Fatalf("content leaked through %s", key)
 		}
 	}

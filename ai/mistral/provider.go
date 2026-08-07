@@ -156,12 +156,6 @@ func (p *Provider) listModelCatalog(ctx context.Context) ([]ai.ModelDescriptor, 
 	return descriptors, nil
 }
 
-func fallbackModels() []string {
-	out := make([]string, len(models))
-	copy(out, models)
-	return out
-}
-
 func (p *Provider) fallbackDescriptors() []ai.ModelDescriptor {
 	descriptors := make([]ai.ModelDescriptor, 0, len(models))
 	for _, model := range models {
