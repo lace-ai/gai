@@ -503,3 +503,4 @@ Before making a large API change, open an issue describing the use case and comp
 GAI is available under the [MIT License](LICENSE).
 
 Copyright (c) 2026 Samuel Konrad.
+
