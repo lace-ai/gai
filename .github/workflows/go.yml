@@ -88,7 +88,7 @@ jobs:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     env:
-      GOVULNCHECK_VERSION: v1.1.4
+      GOVULNCHECK_VERSION: v1.6.0
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
