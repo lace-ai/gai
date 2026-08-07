@@ -233,7 +233,7 @@ func (t *SearchTool) Function(ctx context.Context, call *ai.ToolCall) (response 
 	ctx, observer := newSearchObserver(ctx, t.debug, t.searchType, t.numResults)
 	defer func() {
 		if response == nil {
-			observer.Finish(errors.New("Exa search returned no tool response"))
+			observer.Finish(errors.New("exa search returned no tool response"))
 			return
 		}
 		observer.Finish(response.ErrorValue())

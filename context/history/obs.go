@@ -295,7 +295,9 @@ func (o *historyObserver) BuildFinished(ctx context.Context, part *Part, tokenCo
 	o.turnCount = turnCount
 	o.includedTurnCount = includedTurnCount
 	o.messageCount = messageCount
-	o.contentCount = len(part.Contents)
+	if part != nil {
+		o.contentCount = len(part.Contents)
+	}
 
 	fields := map[string]any{
 		"session_id":    o.sessionID,

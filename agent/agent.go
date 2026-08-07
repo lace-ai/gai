@@ -202,7 +202,7 @@ func usesNativeTools(model ai.Model) bool {
 	if describer, ok := model.(ai.ModelDescriber); ok {
 		return describer.Descriptor().SupportsNativeTools()
 	}
-	native, ok := model.(ai.NativeToolModel)
+	native, ok := model.(interface{ NativeTools() bool })
 	return ok && native.NativeTools()
 }
 

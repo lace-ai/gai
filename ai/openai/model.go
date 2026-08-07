@@ -24,7 +24,6 @@ type Model struct {
 
 var _ ai.Model = (*Model)(nil)
 var _ ai.ModelDescriber = (*Model)(nil)
-var _ ai.NativeToolModel = (*Model)(nil)
 
 func (m *Model) Name() string { return m.name }
 
