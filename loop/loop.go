@@ -49,6 +49,8 @@ type Loop struct {
 	Model ai.Model
 	// Tools contains the functions available to the model.
 	Tools []Tool
+	// ToolChoice controls whether and how the model may call Tools.
+	ToolChoice ai.ToolChoice
 	// ToolTransport controls whether Tools are serialized into AIRequest.Tools.
 	// The default is ToolTransportNative; Tools remain executable in either mode.
 	ToolTransport ToolTransportMode
@@ -110,11 +112,12 @@ type pendingToolCall struct {
 // Conversation state remains in Prompt until a provider-native message path is
 // introduced deliberately; this boundary keeps that future change separate
 // from the current rendered-prompt behavior.
-func renderedPromptRequest(prompt string, maxTokens int, tools []ai.ToolDefinition, responseFormat ai.ResponseFormat, reasoning ai.ReasoningConfig) ai.AIRequest {
+func renderedPromptRequest(prompt string, maxTokens int, tools []ai.ToolDefinition, toolChoice ai.ToolChoice, responseFormat ai.ResponseFormat, reasoning ai.ReasoningConfig) ai.AIRequest {
 	return ai.AIRequest{
 		Prompt:         prompt,
 		MaxTokens:      maxTokens,
 		Tools:          tools,
+		ToolChoice:     toolChoice,
 		ResponseFormat: responseFormat,
 		Reasoning:      reasoning,
 	}
@@ -278,7 +281,13 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 					return
 				}
 
-				request := renderedPromptRequest(prompt, l.MaxTokens, toolDefinitions, l.ResponseFormat, l.Reasoning)
+				toolChoice := l.ToolChoice
+				if l.ToolTransport == ToolTransportText {
+					// Text transport exposes tools through the rendered prompt, not
+					// AIRequest.Tools. Provider-native tool choice is therefore invalid.
+					toolChoice = ai.ToolChoice{}
+				}
+				request := renderedPromptRequest(prompt, l.MaxTokens, toolDefinitions, toolChoice, l.ResponseFormat, l.Reasoning)
 				request.Messages = nativeMessages
 
 				tokens := l.Model.GenerateStream(iterCtx, request)

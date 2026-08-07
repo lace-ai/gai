@@ -234,6 +234,24 @@ support := agent.New(agent.Definition{
 
 The loop sends definitions to the model, executes requested calls, appends tool results to the conversation, and continues until the model commits a normal response or the iteration limit is reached.
 
+For session- or user-specific tools, set `RunInput.Execution.Tools`. A nil slice
+inherits `Definition.Tools`; a non-nil slice replaces them, and an empty slice
+disables definition-level tools for that run. `NewRun` snapshots the slice's
+membership and order, then uses that same snapshot for prompt definitions,
+provider requests, and execution. Tool implementations must still be safe for
+concurrent use.
+
+```go
+workflow, err := support.NewRun(ctx, agent.RunInput{
+  Execution: agent.ExecutionConfig{
+    Tools: []loop.Tool{lookupOrderToolForUser(userID)},
+  },
+})
+```
+
+`Execution.ToolChoice` and `Execution.Reasoning` optionally override the
+definition-level settings for a single run.
+
 ## Ordered workflow events
 
 `RunEvents` forwards the loop's event stream without splitting it into unrelated channels:

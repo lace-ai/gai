@@ -111,6 +111,7 @@ func DecodeToolArgs[T any](req *ai.ToolCall, target *T) error {
 // definitions. Tool execution remains owned by loop.Tool.
 func ToolDefinitions(tools []Tool) ([]ai.ToolDefinition, error) {
 	definitions := make([]ai.ToolDefinition, 0, len(tools))
+	names := make(map[string]struct{}, len(tools))
 	for index, tool := range tools {
 		if tool == nil {
 			return nil, fmt.Errorf("%w: tool at index %d is nil", ai.ErrInvalidToolDefinition, index)
@@ -123,6 +124,10 @@ func ToolDefinitions(tools []Tool) ([]ai.ToolDefinition, error) {
 		if err != nil {
 			return nil, fmt.Errorf("tool %q: %w", tool.Name(), err)
 		}
+		if _, duplicate := names[definition.Name]; duplicate {
+			return nil, fmt.Errorf("%w: duplicate tool name %q", ai.ErrInvalidToolDefinition, definition.Name)
+		}
+		names[definition.Name] = struct{}{}
 		definitions = append(definitions, definition)
 	}
 	return definitions, nil

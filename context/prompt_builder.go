@@ -39,11 +39,32 @@ type PromptBuilder interface {
 	SetInput(input PromptInput)
 }
 
+// PromptBuilderCloner is optionally implemented by builders that can provide
+// an independent copy for a workflow. Agent uses it to isolate per-run prompt
+// configuration when a Prompt callback returns the same builder more than once.
+type PromptBuilderCloner interface {
+	ClonePromptBuilder() PromptBuilder
+}
+
 // NativeMessageBuilder optionally constructs both representations of a model
 // request. PromptBuilder implementations that do not provide it continue to
 // use the rendered prompt as their request input.
 type NativeMessageBuilder interface {
 	BuildRequest(ctx context.Context, conv Conversation) (string, []ai.RequestMessage, error)
+}
+
+// ContextSourceReplacer optionally replaces all context sources with a name.
+// PromptBuilder implementations that do not provide it remain compatible with
+// consumers that only append or prepend prompt context.
+type ContextSourceReplacer interface {
+	ReplaceContextSource(ctx context.Context, name string, source ContextSource) error
+}
+
+// ContextSourceRemover optionally removes all context sources with a name.
+// PromptBuilder implementations that do not provide it remain compatible with
+// consumers that only append or prepend prompt context.
+type ContextSourceRemover interface {
+	RemoveContextSource(ctx context.Context, name string) error
 }
 
 // NativeConversation exposes provider-neutral conversation history alongside
@@ -128,6 +149,27 @@ func NewBuilder(renderer Renderer, tokenBudget int) *Builder {
 	})
 }
 
+// ClonePromptBuilder returns an independent builder copy suitable for one
+// workflow. Context sources and render components are shared because they are
+// configured dependencies; the slices that hold run-specific builder state are
+// copied.
+func (b *Builder) ClonePromptBuilder() PromptBuilder {
+	if b == nil {
+		return (*Builder)(nil)
+	}
+	cloned := *b
+	cloned.SystemInstructions = make([]Part, len(b.SystemInstructions))
+	copy(cloned.SystemInstructions, b.SystemInstructions)
+	cloned.ContextSources = make([]ContextSource, len(b.ContextSources))
+	copy(cloned.ContextSources, b.ContextSources)
+	cloned.ContextParts = make([]Part, len(b.ContextParts))
+	copy(cloned.ContextParts, b.ContextParts)
+	cloned.Iteration = make([]Part, len(b.Iteration))
+	copy(cloned.Iteration, b.Iteration)
+	cloned.input = b.input.Clone()
+	return &cloned
+}
+
 func (b *Builder) SetDebugSink(debugSink gai.DebugSink) {
 	b.debugSink = debugSink
 }
@@ -146,6 +188,65 @@ func (b *Builder) PrependContextSource(ctx context.Context, source ContextSource
 		setter.SetTokenizer(b.tokenizer)
 	}
 	b.ContextSources = append([]ContextSource{source}, b.ContextSources...)
+	return nil
+}
+
+// ReplaceContextSource replaces all sources named name with source, preserving
+// the position of the first matching source.
+func (b *Builder) ReplaceContextSource(ctx context.Context, name string, source ContextSource) error {
+	name = strings.TrimSpace(name)
+	if b == nil {
+		return ErrPromptBuilderNil
+	}
+	if name == "" || source == nil {
+		return ErrPromptSource
+	}
+	if setter, ok := source.(TokenizerSetter); ok && b.tokenizer != nil {
+		setter.SetTokenizer(b.tokenizer)
+	}
+
+	sources := make([]ContextSource, 0, len(b.ContextSources))
+	replaced := false
+	for _, existing := range b.ContextSources {
+		if existing != nil && existing.Name() == name {
+			if !replaced {
+				sources = append(sources, source)
+				replaced = true
+			}
+			continue
+		}
+		sources = append(sources, existing)
+	}
+	if !replaced {
+		return ErrPromptSource
+	}
+	b.ContextSources = sources
+	return nil
+}
+
+// RemoveContextSource removes all sources named name.
+func (b *Builder) RemoveContextSource(ctx context.Context, name string) error {
+	name = strings.TrimSpace(name)
+	if b == nil {
+		return ErrPromptBuilderNil
+	}
+	if name == "" {
+		return ErrPromptSource
+	}
+
+	sources := make([]ContextSource, 0, len(b.ContextSources))
+	removed := false
+	for _, existing := range b.ContextSources {
+		if existing != nil && existing.Name() == name {
+			removed = true
+			continue
+		}
+		sources = append(sources, existing)
+	}
+	if !removed {
+		return ErrPromptSource
+	}
+	b.ContextSources = sources
 	return nil
 }
 
