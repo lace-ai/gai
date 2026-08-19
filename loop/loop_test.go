@@ -44,6 +44,11 @@ type countingPromptBuilder struct {
 	count atomic.Int32
 }
 
+type deadlineRecordingPromptBuilder struct {
+	stubPromptBuilder
+	hasDeadline atomic.Bool
+}
+
 type failingToolResponseProcessor struct {
 	err error
 }
@@ -84,6 +89,20 @@ func (b *countingPromptBuilder) BuildContext(ctx context.Context) ([]gaictx.Part
 func (b *countingPromptBuilder) BuildPrompt(ctx context.Context, conv gaictx.Conversation) (string, error) {
 	count := b.count.Add(1)
 	return fmt.Sprintf("prompt-%d", count), nil
+}
+
+func (b *deadlineRecordingPromptBuilder) BuildPrompt(ctx context.Context, conv gaictx.Conversation) (string, error) {
+	_, hasDeadline := ctx.Deadline()
+	b.hasDeadline.Store(hasDeadline)
+	return b.stubPromptBuilder.BuildPrompt(ctx, conv)
+}
+
+func (b *deadlineRecordingPromptBuilder) BuildRequest(ctx context.Context, conv gaictx.Conversation) (string, []ai.RequestMessage, error) {
+	prompt, err := b.BuildPrompt(ctx, conv)
+	if err != nil {
+		return "", nil, err
+	}
+	return prompt, []ai.RequestMessage{{Role: ai.RequestMessageRoleUser, Text: prompt}}, nil
 }
 
 func (b *countingPromptBuilder) Input() gaictx.PromptInput {
@@ -702,6 +721,23 @@ func TestLoopRetriesDoNotConsumeIterations(t *testing.T) {
 	}
 	if l.Iterations[0].UserMessage == nil {
 		t.Fatal("expected completed first iteration to retain user message")
+	}
+}
+
+func TestLoopAttemptTimeoutDoesNotApplyToPromptConstruction(t *testing.T) {
+	t.Parallel()
+
+	model := &scriptedStreamModel{sequences: [][]ai.Token{{{Type: ai.TokenTypeText, Data: []byte("done")}}}}
+	promptBuilder := &deadlineRecordingPromptBuilder{stubPromptBuilder: stubPromptBuilder{userPrompt: "user"}}
+	l := loop.New(model, nil, promptBuilder, nil)
+	l.MaxLoopIterations = 1
+	l.RetryPolicy = &loop.RetryPolicy{MaxRetries: 1, AttemptTimeout: time.Second}
+
+	if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+	if promptBuilder.hasDeadline.Load() {
+		t.Fatal("prompt construction must not receive the model attempt deadline")
 	}
 }
 

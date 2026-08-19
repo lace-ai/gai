@@ -244,14 +244,6 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 
 				iterCtx, iterState = runState.startIteration(ctx, iteration.Count, attempt)
 				iterCtx, cancel = context.WithCancel(iterCtx)
-				var attemptDeadline context.Context
-				if l.RetryPolicy != nil && l.RetryPolicy.AttemptTimeout > 0 {
-					var attemptCancel context.CancelFunc
-					attemptDeadline, attemptCancel = context.WithTimeout(iterCtx, l.RetryPolicy.AttemptTimeout)
-					previousCancel := cancel
-					cancel = func() { attemptCancel(); previousCancel() }
-					iterCtx = attemptDeadline
-				}
 				attemptID := iterState.attemptID()
 				if err := iterCtx.Err(); err != nil {
 					sendAttemptCanceled(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, err)
@@ -297,6 +289,14 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 				request := renderedPromptRequest(prompt, l.MaxTokens, toolDefinitions, l.ResponseFormat, l.Reasoning)
 				request.Messages = nativeMessages
 
+				var attemptDeadline context.Context
+				if l.RetryPolicy != nil && l.RetryPolicy.AttemptTimeout > 0 {
+					var attemptCancel context.CancelFunc
+					attemptDeadline, attemptCancel = context.WithTimeout(iterCtx, l.RetryPolicy.AttemptTimeout)
+					previousCancel := cancel
+					cancel = func() { attemptCancel(); previousCancel() }
+					iterCtx = attemptDeadline
+				}
 				tokens := l.Model.GenerateStream(iterCtx, request)
 
 				retrying := false
