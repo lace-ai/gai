@@ -412,6 +412,10 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 				if l.RetryPolicy != nil {
 					delay := l.RetryPolicy.Backoff(runState.retryCount-1, retryErr)
 					if delay > 0 {
+						// The backoff is scoped to the run context, not the failed
+						// attempt context. Cancel the attempt before waiting so a model
+						// producer cannot remain blocked while the retry is delayed.
+						cancel()
 						if err := l.RetryPolicy.wait(ctx, delay); err != nil {
 							if cancelErr := cancellationError(ctx, err); cancelErr != nil {
 								sendAttemptCanceled(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, cancelErr)

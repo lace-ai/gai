@@ -43,6 +43,11 @@ type cancelAfterTokenModel struct {
 	cancel context.CancelFunc
 }
 
+type retryCancellationModel struct {
+	attemptCanceled chan struct{}
+	calls           atomic.Int32
+}
+
 type countingPromptBuilder struct {
 	count atomic.Int32
 }
@@ -336,6 +341,34 @@ func (m *cancelAfterTokenModel) Close() error {
 }
 
 func (m *cancelAfterTokenModel) Tokenizer() ai.Tokenizer {
+	return &mocks.MockTokenizer{}
+}
+
+func (m *retryCancellationModel) Name() string { return "retry-cancellation-model" }
+
+func (m *retryCancellationModel) Generate(context.Context, ai.AIRequest) (*ai.AIResponse, error) {
+	return &ai.AIResponse{}, nil
+}
+
+func (m *retryCancellationModel) GenerateStream(ctx context.Context, _ ai.AIRequest) <-chan ai.Token {
+	out := make(chan ai.Token)
+	attempt := m.calls.Add(1)
+	go func() {
+		defer close(out)
+		if attempt == 1 {
+			out <- ai.Token{Err: &ai.ProviderError{Kind: ai.ProviderErrorTransient}}
+			<-ctx.Done()
+			close(m.attemptCanceled)
+			return
+		}
+		out <- ai.Token{Type: ai.TokenTypeText, Data: []byte("done")}
+	}()
+	return out
+}
+
+func (m *retryCancellationModel) Close() error { return nil }
+
+func (m *retryCancellationModel) Tokenizer() ai.Tokenizer {
 	return &mocks.MockTokenizer{}
 }
 
@@ -868,6 +901,31 @@ func TestLoopRetryUsesInjectedWait(t *testing.T) {
 	}
 	if waited != time.Hour {
 		t.Fatalf("waited %s, want %s", waited, time.Hour)
+	}
+}
+
+func TestLoopCancelsFailedAttemptBeforeRetryBackoff(t *testing.T) {
+	model := &retryCancellationModel{attemptCanceled: make(chan struct{})}
+	l := loop.New(model, nil, testPromptBuilder(), nil)
+	l.MaxLoopIterations = 1
+	l.RetryPolicy = &loop.RetryPolicy{
+		MaxRetries:     1,
+		InitialBackoff: time.Hour,
+		Wait: func(_ context.Context, _ time.Duration) error {
+			select {
+			case <-model.attemptCanceled:
+				return nil
+			case <-time.After(100 * time.Millisecond):
+				return errors.New("model attempt was still active during retry backoff")
+			}
+		},
+	}
+
+	if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+	if calls := model.calls.Load(); calls != 2 {
+		t.Fatalf("model attempts = %d, want 2", calls)
 	}
 }
 
