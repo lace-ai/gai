@@ -383,3 +383,12 @@ func TestPromptBuilderReturnsCancellationBeforeBuilding(t *testing.T) {
 		t.Fatalf("BuildPrompt error = %v, want context.Canceled", err)
 	}
 }
+
+func TestClonePromptBuilderNilReceiverReturnsNil(t *testing.T) {
+	t.Parallel()
+
+	var builder *Builder
+	if clone := builder.ClonePromptBuilder(); clone != nil {
+		t.Fatalf("ClonePromptBuilder() = %#v, want nil", clone)
+	}
+}

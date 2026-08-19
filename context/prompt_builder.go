@@ -155,7 +155,7 @@ func NewBuilder(renderer Renderer, tokenBudget int) *Builder {
 // copied.
 func (b *Builder) ClonePromptBuilder() PromptBuilder {
 	if b == nil {
-		return (*Builder)(nil)
+		return nil
 	}
 	cloned := *b
 	cloned.SystemInstructions = make([]Part, len(b.SystemInstructions))
