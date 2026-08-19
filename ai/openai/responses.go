@@ -164,8 +164,8 @@ func (m *Model) generateResponsesStream(ctx context.Context, out chan<- ai.Token
 		}
 	}
 	if err := stream.Err(); err != nil {
-		streamErr = err
-		emit(ai.Token{Type: ai.TokenTypeErr, Err: err, Text: err.Error()})
+		streamErr = classifyProviderError(err)
+		emit(ai.Token{Type: ai.TokenTypeErr, Err: streamErr, Text: streamErr.Error()})
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 
 	antropic "github.com/anthropics/anthropic-sdk-go"
@@ -384,6 +385,18 @@ func localError(err error) error {
 	return &Error{StatusCode: sdkErr.StatusCode, Type: string(sdkErr.Type()), Message: message}
 }
 
+func classifyProviderError(err error) error {
+	var sdkErr *antropic.Error
+	if !errors.As(err, &sdkErr) || sdkErr == nil {
+		return err
+	}
+	var header http.Header
+	if sdkErr.Response != nil {
+		header = sdkErr.Response.Header
+	}
+	return ai.ClassifyProviderError(err, sdkErr.StatusCode, string(sdkErr.Type()), sdkErr.RequestID, header)
+}
+
 func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.Token {
 	out := make(chan ai.Token, 1)
 	go func() {
@@ -499,7 +512,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			}
 		}
 		if streamErr == nil {
-			streamErr = localError(stream.Err())
+			streamErr = classifyProviderError(stream.Err())
 		}
 		if streamErr == nil && len(blocks) != 0 {
 			streamErr = fmt.Errorf("anthropic stream ended with %d open content block(s)", len(blocks))

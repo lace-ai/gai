@@ -3,6 +3,9 @@ package ai
 import (
 	"errors"
 	"fmt"
+	"net/http"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -44,6 +47,60 @@ func (e *ProviderError) Unwrap() error {
 		return nil
 	}
 	return e.Err
+}
+
+// ClassifyProviderError adds provider-neutral retry metadata to an HTTP API
+// error. It preserves err in the returned error chain.
+func ClassifyProviderError(err error, statusCode int, code, requestID string, header http.Header) error {
+	if err == nil {
+		return nil
+	}
+	var provider *ProviderError
+	if errors.As(err, &provider) {
+		return err
+	}
+	return &ProviderError{
+		Kind:       providerErrorKind(statusCode, code),
+		StatusCode: statusCode,
+		Code:       code,
+		RequestID:  requestID,
+		RetryAfter: retryAfter(header.Get("Retry-After")),
+		Err:        err,
+	}
+}
+
+func providerErrorKind(statusCode int, code string) ProviderErrorKind {
+	code = strings.ToLower(code)
+	switch {
+	case statusCode == http.StatusTooManyRequests || strings.Contains(code, "rate_limit") || strings.Contains(code, "rate-limit"):
+		return ProviderErrorRateLimited
+	case statusCode == http.StatusRequestTimeout || statusCode == http.StatusConflict || statusCode == http.StatusTooEarly || statusCode >= http.StatusInternalServerError || strings.Contains(code, "overload") || strings.Contains(code, "temporar"):
+		return ProviderErrorTransient
+	case statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden || strings.Contains(code, "auth") || strings.Contains(code, "api_key"):
+		return ProviderErrorAuthentication
+	case statusCode == http.StatusNotImplemented || strings.Contains(code, "unsupported"):
+		return ProviderErrorUnsupported
+	case statusCode >= http.StatusBadRequest && statusCode < http.StatusInternalServerError:
+		return ProviderErrorInvalidRequest
+	default:
+		return ProviderErrorUnknown
+	}
+}
+
+func retryAfter(value string) time.Duration {
+	value = strings.TrimSpace(value)
+	if seconds, err := strconv.ParseInt(value, 10, 64); err == nil {
+		if seconds > 0 {
+			return time.Duration(seconds) * time.Second
+		}
+		return 0
+	}
+	if retryAt, err := http.ParseTime(value); err == nil {
+		if delay := time.Until(retryAt); delay > 0 {
+			return delay
+		}
+	}
+	return 0
 }
 
 var (

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lace-ai/gai/ai"
 	"github.com/lace-ai/gai/internal/obstest"
@@ -973,4 +974,32 @@ func mustMarshalJSON(t *testing.T, value string) string {
 		t.Fatalf("marshal JSON: %v", err)
 	}
 	return string(raw)
+}
+
+func TestModelGenerateStreamClassifiesProviderRateLimit(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("x-request-id", "req_openai")
+		w.Header().Set("Retry-After", "4")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"code":"rate_limit_exceeded","message":"slow down","type":"rate_limit_error"}}`))
+	}))
+	defer ts.Close()
+	p := New("test-key", nil)
+	p.baseURL = ts.URL
+	m, err := p.Model(GPT41Mini)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for token := range m.GenerateStream(t.Context(), ai.AIRequest{Prompt: "hello"}) {
+		if token.Type != ai.TokenTypeErr {
+			continue
+		}
+		var providerErr *ai.ProviderError
+		if !errors.As(token.Err, &providerErr) || providerErr.Kind != ai.ProviderErrorRateLimited || providerErr.StatusCode != http.StatusTooManyRequests || providerErr.Code != "rate_limit_exceeded" || providerErr.RequestID != "req_openai" || providerErr.RetryAfter != 4*time.Second || errors.Unwrap(providerErr) == nil {
+			t.Fatalf("provider error = %#v", token.Err)
+		}
+		return
+	}
+	t.Fatal("expected stream error")
 }

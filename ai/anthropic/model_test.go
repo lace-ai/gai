@@ -431,3 +431,24 @@ func TestCountTokens(t *testing.T) {
 		t.Fatalf("Tokenize error = %v", err)
 	}
 }
+
+func TestGenerateStreamClassifiesProviderRateLimit(t *testing.T) {
+	m := testModel(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("request-id", "req_anthropic")
+		w.Header().Set("Retry-After", "3")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}`))
+	})
+	for token := range m.GenerateStream(t.Context(), ai.AIRequest{Prompt: "hello"}) {
+		if token.Type != ai.TokenTypeErr {
+			continue
+		}
+		var providerErr *ai.ProviderError
+		if !errors.As(token.Err, &providerErr) || providerErr.Kind != ai.ProviderErrorRateLimited || providerErr.StatusCode != http.StatusTooManyRequests || providerErr.Code != "rate_limit_error" || providerErr.RequestID != "req_anthropic" || providerErr.RetryAfter != 3*time.Second || errors.Unwrap(providerErr) == nil {
+			t.Fatalf("provider error = %#v", token.Err)
+		}
+		return
+	}
+	t.Fatal("expected stream error")
+}

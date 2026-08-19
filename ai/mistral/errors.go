@@ -1,6 +1,7 @@
 package mistral
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 )
@@ -36,4 +37,20 @@ func (e *HTTPError) ResponseBody() []byte {
 		return nil
 	}
 	return append([]byte(nil), e.body...)
+}
+
+func mistralErrorCode(body []byte) string {
+	var payload struct {
+		Code  string `json:"code"`
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &payload) != nil {
+		return ""
+	}
+	if payload.Error.Code != "" {
+		return payload.Error.Code
+	}
+	return payload.Code
 }

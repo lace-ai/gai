@@ -660,7 +660,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 					Fields: fields,
 				})
 			}
-			streamErr = newHTTPError("chat stream", res.StatusCode, resBody)
+			streamErr = ai.ClassifyProviderError(newHTTPError("chat stream", res.StatusCode, resBody), res.StatusCode, mistralErrorCode(resBody), res.Header.Get("x-request-id"), res.Header)
 			if !emit(ai.Token{
 				Err:  streamErr,
 				Type: ai.TokenTypeErr,
