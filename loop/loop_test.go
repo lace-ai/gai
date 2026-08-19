@@ -448,6 +448,32 @@ func TestLoopTextTransportDoesNotSatisfyRequiredToolChoiceWithUnknownTool(t *tes
 	}
 }
 
+func TestLoopTextTransportDoesNotSatisfyNamedRequiredToolChoiceWithDifferentConfiguredTool(t *testing.T) {
+	t.Parallel()
+
+	model := &scriptedStreamModel{sequences: [][]ai.Token{
+		{{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-echo", Type: "function", Name: "echo", Args: json.RawMessage(`{"text":"payload"}`)}}},
+		{{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-failure", Type: "function", Name: "failure", Args: json.RawMessage(`{"text":"payload"}`)}}},
+		{{Type: ai.TokenTypeText, Text: "done"}},
+	}}
+	l := loop.New(model, []loop.Tool{loop.NewEchoTool(), sentinelErrorTool{}}, testPromptBuilder(), nil)
+	l.ToolTransport = loop.ToolTransportText
+	l.ToolChoice = ai.ToolChoice{Mode: ai.ToolChoiceRequired, Names: []string{"failure"}}
+
+	events := collectLoopEvents(t, l, context.Background())
+	if err := loopError(events); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+	if got := len(model.Requests()); got != 3 {
+		t.Fatalf("requests = %d, want 3", got)
+	}
+	for _, event := range events {
+		if event.IterationCount == 1 && (event.Type == loop.EventToken || event.Type == loop.EventIterationDone) {
+			t.Fatalf("mismatched required tool call must not be observable, got %#v", event)
+		}
+	}
+}
+
 func TestLoopTextTransportDoesNotExposeMixedResponseWithUnknownTool(t *testing.T) {
 	t.Parallel()
 

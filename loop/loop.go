@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -386,7 +387,7 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 				iterState.finish(nil)
 			}
 
-			if deferTokens && !hasPermittedToolCall(toolCalls, l.Tools) {
+			if deferTokens && !hasPermittedToolCall(toolCalls, l.Tools, l.ToolChoice.Names) {
 				// A text-transport response that does not satisfy a required tool
 				// call is not part of the conversation and must not be observable.
 				cancel()
@@ -450,7 +451,7 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 			}
 			l.Iterations = append(l.Iterations, iteration)
 			userMessage = nil
-			if hasPermittedToolCall(toolCalls, l.Tools) {
+			if hasPermittedToolCall(toolCalls, l.Tools, l.ToolChoice.Names) {
 				requiredToolCallSatisfied = true
 			}
 			runState.resetRetries()
@@ -498,11 +499,14 @@ func userMessageForIteration(promptBuilder gaictx.PromptBuilder, index int) *gai
 }
 
 // hasPermittedToolCall reports whether the model requested a valid configured
-// tool. Rejected calls, including calls for unavailable tools, do not satisfy a
-// required tool choice.
-func hasPermittedToolCall(toolCalls []pendingToolCall, tools []Tool) bool {
+// tool allowed by the required tool choice. Rejected calls, including calls for
+// unavailable or unselected tools, do not satisfy a required tool choice.
+func hasPermittedToolCall(toolCalls []pendingToolCall, tools []Tool, allowedNames []string) bool {
 	for _, toolCall := range toolCalls {
 		if err := toolCall.call.Validate(); err != nil {
+			continue
+		}
+		if len(allowedNames) > 0 && !slices.Contains(allowedNames, toolCall.call.Name) {
 			continue
 		}
 		for _, tool := range tools {
