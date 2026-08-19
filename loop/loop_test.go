@@ -391,6 +391,32 @@ func TestLoopTextTransportDoesNotFinishBeforeRequiredToolCall(t *testing.T) {
 	}
 }
 
+func TestLoopTextTransportDoesNotSatisfyRequiredToolChoiceWithUnknownTool(t *testing.T) {
+	t.Parallel()
+
+	model := &scriptedStreamModel{sequences: [][]ai.Token{
+		{{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-1", Type: "function", Name: "missing", Args: json.RawMessage(`{"text":"payload"}`)}}},
+		{{Type: ai.TokenTypeText, Text: "done"}},
+	}}
+	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
+	l.ToolTransport = loop.ToolTransportText
+	l.ToolChoice = ai.ToolChoice{Mode: ai.ToolChoiceRequired}
+	l.MaxLoopIterations = 2
+
+	events := collectLoopEvents(t, l, context.Background())
+	if err := loopError(events); !errors.Is(err, loop.ErrMaxIterations) {
+		t.Fatalf("loop error = %v, want ErrMaxIterations after no permitted tool call", err)
+	}
+	if len(model.Requests()) != 2 {
+		t.Fatalf("requests = %d, want 2", len(model.Requests()))
+	}
+	for _, event := range events {
+		if event.Type == loop.EventDone {
+			t.Fatalf("run must not finish after an unavailable tool call")
+		}
+	}
+}
+
 func loopEventsOfType(events []loop.Event, eventType loop.EventType) []loop.Event {
 	var filtered []loop.Event
 	for _, event := range events {

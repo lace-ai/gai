@@ -698,8 +698,8 @@ func TestAgentTextTransportDoesNotExecuteUnselectedRequiredTool(t *testing.T) {
 		t.Fatalf("NewRun failed: %v", err)
 	}
 	consumed := consumeWorkflow(t, workflow)
-	if len(consumed.errs) != 0 {
-		t.Fatalf("workflow errors: %v", consumed.errs)
+	if len(consumed.errs) != 1 || !errors.Is(consumed.errs[0], loop.ErrMaxIterations) {
+		t.Fatalf("workflow errors = %v, want ErrMaxIterations after no selected tool call", consumed.errs)
 	}
 	if unselected.calls != 0 {
 		t.Fatalf("unselected tool was called %d times", unselected.calls)

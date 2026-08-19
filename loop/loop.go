@@ -446,7 +446,7 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 				return
 			}
 			l.Iterations = append(l.Iterations, iteration)
-			if len(toolCalls) > 0 {
+			if hasPermittedToolCall(toolCalls, l.Tools) {
 				requiredToolCallSatisfied = true
 			}
 			runState.resetRetries()
@@ -491,6 +491,23 @@ func userMessageForIteration(promptBuilder gaictx.PromptBuilder, index int) *gai
 		return nil
 	}
 	return &gaictx.Message{Role: gaictx.RoleUser, Content: input.User}
+}
+
+// hasPermittedToolCall reports whether the model requested a valid configured
+// tool. Rejected calls, including calls for unavailable tools, do not satisfy a
+// required tool choice.
+func hasPermittedToolCall(toolCalls []pendingToolCall, tools []Tool) bool {
+	for _, toolCall := range toolCalls {
+		if err := toolCall.call.Validate(); err != nil {
+			continue
+		}
+		for _, tool := range tools {
+			if tool != nil && tool.Name() == toolCall.call.Name {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // executeToolCalls records tool responses on iteration. Tool execution
