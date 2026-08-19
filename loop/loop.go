@@ -420,6 +420,13 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 				requiredToolCallSatisfied = true
 			}
 			runState.resetRetries()
+			if l.ToolTransport == ToolTransportText && len(toolCalls) == 0 && !requiredToolCallSatisfied {
+				// Text transport cannot rely on provider enforcement. Keep the
+				// run active until the required tool call has been observed.
+				cancel()
+				iterState.finish(iterationErr)
+				continue
+			}
 			if len(toolCalls) == 0 {
 				cancel()
 				iterState.markFinal()

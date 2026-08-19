@@ -353,6 +353,32 @@ func TestLoopDowngradesRequiredToolChoiceAfterToolCall(t *testing.T) {
 	}
 }
 
+func TestLoopTextTransportDoesNotFinishBeforeRequiredToolCall(t *testing.T) {
+	t.Parallel()
+
+	model := &scriptedStreamModel{sequences: [][]ai.Token{
+		{{Type: ai.TokenTypeText, Text: "I will answer without a tool."}},
+		{{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-1", Type: "function", Name: "echo", Args: json.RawMessage(`{"text":"payload"}`)}}},
+		{{Type: ai.TokenTypeText, Text: "done"}},
+	}}
+	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
+	l.ToolTransport = loop.ToolTransportText
+	l.ToolChoice = ai.ToolChoice{Mode: ai.ToolChoiceRequired}
+
+	if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+	requests := model.Requests()
+	if len(requests) != 3 {
+		t.Fatalf("requests = %d, want 3", len(requests))
+	}
+	for i, request := range requests {
+		if len(request.Tools) != 0 || request.ToolChoice.Mode != "" {
+			t.Fatalf("text request %d must not use provider-native tools or tool choice: %#v", i, request)
+		}
+	}
+}
+
 func loopEventsOfType(events []loop.Event, eventType loop.EventType) []loop.Event {
 	var filtered []loop.Event
 	for _, event := range events {
@@ -1053,7 +1079,9 @@ func TestLoopToolTransportControlsProviderToolDefinitions(t *testing.T) {
 			model := &scriptedStreamModel{sequences: [][]ai.Token{{{Type: ai.TokenTypeText, Text: "done"}}}}
 			l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
 			l.ToolTransport = tt.transport
-			l.ToolChoice = ai.ToolChoice{Mode: ai.ToolChoiceRequired}
+			if tt.wantChoice {
+				l.ToolChoice = ai.ToolChoice{Mode: ai.ToolChoiceRequired}
+			}
 
 			if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
 				t.Fatalf("unexpected loop error: %v", err)
