@@ -330,7 +330,11 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 							break
 						}
 
-						iterationErr = fmt.Errorf("%w: limit=%d: %w", ErrMaxRetries, retryLimit, t.Err)
+						if l.RetryPolicy != nil && runState.retryCount < retryLimit {
+							iterationErr = t.Err
+						} else {
+							iterationErr = fmt.Errorf("%w: limit=%d: %w", ErrMaxRetries, retryLimit, t.Err)
+						}
 						sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, iterationErr)
 						cancel()
 						iterState.finish(iterationErr)

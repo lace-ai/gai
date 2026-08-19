@@ -846,6 +846,27 @@ func TestLoopTerminalRetryErrorReportsPolicyLimit(t *testing.T) {
 	}
 }
 
+func TestLoopNonRetryablePolicyErrorIsNotReportedAsRetryExhaustion(t *testing.T) {
+	t.Parallel()
+
+	providerErr := &ai.ProviderError{Kind: ai.ProviderErrorInvalidRequest, Err: errors.New("bad request")}
+	model := &scriptedStreamModel{
+		sequences: [][]ai.Token{{{Err: providerErr}}},
+	}
+	l := loop.New(model, nil, testPromptBuilder(), nil)
+	l.MaxLoopIterations = 1
+	l.RetryPolicy = &loop.RetryPolicy{MaxRetries: 3}
+
+	err := loopError(collectLoopEvents(t, l, context.Background()))
+	if errors.Is(err, loop.ErrMaxRetries) {
+		t.Fatalf("error = %v, must not report retry exhaustion", err)
+	}
+	var got *ai.ProviderError
+	if !errors.As(err, &got) || got != providerErr {
+		t.Fatalf("error = %v, want original provider error", err)
+	}
+}
+
 func TestLoopStreamErrorsIncludeAttemptMetadata(t *testing.T) {
 	t.Parallel()
 
