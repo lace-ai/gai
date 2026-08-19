@@ -229,14 +229,17 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 			iteration := Iteration{Count: i + 1}
 			userMessage := userMessageForIteration(l.PromptBuilder, i)
 			var toolCalls []pendingToolCall
+			var deferredTokens []ai.Token
 			var iterState *loopIterationState
 			var iterationErr error
 			var iterCtx context.Context
 			var cancel context.CancelFunc
+			deferTokens := l.ToolTransport == ToolTransportText && !requiredToolCallSatisfied
 
 			for attempt := 1; ; attempt++ {
 				attemptIteration := Iteration{Count: iteration.Count, UserMessage: userMessage}
 				toolCalls = nil
+				deferredTokens = nil
 
 				iterCtx, iterState = runState.startIteration(ctx, iteration.Count, attempt)
 				iterCtx, cancel = context.WithCancel(iterCtx)
@@ -332,6 +335,10 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 					} else {
 						attemptIteration.AppendToken(t)
 					}
+					if deferTokens {
+						deferredTokens = append(deferredTokens, t)
+						continue
+					}
 					runState.recordToken(t)
 					iterState.recordToken(t)
 					if err := sendEvent(ctx, events, TokenEvent(iteration.Count, attemptID, runState.retryCount, t)); err != nil {
@@ -375,6 +382,29 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 				}
 				cancel()
 				iterState.finish(nil)
+			}
+
+			if deferTokens && len(toolCalls) == 0 {
+				// A text-transport response that does not satisfy a required tool
+				// call is not part of the conversation and must not be observable.
+				cancel()
+				iterState.finish(iterationErr)
+				continue
+			}
+			for _, token := range deferredTokens {
+				runState.recordToken(token)
+				iterState.recordToken(token)
+				if err := sendEvent(ctx, events, TokenEvent(iteration.Count, iterState.attemptID(), runState.retryCount, token)); err != nil {
+					if cancelErr := cancellationError(iterCtx, err); cancelErr != nil {
+						sendAttemptCanceled(ctx, events, runState, iteration.Count, iterState.attemptID(), runState.retryCount, &iteration, cancelErr)
+						iterState.markCanceled(cancelErr)
+					} else {
+						sendAttemptError(ctx, events, runState, iteration.Count, iterState.attemptID(), runState.retryCount, &iteration, err)
+					}
+					cancel()
+					iterState.finish(nil)
+					return
+				}
 			}
 
 			if err := l.executeToolCalls(iterCtx, &iteration, toolCalls, events, iteration.Count, iterState.attemptID(), runState.retryCount); err != nil {

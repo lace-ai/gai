@@ -365,7 +365,8 @@ func TestLoopTextTransportDoesNotFinishBeforeRequiredToolCall(t *testing.T) {
 	l.ToolTransport = loop.ToolTransportText
 	l.ToolChoice = ai.ToolChoice{Mode: ai.ToolChoiceRequired}
 
-	if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
+	events := collectLoopEvents(t, l, context.Background())
+	if err := loopError(events); err != nil {
 		t.Fatalf("unexpected loop error: %v", err)
 	}
 	requests := model.Requests()
@@ -376,6 +377,17 @@ func TestLoopTextTransportDoesNotFinishBeforeRequiredToolCall(t *testing.T) {
 		if len(request.Tools) != 0 || request.ToolChoice.Mode != "" {
 			t.Fatalf("text request %d must not use provider-native tools or tool choice: %#v", i, request)
 		}
+	}
+	if strings.Contains(requests[1].Prompt, "I will answer without a tool.") {
+		t.Fatalf("second prompt must not include the rejected response: %q", requests[1].Prompt)
+	}
+	for _, event := range events {
+		if event.IterationCount == 1 && (event.Type == loop.EventToken || event.Type == loop.EventIterationDone) {
+			t.Fatalf("rejected iteration must not be observable, got %#v", event)
+		}
+	}
+	if len(l.Iterations) != 2 {
+		t.Fatalf("persisted iterations = %d, want only accepted iterations", len(l.Iterations))
 	}
 }
 
