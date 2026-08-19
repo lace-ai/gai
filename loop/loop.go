@@ -390,6 +390,7 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 				// A text-transport response that does not satisfy a required tool
 				// call is not part of the conversation and must not be observable.
 				cancel()
+				runState.resetRetries()
 				iterState.finish(iterationErr)
 				continue
 			}

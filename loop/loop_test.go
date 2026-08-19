@@ -398,6 +398,30 @@ func TestLoopTextTransportDoesNotFinishBeforeRequiredToolCall(t *testing.T) {
 	}
 }
 
+func TestLoopTextTransportRejectedResponseResetsRetryBudget(t *testing.T) {
+	t.Parallel()
+
+	model := &scriptedStreamModel{sequences: [][]ai.Token{
+		{{Err: errors.New("temporary before rejected response")}},
+		{{Type: ai.TokenTypeText, Text: "I will answer without a tool."}},
+		{{Err: errors.New("temporary after rejected response")}},
+		{{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-1", Type: "function", Name: "echo", Args: json.RawMessage(`{"text":"payload"}`)}}},
+		{{Type: ai.TokenTypeText, Text: "done"}},
+	}}
+	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
+	l.ToolTransport = loop.ToolTransportText
+	l.ToolChoice = ai.ToolChoice{Mode: ai.ToolChoiceRequired}
+	l.RetryCount = 1
+
+	events := collectLoopEvents(t, l, context.Background())
+	if err := loopError(events); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+	if got := len(model.Requests()); got != 5 {
+		t.Fatalf("requests = %d, want 5", got)
+	}
+}
+
 func TestLoopTextTransportDoesNotSatisfyRequiredToolChoiceWithUnknownTool(t *testing.T) {
 	t.Parallel()
 
