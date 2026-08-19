@@ -52,6 +52,10 @@ type deadlineRecordingPromptBuilder struct {
 	hasDeadline atomic.Bool
 }
 
+type deadlineRecordingTool struct {
+	hasDeadline atomic.Bool
+}
+
 type failingToolResponseProcessor struct {
 	err error
 }
@@ -98,6 +102,19 @@ func (b *deadlineRecordingPromptBuilder) BuildPrompt(ctx context.Context, conv g
 	_, hasDeadline := ctx.Deadline()
 	b.hasDeadline.Store(hasDeadline)
 	return b.stubPromptBuilder.BuildPrompt(ctx, conv)
+}
+
+func (t *deadlineRecordingTool) Name() string { return "record-deadline" }
+func (t *deadlineRecordingTool) Description() string {
+	return "Records whether its context has a deadline."
+}
+func (t *deadlineRecordingTool) Params() ai.ToolParameters {
+	return loop.NewEchoTool().Params()
+}
+func (t *deadlineRecordingTool) Function(ctx context.Context, _ *ai.ToolCall) *loop.ToolResponse {
+	_, hasDeadline := ctx.Deadline()
+	t.hasDeadline.Store(hasDeadline)
+	return loop.NewToolSuccess("ok")
 }
 
 func (b *deadlineRecordingPromptBuilder) BuildRequest(ctx context.Context, conv gaictx.Conversation) (string, []ai.RequestMessage, error) {
@@ -762,6 +779,34 @@ func TestLoopAttemptTimeoutDoesNotApplyToPromptConstruction(t *testing.T) {
 	}
 	if promptBuilder.hasDeadline.Load() {
 		t.Fatal("prompt construction must not receive the model attempt deadline")
+	}
+}
+
+func TestLoopAttemptTimeoutDoesNotApplyToToolExecution(t *testing.T) {
+	t.Parallel()
+
+	tool := &deadlineRecordingTool{}
+	model := &scriptedStreamModel{sequences: [][]ai.Token{
+		{{
+			Type: ai.TokenTypeToolCall,
+			ToolCall: &ai.ToolCall{
+				ID:   "call-1",
+				Type: "function",
+				Name: "record-deadline",
+				Args: json.RawMessage(`{"text":"payload"}`),
+			},
+		}},
+		{{Type: ai.TokenTypeText, Data: []byte("done")}},
+	}}
+	l := loop.New(model, []loop.Tool{tool}, testPromptBuilder(), nil)
+	l.MaxLoopIterations = 2
+	l.RetryPolicy = &loop.RetryPolicy{MaxRetries: 1, AttemptTimeout: time.Second}
+
+	if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+	if tool.hasDeadline.Load() {
+		t.Fatal("tool execution must not receive the model attempt deadline")
 	}
 }
 

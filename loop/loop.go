@@ -289,15 +289,16 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 				request := renderedPromptRequest(prompt, l.MaxTokens, toolDefinitions, l.ResponseFormat, l.Reasoning)
 				request.Messages = nativeMessages
 
+				modelCtx := iterCtx
 				var attemptDeadline context.Context
 				if l.RetryPolicy != nil && l.RetryPolicy.AttemptTimeout > 0 {
 					var attemptCancel context.CancelFunc
 					attemptDeadline, attemptCancel = context.WithTimeout(iterCtx, l.RetryPolicy.AttemptTimeout)
 					previousCancel := cancel
 					cancel = func() { attemptCancel(); previousCancel() }
-					iterCtx = attemptDeadline
+					modelCtx = attemptDeadline
 				}
-				tokens := l.Model.GenerateStream(iterCtx, request)
+				tokens := l.Model.GenerateStream(modelCtx, request)
 
 				retrying := false
 				var retryErr error
