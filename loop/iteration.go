@@ -70,11 +70,11 @@ type IterationPart struct {
 }
 
 // Messages converts the iteration into ordered conversation messages.
-// The first iteration includes UserMessage when present.
+// UserMessage is included when present on an accepted iteration.
 func (i Iteration) Messages() []gaictx.Message {
 	var msgs []gaictx.Message
 
-	if i.Count == 1 && i.UserMessage != nil {
+	if i.UserMessage != nil {
 		msgs = append(msgs, *i.UserMessage)
 	}
 

@@ -225,9 +225,11 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 		}
 
 		requiredToolCallSatisfied := l.ToolChoice.Mode != ai.ToolChoiceRequired
+		// Retain the input until an iteration is accepted. A rejected required-tool
+		// response consumes an iteration slot but must not lose conversation input.
+		userMessage := userMessageForIteration(l.PromptBuilder, 0)
 		for i := range l.MaxLoopIterations {
 			iteration := Iteration{Count: i + 1}
-			userMessage := userMessageForIteration(l.PromptBuilder, i)
 			var toolCalls []pendingToolCall
 			var deferredTokens []ai.Token
 			var iterState *loopIterationState
@@ -446,6 +448,7 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 				return
 			}
 			l.Iterations = append(l.Iterations, iteration)
+			userMessage = nil
 			if hasPermittedToolCall(toolCalls, l.Tools) {
 				requiredToolCallSatisfied = true
 			}

@@ -389,6 +389,13 @@ func TestLoopTextTransportDoesNotFinishBeforeRequiredToolCall(t *testing.T) {
 	if len(l.Iterations) != 2 {
 		t.Fatalf("persisted iterations = %d, want only accepted iterations", len(l.Iterations))
 	}
+	if l.Iterations[0].UserMessage == nil {
+		t.Fatal("first accepted iteration must retain the original user message")
+	}
+	messages := l.Messages()
+	if len(messages) == 0 || messages[0].Role != gaictx.RoleUser || messages[0].Content.String() != "Initial prompt" {
+		t.Fatalf("messages must begin with the original user request, got %#v", messages)
+	}
 }
 
 func TestLoopTextTransportDoesNotSatisfyRequiredToolChoiceWithUnknownTool(t *testing.T) {
