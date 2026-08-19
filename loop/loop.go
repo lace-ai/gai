@@ -384,7 +384,7 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 				iterState.finish(nil)
 			}
 
-			if deferTokens && len(toolCalls) == 0 {
+			if deferTokens && !hasPermittedToolCall(toolCalls, l.Tools) {
 				// A text-transport response that does not satisfy a required tool
 				// call is not part of the conversation and must not be observable.
 				cancel()

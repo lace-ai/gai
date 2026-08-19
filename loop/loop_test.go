@@ -417,6 +417,42 @@ func TestLoopTextTransportDoesNotSatisfyRequiredToolChoiceWithUnknownTool(t *tes
 	}
 }
 
+func TestLoopTextTransportDoesNotExposeMixedResponseWithUnknownTool(t *testing.T) {
+	t.Parallel()
+
+	model := &scriptedStreamModel{sequences: [][]ai.Token{
+		{
+			{Type: ai.TokenTypeText, Text: "I will answer without a tool."},
+			{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-missing", Type: "function", Name: "missing", Args: json.RawMessage(`{"text":"payload"}`)}},
+		},
+		{{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-echo", Type: "function", Name: "echo", Args: json.RawMessage(`{"text":"payload"}`)}}},
+		{{Type: ai.TokenTypeText, Text: "done"}},
+	}}
+	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
+	l.ToolTransport = loop.ToolTransportText
+	l.ToolChoice = ai.ToolChoice{Mode: ai.ToolChoiceRequired}
+
+	events := collectLoopEvents(t, l, context.Background())
+	if err := loopError(events); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+	requests := model.Requests()
+	if len(requests) != 3 {
+		t.Fatalf("requests = %d, want 3", len(requests))
+	}
+	if strings.Contains(requests[1].Prompt, "I will answer without a tool.") {
+		t.Fatalf("second prompt must not include the rejected response: %q", requests[1].Prompt)
+	}
+	for _, event := range events {
+		if event.IterationCount == 1 && (event.Type == loop.EventToken || event.Type == loop.EventIterationDone) {
+			t.Fatalf("rejected iteration must not be observable, got %#v", event)
+		}
+	}
+	if len(l.Iterations) != 2 {
+		t.Fatalf("persisted iterations = %d, want only accepted iterations", len(l.Iterations))
+	}
+}
+
 func loopEventsOfType(events []loop.Event, eventType loop.EventType) []loop.Event {
 	var filtered []loop.Event
 	for _, event := range events {
