@@ -401,9 +401,13 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 				}
 
 				runState.retry()
+				delay := time.Duration(0)
+				if l.RetryPolicy != nil {
+					delay = l.RetryPolicy.Backoff(runState.retryCount-1, retryErr)
+				}
 				iterState.recordIteration(attemptIteration)
-				iterState.markRetrying(runState.retryCount)
-				if err := sendEvent(ctx, events, RetryEvent(iteration.Count, attemptID, runState.retryCount, attemptIteration)); err != nil {
+				iterState.markRetrying(runState.retryCount, retryReason(retryErr), delay)
+				if err := sendEvent(ctx, events, RetryEvent(iteration.Count, attemptID, runState.retryCount, retryReason(retryErr), delay, attemptIteration)); err != nil {
 					if cancelErr := cancellationError(iterCtx, err); cancelErr != nil {
 						sendAttemptCanceled(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, cancelErr)
 						iterState.markCanceled(cancelErr)
@@ -415,7 +419,6 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 					return
 				}
 				if l.RetryPolicy != nil {
-					delay := l.RetryPolicy.Backoff(runState.retryCount-1, retryErr)
 					if delay > 0 {
 						// The backoff is scoped to the run context, not the failed
 						// attempt context. Cancel the attempt before waiting so a model

@@ -875,6 +875,56 @@ func TestLoopAttemptTimeoutPreservesProviderRetryAfter(t *testing.T) {
 	}
 }
 
+func TestLoopRetryObservabilityReportsClassificationAndDelay(t *testing.T) {
+	previousProvider := otel.GetTracerProvider()
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	otel.SetTracerProvider(provider)
+	t.Cleanup(func() {
+		_ = provider.Shutdown(context.Background())
+		otel.SetTracerProvider(previousProvider)
+	})
+
+	retryDelay := 7 * time.Millisecond
+	model := &scriptedStreamModel{sequences: [][]ai.Token{
+		{{Err: &ai.ProviderError{Kind: ai.ProviderErrorRateLimited}}},
+		{{Type: ai.TokenTypeText, Data: []byte("done")}},
+	}}
+	l := loop.New(model, nil, testPromptBuilder(), nil)
+	l.MaxLoopIterations = 1
+	l.RetryPolicy = &loop.RetryPolicy{
+		MaxRetries:     1,
+		InitialBackoff: retryDelay,
+		Wait:           func(context.Context, time.Duration) error { return nil },
+	}
+
+	events := collectLoopEvents(t, l, context.Background())
+	if err := loopError(events); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+	retries := loopEventsOfType(events, loop.EventRetry)
+	if len(retries) != 1 {
+		t.Fatalf("retry events = %d, want 1", len(retries))
+	}
+	if retries[0].RetryReason != "rate_limited" || retries[0].RetryDelay != retryDelay {
+		t.Fatalf("retry event observability = %#v, want reason rate_limited and delay %s", retries[0], retryDelay)
+	}
+
+	for _, span := range recorder.Ended() {
+		if span.Name() != "loop.iteration" {
+			continue
+		}
+		attributes := map[string]any{}
+		for _, attribute := range span.Attributes() {
+			attributes[string(attribute.Key)] = attribute.Value.AsInterface()
+		}
+		if attributes["loop.retry_reason"] == "rate_limited" && attributes["loop.retry_delay_ms"] == int64(retryDelay/time.Millisecond) {
+			return
+		}
+	}
+	t.Fatalf("retrying iteration span missing classification or delay: %#v", recorder.Ended())
+}
+
 func TestLoopRetryUsesInjectedWait(t *testing.T) {
 	t.Parallel()
 
