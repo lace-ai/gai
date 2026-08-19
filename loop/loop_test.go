@@ -797,6 +797,26 @@ func TestLoopAttemptTimeoutPreservesProviderRetryAfter(t *testing.T) {
 	}
 }
 
+func TestLoopTerminalRetryErrorReportsPolicyLimit(t *testing.T) {
+	t.Parallel()
+
+	model := &scriptedStreamModel{
+		sequences: [][]ai.Token{{{Err: &ai.ProviderError{Kind: ai.ProviderErrorTransient}}}},
+	}
+	l := loop.New(model, nil, testPromptBuilder(), nil)
+	l.MaxLoopIterations = 1
+	l.RetryCount = 3
+	l.RetryPolicy = &loop.RetryPolicy{MaxRetries: 0}
+
+	err := loopError(collectLoopEvents(t, l, context.Background()))
+	if !errors.Is(err, loop.ErrMaxRetries) {
+		t.Fatalf("error = %v, want ErrMaxRetries", err)
+	}
+	if !strings.Contains(err.Error(), "limit=0") {
+		t.Fatalf("error = %q, want active policy limit", err)
+	}
+}
+
 func TestLoopStreamErrorsIncludeAttemptMetadata(t *testing.T) {
 	t.Parallel()
 
