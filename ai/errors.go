@@ -1,6 +1,50 @@
 package ai
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+	"time"
+)
+
+// ProviderErrorKind is a provider-neutral classification used by retry policy.
+type ProviderErrorKind string
+
+const (
+	ProviderErrorUnknown        ProviderErrorKind = "unknown"
+	ProviderErrorRateLimited    ProviderErrorKind = "rate_limited"
+	ProviderErrorTransient      ProviderErrorKind = "transient"
+	ProviderErrorAuthentication ProviderErrorKind = "authentication"
+	ProviderErrorInvalidRequest ProviderErrorKind = "invalid_request"
+	ProviderErrorUnsupported    ProviderErrorKind = "unsupported"
+)
+
+// ProviderError carries safe, provider-neutral failure metadata. Provider
+// adapters should wrap vendor errors in this type before returning them.
+type ProviderError struct {
+	Kind       ProviderErrorKind
+	StatusCode int
+	Code       string
+	RequestID  string
+	RetryAfter time.Duration
+	Err        error
+}
+
+func (e *ProviderError) Error() string {
+	if e == nil {
+		return "<nil>"
+	}
+	if e.Err != nil {
+		return fmt.Sprintf("provider %s error: %v", e.Kind, e.Err)
+	}
+	return fmt.Sprintf("provider %s error", e.Kind)
+}
+
+func (e *ProviderError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
 
 var (
 	// ErrModelNotFound indicates that a requested model is unavailable.

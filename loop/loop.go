@@ -62,6 +62,8 @@ type Loop struct {
 	Reasoning ai.ReasoningConfig
 	// RetryCount is the number of model stream failures retried before stopping.
 	RetryCount int
+	// RetryPolicy enables classified retries. Nil preserves RetryCount behavior.
+	RetryPolicy *RetryPolicy
 	// PromptBuilder constructs the prompt for each iteration.
 	PromptBuilder gaictx.PromptBuilder
 	// ToolResponseProcessor optionally processes tool responses after they are recorded on the iteration and before it is persisted.
@@ -183,6 +185,12 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 	}
 
 	go func() {
+		callerCtx := ctx
+		if l.RetryPolicy != nil && l.RetryPolicy.TotalTimeout > 0 {
+			var totalCancel context.CancelFunc
+			ctx, totalCancel = context.WithTimeout(ctx, l.RetryPolicy.TotalTimeout)
+			defer totalCancel()
+		}
 		ctx, runState := newLoopRunState(ctx, l)
 		defer runState.finish()
 		defer close(events)
@@ -236,6 +244,14 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 
 				iterCtx, iterState = runState.startIteration(ctx, iteration.Count, attempt)
 				iterCtx, cancel = context.WithCancel(iterCtx)
+				var attemptDeadline context.Context
+				if l.RetryPolicy != nil && l.RetryPolicy.AttemptTimeout > 0 {
+					var attemptCancel context.CancelFunc
+					attemptDeadline, attemptCancel = context.WithTimeout(iterCtx, l.RetryPolicy.AttemptTimeout)
+					previousCancel := cancel
+					cancel = func() { attemptCancel(); previousCancel() }
+					iterCtx = attemptDeadline
+				}
 				attemptID := iterState.attemptID()
 				if err := iterCtx.Err(); err != nil {
 					sendAttemptCanceled(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, err)
@@ -284,9 +300,15 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 				tokens := l.Model.GenerateStream(iterCtx, request)
 
 				retrying := false
+				var retryErr error
 				for t := range tokens {
 					if t.Err != nil {
-						if cancelErr := cancellationError(iterCtx, t.Err); cancelErr != nil {
+						retryErr = t.Err
+						attemptTimeout := attemptDeadline != nil && errors.Is(attemptDeadline.Err(), context.DeadlineExceeded) && callerCtx.Err() == nil && ctx.Err() == nil
+						if attemptTimeout {
+							t.Err = ErrAttemptTimeout
+							retryErr = t.Err
+						} else if cancelErr := cancellationError(iterCtx, t.Err); cancelErr != nil {
 							sendAttemptCanceled(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, cancelErr)
 							cancel()
 							iterState.markCanceled(cancelErr)
@@ -294,7 +316,11 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 							return
 						}
 
-						if runState.canRetry(l.RetryCount) {
+						canRetry := runState.canRetry(l.RetryCount)
+						if l.RetryPolicy != nil {
+							canRetry = l.RetryPolicy.ShouldRetry(runState.retryCount, t.Err)
+						}
+						if canRetry {
 							retrying = true
 							break
 						}
@@ -334,7 +360,20 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 					}
 				}
 
-				if err := iterCtx.Err(); err != nil {
+				attemptTimeout := attemptDeadline != nil && errors.Is(attemptDeadline.Err(), context.DeadlineExceeded) && callerCtx.Err() == nil && ctx.Err() == nil
+				if attemptTimeout && !retrying {
+					retryErr = ErrAttemptTimeout
+					if l.RetryPolicy.ShouldRetry(runState.retryCount, ErrAttemptTimeout) {
+						retrying = true
+					} else {
+						iterationErr = fmt.Errorf("%w: limit=%d: %w", ErrMaxRetries, l.RetryPolicy.MaxRetries, ErrAttemptTimeout)
+						sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, iterationErr)
+						cancel()
+						iterState.finish(iterationErr)
+						return
+					}
+				}
+				if err := iterCtx.Err(); err != nil && !(retrying && attemptTimeout) {
 					sendAttemptCanceled(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, err)
 					cancel()
 					iterState.markCanceled(err)
@@ -359,6 +398,22 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 					cancel()
 					iterState.finish(nil)
 					return
+				}
+				if l.RetryPolicy != nil {
+					delay := l.RetryPolicy.Backoff(runState.retryCount-1, retryErr)
+					if delay > 0 {
+						timer := time.NewTimer(delay)
+						select {
+						case <-ctx.Done():
+							timer.Stop()
+							sendAttemptCanceled(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, ctx.Err())
+							cancel()
+							iterState.markCanceled(ctx.Err())
+							iterState.finish(nil)
+							return
+						case <-timer.C:
+						}
+					}
 				}
 				cancel()
 				iterState.finish(nil)
