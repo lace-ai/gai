@@ -35,3 +35,17 @@ func TestRetryPolicyAttemptTimeoutRetriesButCallerCancellationDoesNot(t *testing
 		t.Fatal("attempt timeout must retain deadline identity")
 	}
 }
+
+func TestRetryPolicyBackoffNeverExceedsMaximumWithJitter(t *testing.T) {
+	policy := loop.RetryPolicy{
+		InitialBackoff: 10 * time.Millisecond,
+		MaxBackoff:     10 * time.Millisecond,
+		Multiplier:     2,
+		Jitter:         1,
+	}
+	for range 64 {
+		if backoff := policy.Backoff(1, nil); backoff > policy.MaxBackoff {
+			t.Fatalf("backoff %s exceeds maximum %s", backoff, policy.MaxBackoff)
+		}
+	}
+}

@@ -71,5 +71,8 @@ func (p RetryPolicy) Backoff(retries int, err error) time.Duration {
 	if p.Jitter > 0 {
 		d = time.Duration(float64(d) * (1 - p.Jitter + rand.Float64()*2*p.Jitter))
 	}
+	if p.MaxBackoff > 0 && d > p.MaxBackoff {
+		d = p.MaxBackoff
+	}
 	return d
 }
