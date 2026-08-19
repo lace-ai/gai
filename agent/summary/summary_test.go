@@ -86,34 +86,3 @@ func (m *recordingModel) Close() error {
 func (m *recordingModel) Tokenizer() ai.Tokenizer {
 	return &mocks.MockTokenizer{}
 }
-
-type toolCallModel struct {
-	tokens []ai.Token
-}
-
-func (m toolCallModel) Name() string {
-	return "tool-call"
-}
-
-func (m toolCallModel) Generate(context.Context, ai.AIRequest) (*ai.AIResponse, error) {
-	return &ai.AIResponse{}, nil
-}
-
-func (m toolCallModel) GenerateStream(context.Context, ai.AIRequest) <-chan ai.Token {
-	out := make(chan ai.Token, len(m.tokens))
-	go func() {
-		defer close(out)
-		for _, token := range m.tokens {
-			out <- token
-		}
-	}()
-	return out
-}
-
-func (m toolCallModel) Close() error {
-	return nil
-}
-
-func (m toolCallModel) Tokenizer() ai.Tokenizer {
-	return &mocks.MockTokenizer{}
-}

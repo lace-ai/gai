@@ -196,7 +196,7 @@ func (o *workflowObserver) Finished(ctx context.Context, result WorkflowResult) 
 		"error_count":      len(result.Errors),
 		"complete":         result.Complete,
 	}
-	if o != nil && o.span != nil {
+	if o.span != nil {
 		o.span.SetAttributes(
 			attribute.Int("agent.stage_count", len(result.Stages)),
 			attribute.Int("agent.token_count", len(result.Tokens)),
@@ -208,7 +208,7 @@ func (o *workflowObserver) Finished(ctx context.Context, result WorkflowResult) 
 	gai.AddDebugContent(ctx, o.debug, fields, "reasoning", gai.ContentKindReasoning, result.Reasoning)
 	err := errors.Join(result.Errors...)
 	o.emit(ctx, "agent_workflow_finished", fields, err)
-	if o != nil && o.span != nil {
+	if o.span != nil {
 		gai.EndSpan(o.span, err)
 	}
 }
@@ -270,12 +270,15 @@ func (o *middlewareObserver) Skipped(ctx context.Context, reason string) {
 }
 
 func (o *middlewareObserver) Finished(ctx context.Context, result AgentResult, applied bool) {
+	if o == nil {
+		return
+	}
 	fields := o.fields()
 	for key, value := range agentResultFields(result) {
 		fields[key] = value
 	}
 	fields["output_applied"] = applied
-	if o != nil && o.span != nil {
+	if o.span != nil {
 		o.span.SetAttributes(
 			attribute.Int("agent.middleware.token_count", len(result.Tokens)),
 			attribute.Int("agent.middleware.error_count", len(result.Errors)),
@@ -290,7 +293,7 @@ func (o *middlewareObserver) Finished(ctx context.Context, result AgentResult, a
 		name = "agent_middleware_failed"
 	}
 	o.emit(ctx, name, fields, err)
-	if o != nil && o.span != nil {
+	if o.span != nil {
 		gai.EndSpan(o.span, err)
 	}
 }

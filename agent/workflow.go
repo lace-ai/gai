@@ -595,11 +595,6 @@ func iterationTokens(iterations []loop.Iteration) []ai.Token {
 	return tokens
 }
 
-func iterationText(iterations []loop.Iteration) string { return tokenText(iterationTokens(iterations)) }
-func iterationReasoning(iterations []loop.Iteration) string {
-	return tokenReasoning(iterationTokens(iterations))
-}
-
 func cloneRunInput(input RunInput) RunInput {
 	cloned := input
 	if input.TraceContext != nil {

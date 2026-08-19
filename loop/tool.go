@@ -1,7 +1,6 @@
 package loop
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -145,17 +144,6 @@ func ToolCallToString(tc ai.ToolCall) string {
 	builder.WriteString(",arguments: ")
 	builder.Write(tc.Args)
 	return builder.String()
-}
-
-func toolCallSignature(tc ai.ToolCall) string {
-	args := strings.TrimSpace(string(tc.Args))
-	if len(tc.Args) > 0 {
-		var compact bytes.Buffer
-		if err := json.Compact(&compact, tc.Args); err == nil {
-			args = compact.String()
-		}
-	}
-	return tc.Name + "\x00" + args
 }
 
 // String returns the response text.

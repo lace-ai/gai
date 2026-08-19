@@ -27,7 +27,6 @@ type Model struct {
 
 var _ ai.Model = (*Model)(nil)
 var _ ai.ModelDescriber = (*Model)(nil)
-var _ ai.NativeToolModel = (*Model)(nil)
 
 func (m *Model) Name() string {
 	return m.name
@@ -709,7 +708,7 @@ func (t *Tokenizer) ID() string {
 }
 
 func (t *Tokenizer) CountTokens(ctx context.Context, text string) (tokens int, err error) {
-	ctx, span := gai.StartOperationSpan(ctx, geminiTracerName, "ai.gemini", "ai.operation", "tokenizer.count_tokens",
+	_, span := gai.StartOperationSpan(ctx, geminiTracerName, "ai.gemini", "ai.operation", "tokenizer.count_tokens",
 		attribute.String("ai.provider", "gemini"),
 		attribute.String("ai.model", t.modelName),
 		attribute.String("ai.tokenizer", t.ID()),
@@ -733,7 +732,7 @@ func (t *Tokenizer) CountTokens(ctx context.Context, text string) (tokens int, e
 }
 
 func (t *Tokenizer) Tokenize(ctx context.Context, text string) (tokens []string, err error) {
-	ctx, span := gai.StartOperationSpan(ctx, geminiTracerName, "ai.gemini", "ai.operation", "tokenizer.tokenize",
+	_, span := gai.StartOperationSpan(ctx, geminiTracerName, "ai.gemini", "ai.operation", "tokenizer.tokenize",
 		attribute.String("ai.provider", "gemini"),
 		attribute.String("ai.model", t.modelName),
 		attribute.String("ai.tokenizer", t.ID()),
