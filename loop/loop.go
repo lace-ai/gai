@@ -305,15 +305,18 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 					if t.Err != nil {
 						retryErr = t.Err
 						attemptTimeout := attemptDeadline != nil && errors.Is(attemptDeadline.Err(), context.DeadlineExceeded) && callerCtx.Err() == nil && ctx.Err() == nil
-						if attemptTimeout {
+						var providerErr *ai.ProviderError
+						if attemptTimeout && errors.Is(t.Err, context.DeadlineExceeded) && !errors.As(t.Err, &providerErr) {
 							t.Err = ErrAttemptTimeout
 							retryErr = t.Err
-						} else if cancelErr := cancellationError(iterCtx, t.Err); cancelErr != nil {
-							sendAttemptCanceled(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, cancelErr)
-							cancel()
-							iterState.markCanceled(cancelErr)
-							iterState.finish(nil)
-							return
+						} else if !attemptTimeout {
+							if cancelErr := cancellationError(iterCtx, t.Err); cancelErr != nil {
+								sendAttemptCanceled(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, cancelErr)
+								cancel()
+								iterState.markCanceled(cancelErr)
+								iterState.finish(nil)
+								return
+							}
 						}
 
 						canRetry := runState.canRetry(l.RetryCount)

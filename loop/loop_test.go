@@ -30,10 +30,13 @@ func (m wrapStreamModel) GenerateStream(ctx context.Context, req ai.AIRequest) <
 }
 
 type scriptedStreamModel struct {
-	sequences [][]ai.Token
-	idx       int
-	mu        sync.Mutex
-	requests  []ai.AIRequest
+	sequences     [][]ai.Token
+	delays        []time.Duration
+	ignoreContext bool
+	idx           int
+	mu            sync.Mutex
+	requests      []ai.AIRequest
+	requestTimes  []time.Time
 }
 
 type cancelAfterTokenModel struct {
@@ -235,15 +238,27 @@ func (m *scriptedStreamModel) GenerateStream(ctx context.Context, req ai.AIReque
 		defer close(out)
 		m.mu.Lock()
 		m.requests = append(m.requests, req)
+		m.requestTimes = append(m.requestTimes, time.Now())
 		m.mu.Unlock()
 
 		if m.idx >= len(m.sequences) {
 			return
 		}
 		seq := m.sequences[m.idx]
+		var delay time.Duration
+		if m.idx < len(m.delays) {
+			delay = m.delays[m.idx]
+		}
 		m.idx++
+		if delay > 0 {
+			time.Sleep(delay)
+		}
 
 		for _, tok := range seq {
+			if m.ignoreContext {
+				out <- tok
+				continue
+			}
 			select {
 			case <-ctx.Done():
 				return
@@ -270,6 +285,15 @@ func (m *scriptedStreamModel) Requests() []ai.AIRequest {
 	requests := make([]ai.AIRequest, len(m.requests))
 	copy(requests, m.requests)
 	return requests
+}
+
+func (m *scriptedStreamModel) RequestTimes() []time.Time {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	times := make([]time.Time, len(m.requestTimes))
+	copy(times, m.requestTimes)
+	return times
 }
 
 func (m *cancelAfterTokenModel) Name() string {
@@ -738,6 +762,38 @@ func TestLoopAttemptTimeoutDoesNotApplyToPromptConstruction(t *testing.T) {
 	}
 	if promptBuilder.hasDeadline.Load() {
 		t.Fatal("prompt construction must not receive the model attempt deadline")
+	}
+}
+
+func TestLoopAttemptTimeoutPreservesProviderRetryAfter(t *testing.T) {
+	t.Parallel()
+
+	retryAfter := 40 * time.Millisecond
+	model := &scriptedStreamModel{
+		sequences: [][]ai.Token{
+			{{Err: &ai.ProviderError{Kind: ai.ProviderErrorTransient, RetryAfter: retryAfter}}},
+			{{Type: ai.TokenTypeText, Data: []byte("done")}},
+		},
+		delays:        []time.Duration{5 * time.Millisecond},
+		ignoreContext: true,
+	}
+	l := loop.New(model, nil, testPromptBuilder(), nil)
+	l.MaxLoopIterations = 1
+	l.RetryPolicy = &loop.RetryPolicy{
+		MaxRetries:        1,
+		AttemptTimeout:    time.Millisecond,
+		RespectRetryAfter: true,
+	}
+
+	if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+	times := model.RequestTimes()
+	if len(times) != 2 {
+		t.Fatalf("expected 2 model attempts, got %d", len(times))
+	}
+	if elapsed := times[1].Sub(times[0]); elapsed < retryAfter {
+		t.Fatalf("retry began after %s, want at least provider RetryAfter %s", elapsed, retryAfter)
 	}
 }
 
