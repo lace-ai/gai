@@ -88,6 +88,20 @@ func (l *Loop) Validate() error {
 	if err := l.ResponseFormat.Validate(); err != nil {
 		return err
 	}
+	if l.ToolChoice.Mode == ai.ToolChoiceRequired {
+		for _, requiredName := range l.ToolChoice.Names {
+			configured := false
+			for _, tool := range l.Tools {
+				if tool != nil && tool.Name() == requiredName {
+					configured = true
+					break
+				}
+			}
+			if !configured {
+				return fmt.Errorf("%w: %q", ErrRequiredToolNotConfigured, requiredName)
+			}
+		}
+	}
 	return nil
 }
 

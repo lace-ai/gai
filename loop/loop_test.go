@@ -328,6 +328,18 @@ func TestLoopPropagatesReasoningToModelRequests(t *testing.T) {
 	}
 }
 
+func TestLoopValidateRejectsMissingNamedRequiredTool(t *testing.T) {
+	t.Parallel()
+
+	l := loop.New(&scriptedStreamModel{}, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
+	l.ToolChoice = ai.ToolChoice{Mode: ai.ToolChoiceRequired, Names: []string{"missing"}}
+
+	err := l.Validate()
+	if !errors.Is(err, loop.ErrRequiredToolNotConfigured) {
+		t.Fatalf("Validate() error = %v, want ErrRequiredToolNotConfigured", err)
+	}
+}
+
 func TestLoopDowngradesRequiredToolChoiceAfterToolCall(t *testing.T) {
 	t.Parallel()
 
