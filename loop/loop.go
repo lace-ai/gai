@@ -224,6 +224,7 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 			return
 		}
 
+		requiredToolCallSatisfied := l.ToolChoice.Mode != ai.ToolChoiceRequired
 		for i := range l.MaxLoopIterations {
 			iteration := Iteration{Count: i + 1}
 			userMessage := userMessageForIteration(l.PromptBuilder, i)
@@ -282,6 +283,9 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 				}
 
 				toolChoice := l.ToolChoice
+				if l.ToolChoice.Mode == ai.ToolChoiceRequired && requiredToolCallSatisfied {
+					toolChoice = ai.ToolChoice{Mode: ai.ToolChoiceAuto}
+				}
 				if l.ToolTransport == ToolTransportText {
 					// Text transport exposes tools through the rendered prompt, not
 					// AIRequest.Tools. Provider-native tool choice is therefore invalid.
@@ -412,6 +416,9 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 				return
 			}
 			l.Iterations = append(l.Iterations, iteration)
+			if len(toolCalls) > 0 {
+				requiredToolCallSatisfied = true
+			}
 			runState.resetRetries()
 			if len(toolCalls) == 0 {
 				cancel()

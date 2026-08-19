@@ -328,6 +328,31 @@ func TestLoopPropagatesReasoningToModelRequests(t *testing.T) {
 	}
 }
 
+func TestLoopDowngradesRequiredToolChoiceAfterToolCall(t *testing.T) {
+	t.Parallel()
+
+	model := &scriptedStreamModel{sequences: [][]ai.Token{
+		{{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-1", Type: "function", Name: "echo", Args: json.RawMessage(`{"text":"payload"}`)}}},
+		{{Type: ai.TokenTypeText, Text: "done"}},
+	}}
+	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
+	l.ToolChoice = ai.ToolChoice{Mode: ai.ToolChoiceRequired}
+
+	if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+	requests := model.Requests()
+	if len(requests) != 2 {
+		t.Fatalf("requests = %d, want 2", len(requests))
+	}
+	if requests[0].ToolChoice.Mode != ai.ToolChoiceRequired {
+		t.Fatalf("first tool choice = %#v, want required", requests[0].ToolChoice)
+	}
+	if requests[1].ToolChoice.Mode != ai.ToolChoiceAuto {
+		t.Fatalf("second tool choice = %#v, want auto after the required call", requests[1].ToolChoice)
+	}
+}
+
 func loopEventsOfType(events []loop.Event, eventType loop.EventType) []loop.Event {
 	var filtered []loop.Event
 	for _, event := range events {
