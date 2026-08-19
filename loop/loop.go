@@ -407,16 +407,19 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 				if l.RetryPolicy != nil {
 					delay := l.RetryPolicy.Backoff(runState.retryCount-1, retryErr)
 					if delay > 0 {
-						timer := time.NewTimer(delay)
-						select {
-						case <-ctx.Done():
-							timer.Stop()
-							sendAttemptCanceled(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, ctx.Err())
+						if err := l.RetryPolicy.wait(ctx, delay); err != nil {
+							if cancelErr := cancellationError(ctx, err); cancelErr != nil {
+								sendAttemptCanceled(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, cancelErr)
+								cancel()
+								iterState.markCanceled(cancelErr)
+								iterState.finish(nil)
+								return
+							}
+							iterationErr = fmt.Errorf("wait for retry: %w", err)
+							sendAttemptError(ctx, events, runState, iteration.Count, attemptID, runState.retryCount, &attemptIteration, iterationErr)
 							cancel()
-							iterState.markCanceled(ctx.Err())
-							iterState.finish(nil)
+							iterState.finish(iterationErr)
 							return
-						case <-timer.C:
 						}
 					}
 				}

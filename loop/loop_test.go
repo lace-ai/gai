@@ -797,6 +797,35 @@ func TestLoopAttemptTimeoutPreservesProviderRetryAfter(t *testing.T) {
 	}
 }
 
+func TestLoopRetryUsesInjectedWait(t *testing.T) {
+	t.Parallel()
+
+	model := &scriptedStreamModel{
+		sequences: [][]ai.Token{
+			{{Err: &ai.ProviderError{Kind: ai.ProviderErrorTransient}}},
+			{{Type: ai.TokenTypeText, Data: []byte("done")}},
+		},
+	}
+	var waited time.Duration
+	l := loop.New(model, nil, testPromptBuilder(), nil)
+	l.MaxLoopIterations = 1
+	l.RetryPolicy = &loop.RetryPolicy{
+		MaxRetries:     1,
+		InitialBackoff: time.Hour,
+		Wait: func(_ context.Context, delay time.Duration) error {
+			waited = delay
+			return nil
+		},
+	}
+
+	if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+	if waited != time.Hour {
+		t.Fatalf("waited %s, want %s", waited, time.Hour)
+	}
+}
+
 func TestLoopTerminalRetryErrorReportsPolicyLimit(t *testing.T) {
 	t.Parallel()
 
