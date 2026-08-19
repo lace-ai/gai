@@ -84,6 +84,11 @@ func (l *Loop) Validate() error {
 	if l.PromptBuilder == nil {
 		return ErrPromptNotConfigured
 	}
+	if l.RetryPolicy != nil {
+		if err := l.RetryPolicy.Validate(); err != nil {
+			return err
+		}
+	}
 	if err := l.ResponseFormat.Validate(); err != nil {
 		return err
 	}

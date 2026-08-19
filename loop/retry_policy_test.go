@@ -63,3 +63,49 @@ func TestRetryPolicyBackoffUsesInjectedJitterSource(t *testing.T) {
 		t.Fatalf("backoff = %s, want 12.5ms", backoff)
 	}
 }
+
+func TestRetryPolicyValidateRejectsInvalidPublicValues(t *testing.T) {
+	tests := []struct {
+		name   string
+		policy loop.RetryPolicy
+	}{
+		{name: "negative retries", policy: loop.RetryPolicy{MaxRetries: -1}},
+		{name: "negative initial backoff", policy: loop.RetryPolicy{InitialBackoff: -time.Nanosecond}},
+		{name: "negative maximum backoff", policy: loop.RetryPolicy{MaxBackoff: -time.Nanosecond}},
+		{name: "negative attempt timeout", policy: loop.RetryPolicy{AttemptTimeout: -time.Nanosecond}},
+		{name: "negative total timeout", policy: loop.RetryPolicy{TotalTimeout: -time.Nanosecond}},
+		{name: "negative jitter", policy: loop.RetryPolicy{Jitter: -0.01}},
+		{name: "jitter above one", policy: loop.RetryPolicy{Jitter: 1.01}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.policy.Validate(); err == nil {
+				t.Fatal("Validate() succeeded for an invalid retry policy")
+			}
+		})
+	}
+}
+
+func TestLoopValidateRejectsInvalidRetryPolicy(t *testing.T) {
+	l := loop.New(&scriptedStreamModel{}, nil, testPromptBuilder(), nil)
+	l.RetryPolicy = &loop.RetryPolicy{Jitter: 1.01}
+
+	if err := l.Validate(); err == nil {
+		t.Fatal("Loop.Validate() succeeded with an invalid retry policy")
+	}
+}
+
+func TestRetryPolicyBackoffGuardsInjectedJitterSource(t *testing.T) {
+	policy := loop.RetryPolicy{
+		InitialBackoff: 10 * time.Millisecond,
+		Jitter:         1,
+		JitterSource: func() float64 {
+			return -1
+		},
+	}
+
+	if backoff := policy.Backoff(0, nil); backoff < 0 {
+		t.Fatalf("backoff = %s, must not be negative", backoff)
+	}
+}

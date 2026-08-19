@@ -3,6 +3,7 @@ package loop
 import (
 	"context"
 	"errors"
+	"math"
 	"math/rand/v2"
 	"time"
 
@@ -26,9 +27,11 @@ type RetryPolicy struct {
 	InitialBackoff time.Duration
 	MaxBackoff     time.Duration
 	Multiplier     float64
-	Jitter         float64
+	// Jitter is the proportional randomization amount in the inclusive range [0, 1].
+	Jitter float64
 	// JitterSource supplies a value in [0, 1) when applying jitter. Nil uses
-	// math/rand/v2's default source.
+	// math/rand/v2's default source. Out-of-range source values are constrained
+	// to that range before use.
 	JitterSource func() float64
 	// Wait blocks for a retry delay or returns the context error when canceled.
 	// Nil waits using a wall-clock timer.
@@ -36,6 +39,25 @@ type RetryPolicy struct {
 	RespectRetryAfter bool
 	AttemptTimeout    time.Duration
 	TotalTimeout      time.Duration
+}
+
+// Validate verifies that RetryPolicy's public limits and durations are valid.
+func (p RetryPolicy) Validate() error {
+	switch {
+	case p.MaxRetries < 0:
+		return errors.New("retry policy MaxRetries must be non-negative")
+	case p.InitialBackoff < 0:
+		return errors.New("retry policy InitialBackoff must be non-negative")
+	case p.MaxBackoff < 0:
+		return errors.New("retry policy MaxBackoff must be non-negative")
+	case p.AttemptTimeout < 0:
+		return errors.New("retry policy AttemptTimeout must be non-negative")
+	case p.TotalTimeout < 0:
+		return errors.New("retry policy TotalTimeout must be non-negative")
+	case math.IsNaN(p.Jitter) || p.Jitter < 0 || p.Jitter > 1:
+		return errors.New("retry policy Jitter must be within [0, 1]")
+	}
+	return nil
 }
 
 func (p RetryPolicy) ShouldRetry(retries int, err error) bool {
@@ -79,7 +101,14 @@ func (p RetryPolicy) Backoff(retries int, err error) time.Duration {
 		if source == nil {
 			source = rand.Float64
 		}
-		d = time.Duration(float64(d) * (1 - p.Jitter + source()*2*p.Jitter))
+		jitter := source()
+		switch {
+		case math.IsNaN(jitter) || jitter < 0:
+			jitter = 0
+		case jitter >= 1:
+			jitter = math.Nextafter(1, 0)
+		}
+		d = time.Duration(float64(d) * (1 - p.Jitter + jitter*2*p.Jitter))
 	}
 	if p.MaxBackoff > 0 && d > p.MaxBackoff {
 		d = p.MaxBackoff
