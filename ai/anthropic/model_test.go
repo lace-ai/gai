@@ -433,6 +433,7 @@ func TestCountTokens(t *testing.T) {
 }
 
 func TestGenerateStreamClassifiesProviderRateLimit(t *testing.T) {
+	recorder := obstest.Install(t)
 	m := testModel(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("request-id", "req_anthropic")
@@ -440,6 +441,7 @@ func TestGenerateStreamClassifiesProviderRateLimit(t *testing.T) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		_, _ = w.Write([]byte(`{"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}`))
 	})
+	sawError := false
 	for token := range m.GenerateStream(t.Context(), ai.AIRequest{Prompt: "hello"}) {
 		if token.Type != ai.TokenTypeErr {
 			continue
@@ -448,7 +450,13 @@ func TestGenerateStreamClassifiesProviderRateLimit(t *testing.T) {
 		if !errors.As(token.Err, &providerErr) || providerErr.Kind != ai.ProviderErrorRateLimited || providerErr.StatusCode != http.StatusTooManyRequests || providerErr.Code != "rate_limit_error" || providerErr.RequestID != "req_anthropic" || providerErr.RetryAfter != 3*time.Second || errors.Unwrap(providerErr) == nil {
 			t.Fatalf("provider error = %#v", token.Err)
 		}
-		return
+		sawError = true
 	}
-	t.Fatal("expected stream error")
+	if !sawError {
+		t.Fatal("expected stream error")
+	}
+	attrs := obstest.Attributes(obstest.RequireGenerationSpans(t, recorder, 1)[0])
+	if got := attrs["http.response.status_code"].AsInt64(); got != http.StatusTooManyRequests {
+		t.Fatalf("HTTP status attribute = %d, want %d", got, http.StatusTooManyRequests)
+	}
 }

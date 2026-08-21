@@ -549,9 +549,13 @@ func streamToolCall(block *streamBlock) (*ai.ToolCall, error) {
 }
 
 func anthropicHTTPStatus(err error) int {
-	var providerErr *Error
+	var providerErr *ai.ProviderError
 	if errors.As(err, &providerErr) {
 		return providerErr.StatusCode
+	}
+	var anthropicErr *Error
+	if errors.As(err, &anthropicErr) {
+		return anthropicErr.StatusCode
 	}
 	return 0
 }
