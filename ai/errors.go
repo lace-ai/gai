@@ -74,12 +74,12 @@ func providerErrorKind(statusCode int, code string) ProviderErrorKind {
 	switch {
 	case statusCode == http.StatusTooManyRequests || strings.Contains(code, "rate_limit") || strings.Contains(code, "rate-limit"):
 		return ProviderErrorRateLimited
+	case statusCode == http.StatusNotImplemented || strings.Contains(code, "unsupported"):
+		return ProviderErrorUnsupported
 	case statusCode == http.StatusRequestTimeout || statusCode == http.StatusConflict || statusCode == http.StatusTooEarly || statusCode >= http.StatusInternalServerError || strings.Contains(code, "server_error") || strings.Contains(code, "overload") || strings.Contains(code, "temporar"):
 		return ProviderErrorTransient
 	case statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden || strings.Contains(code, "auth") || strings.Contains(code, "api_key"):
 		return ProviderErrorAuthentication
-	case statusCode == http.StatusNotImplemented || strings.Contains(code, "unsupported"):
-		return ProviderErrorUnsupported
 	case statusCode >= http.StatusBadRequest && statusCode < http.StatusInternalServerError:
 		return ProviderErrorInvalidRequest
 	default:

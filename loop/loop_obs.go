@@ -88,6 +88,9 @@ func newLoopRunState(ctx context.Context, l *Loop) (context.Context, *loopRunSta
 	if l != nil {
 		maxIterations = l.MaxLoopIterations
 		retryLimit = l.RetryCount
+		if l.RetryPolicy != nil {
+			retryLimit = l.RetryPolicy.MaxRetries
+		}
 		maxTokens = l.MaxTokens
 		toolCount = len(l.Tools)
 		if l.Model != nil {

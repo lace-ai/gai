@@ -28,6 +28,28 @@ func (f toolResponseProcessorFunc) Process(call ai.ToolCall, response *ToolRespo
 	return f(call, response)
 }
 
+func TestLoopRunSpanUsesRetryPolicyLimit(t *testing.T) {
+	recorder := obstest.Install(t)
+	l := &Loop{RetryCount: 3, RetryPolicy: &RetryPolicy{MaxRetries: 0}}
+
+	_, state := newLoopRunState(t.Context(), l)
+	state.finish()
+
+	var runSpan sdktrace.ReadOnlySpan
+	for _, span := range recorder.Ended() {
+		if span.Name() == "loop.run" {
+			runSpan = span
+			break
+		}
+	}
+	if runSpan == nil {
+		t.Fatal("loop run span was not recorded")
+	}
+	if got := obstest.Attributes(runSpan)["loop.retry_limit"].AsInt64(); got != 0 {
+		t.Fatalf("loop.retry_limit = %d, want 0", got)
+	}
+}
+
 func (t observedTestTool) Name() string              { return t.name }
 func (t observedTestTool) Description() string       { return "Test tool." }
 func (t observedTestTool) Params() ai.ToolParameters { return NewEchoTool().Params() }
