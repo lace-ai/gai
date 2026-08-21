@@ -497,6 +497,11 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 				iterState.finish(iterationErr)
 				continue
 			}
+			if l.ToolChoice.Mode == ai.ToolChoiceNone {
+				// Providers and text protocols can still emit a tool-call token even
+				// when tools are disabled. Never dispatch such a call.
+				toolCalls = nil
+			}
 			for _, token := range deferredTokens {
 				runState.recordToken(token)
 				iterState.recordToken(token)

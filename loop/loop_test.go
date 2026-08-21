@@ -61,6 +61,10 @@ type deadlineRecordingTool struct {
 	hasDeadline atomic.Bool
 }
 
+type countingTool struct {
+	calls atomic.Int32
+}
+
 type failingToolResponseProcessor struct {
 	err error
 }
@@ -119,6 +123,14 @@ func (t *deadlineRecordingTool) Params() ai.ToolParameters {
 func (t *deadlineRecordingTool) Function(ctx context.Context, _ *ai.ToolCall) *loop.ToolResponse {
 	_, hasDeadline := ctx.Deadline()
 	t.hasDeadline.Store(hasDeadline)
+	return loop.NewToolSuccess("ok")
+}
+
+func (t *countingTool) Name() string              { return "count" }
+func (t *countingTool) Description() string       { return "Counts invocations." }
+func (t *countingTool) Params() ai.ToolParameters { return loop.NewEchoTool().Params() }
+func (t *countingTool) Function(context.Context, *ai.ToolCall) *loop.ToolResponse {
+	t.calls.Add(1)
 	return loop.NewToolSuccess("ok")
 }
 
@@ -523,6 +535,25 @@ func TestLoopTextTransportDoesNotFinishBeforeRequiredToolCall(t *testing.T) {
 	messages := l.Messages()
 	if len(messages) == 0 || messages[0].Role != gaictx.RoleUser || messages[0].Content.String() != "Initial prompt" {
 		t.Fatalf("messages must begin with the original user request, got %#v", messages)
+	}
+}
+
+func TestLoopTextTransportDoesNotExecuteToolWhenChoiceIsNone(t *testing.T) {
+	t.Parallel()
+
+	tool := &countingTool{}
+	model := &scriptedStreamModel{sequences: [][]ai.Token{{
+		{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-1", Type: "function", Name: "count", Args: json.RawMessage(`{"text":"payload"}`)}},
+	}}}
+	l := loop.New(model, []loop.Tool{tool}, testPromptBuilder(), nil)
+	l.ToolTransport = loop.ToolTransportText
+	l.ToolChoice = ai.ToolChoice{Mode: ai.ToolChoiceNone}
+
+	if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+	if calls := tool.calls.Load(); calls != 0 {
+		t.Fatalf("disabled tool calls = %d, want 0", calls)
 	}
 }
 
