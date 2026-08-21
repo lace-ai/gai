@@ -273,8 +273,9 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 			var iterationErr error
 			var iterCtx context.Context
 			var cancel context.CancelFunc
-			deferTokens := l.ToolTransport == ToolTransportText && (!requiredToolCallSatisfied ||
-				(l.ToolChoice.Mode == ai.ToolChoiceRequired && len(l.ToolChoice.Names) > 0))
+			deferTokens := (l.ToolTransport == ToolTransportText && (!requiredToolCallSatisfied ||
+				(l.ToolChoice.Mode == ai.ToolChoiceRequired && len(l.ToolChoice.Names) > 0))) ||
+				(l.ToolTransport == ToolTransportNative && len(l.ToolChoice.Names) > 0)
 
 			for attempt := 1; ; attempt++ {
 				attemptIteration := Iteration{Count: iteration.Count, UserMessage: userMessage}

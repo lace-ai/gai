@@ -506,7 +506,8 @@ func TestLoopNativeTransportDoesNotExecuteDifferentConfiguredToolOutsideNamedReq
 	l := loop.New(model, []loop.Tool{loop.NewEchoTool(), unselected}, testPromptBuilder(), nil)
 	l.ToolChoice = ai.ToolChoice{Mode: ai.ToolChoiceRequired, Names: []string{"echo"}}
 
-	if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
+	events := collectLoopEvents(t, l, context.Background())
+	if err := loopError(events); err != nil {
 		t.Fatalf("unexpected loop error: %v", err)
 	}
 	if calls := unselected.calls.Load(); calls != 0 {
@@ -522,6 +523,11 @@ func TestLoopNativeTransportDoesNotExecuteDifferentConfiguredToolOutsideNamedReq
 	for i, request := range requests {
 		if len(request.Tools) != 1 || request.Tools[0].Name != "echo" {
 			t.Fatalf("request %d tools = %#v, want only echo", i, request.Tools)
+		}
+	}
+	for _, event := range events {
+		if event.IterationCount == 1 && (event.Type == loop.EventToken || event.Type == loop.EventIterationDone) {
+			t.Fatalf("unselected native tool call must not be observable, got %#v", event)
 		}
 	}
 }
