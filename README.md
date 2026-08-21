@@ -249,8 +249,8 @@ workflow, err := support.NewRun(ctx, agent.RunInput{
 })
 ```
 
-`Execution.ToolChoice` and `Execution.Reasoning` optionally override the
-definition-level settings for a single run.
+`Execution.ToolChoice` configures tool choice for a single run.
+`Execution.Reasoning` optionally overrides `Definition.Reasoning` for that run.
 
 ## Ordered workflow events
 
