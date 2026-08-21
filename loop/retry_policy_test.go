@@ -51,6 +51,17 @@ func TestRetryPolicyBackoffNeverExceedsMaximumWithJitter(t *testing.T) {
 	}
 }
 
+func TestRetryPolicyBackoffClampsInitialBackoffToMaximum(t *testing.T) {
+	policy := loop.RetryPolicy{
+		InitialBackoff: time.Second,
+		MaxBackoff:     10 * time.Millisecond,
+	}
+
+	if backoff := policy.Backoff(0, nil); backoff != policy.MaxBackoff {
+		t.Fatalf("backoff = %s, want maximum %s", backoff, policy.MaxBackoff)
+	}
+}
+
 func TestRetryPolicyBackoffClampsRetryAfterToMaximum(t *testing.T) {
 	policy := loop.RetryPolicy{
 		MaxBackoff:        10 * time.Millisecond,

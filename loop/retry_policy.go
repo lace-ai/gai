@@ -100,6 +100,9 @@ func (p RetryPolicy) Backoff(retries int, err error) time.Duration {
 	if d <= 0 {
 		return 0
 	}
+	if p.MaxBackoff > 0 && d > p.MaxBackoff {
+		d = p.MaxBackoff
+	}
 	m := p.Multiplier
 	if m <= 0 {
 		m = 2
