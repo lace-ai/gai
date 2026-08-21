@@ -381,10 +381,16 @@ func (w *Workflow) captureEvents(ctx context.Context, upstream <-chan loop.Event
 					tokens = append(tokens, *event.Token)
 				}
 			case loop.EventError:
+				if event.Iteration != nil {
+					billedUsage.Add(event.Iteration.Usage)
+				}
 				if event.Err != nil {
 					errs = append(errs, event.Err)
 				}
 			case loop.EventCanceled:
+				if event.Iteration != nil {
+					billedUsage.Add(event.Iteration.Usage)
+				}
 				canceled = true
 				cancellationErr = event.Err
 			case loop.EventRetry, loop.EventDiscard, loop.EventIterationDone:

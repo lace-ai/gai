@@ -410,6 +410,42 @@ func TestAgentWorkflowRunEventsBillsRejectedRequiredToolAttempt(t *testing.T) {
 	}
 }
 
+func TestAgentWorkflowRunEventsBillsTerminalErrorAttempt(t *testing.T) {
+	model := &scriptedWorkflowModel{
+		scripts: [][]ai.Token{{
+			{Type: ai.TokenTypeText, Text: "partial response"},
+			{Type: ai.TokenTypeCompletion, Completion: &ai.Completion{Usage: ai.Usage{InputTokens: 3, OutputTokens: 2}}},
+			{Err: errors.New("terminal stream error")},
+		}},
+	}
+	assistant := agent.New(agent.Definition{
+		Name:  "terminal-error-events-billing",
+		Model: model,
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return gaictx.New(gaictx.Definition{Renderer: &gaictx.SimpleRenderer{}}), nil
+		},
+	})
+
+	workflow, err := assistant.NewRun(context.Background(), textRunInput("fail"))
+	if err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+
+	var terminal loop.Event
+	for event := range workflow.RunEvents(context.Background()) {
+		if event.Type == loop.EventError {
+			terminal = event
+		}
+	}
+	if terminal.Iteration == nil || terminal.Iteration.Usage != (ai.Usage{InputTokens: 3, OutputTokens: 2}) {
+		t.Fatalf("terminal error event = %#v, want usage metadata", terminal)
+	}
+	result := workflow.Result()
+	if result.BilledUsage != (ai.Usage{InputTokens: 3, OutputTokens: 2}) {
+		t.Fatalf("billed usage = %#v", result.BilledUsage)
+	}
+}
+
 func TestAgentWorkflowReportsCancellationWithoutError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
