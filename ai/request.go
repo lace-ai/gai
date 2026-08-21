@@ -127,6 +127,9 @@ func (r AIRequest) Validate() error {
 	if err := r.ResponseFormat.Validate(); err != nil {
 		return err
 	}
+	if err := r.ToolChoice.Validate(); err != nil {
+		return err
+	}
 	for _, tool := range r.Tools {
 		if err := tool.Validate(); err != nil {
 			return err

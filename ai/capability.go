@@ -197,6 +197,16 @@ type ToolChoice struct {
 	Names []string
 }
 
+// Validate checks that the tool-choice mode is supported by the neutral API.
+func (choice ToolChoice) Validate() error {
+	switch choice.Mode {
+	case "", ToolChoiceAuto, ToolChoiceRequired, ToolChoiceNone:
+		return nil
+	default:
+		return fmt.Errorf("unsupported tool choice mode %q", choice.Mode)
+	}
+}
+
 // ResponseFormatType identifies the requested model response format.
 type ResponseFormatType string
 

@@ -169,6 +169,11 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 	if a.def.Prompt == nil {
 		return nil, loop.ErrPromptNotConfigured
 	}
+	if input.Execution.ToolChoice != nil {
+		if err := input.Execution.ToolChoice.Validate(); err != nil {
+			return nil, err
+		}
+	}
 	tools := cloneTools(a.def.Tools)
 	if input.Execution.Tools != nil {
 		tools = cloneTools(input.Execution.Tools)

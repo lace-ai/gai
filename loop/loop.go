@@ -92,6 +92,9 @@ func (l *Loop) Validate() error {
 	if err := l.ResponseFormat.Validate(); err != nil {
 		return err
 	}
+	if err := l.ToolChoice.Validate(); err != nil {
+		return err
+	}
 	if l.ToolChoice.Mode == ai.ToolChoiceRequired {
 		if len(l.Tools) == 0 {
 			return ErrRequiredToolNotConfigured

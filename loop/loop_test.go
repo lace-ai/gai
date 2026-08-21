@@ -445,6 +445,17 @@ func TestLoopValidateRejectsRequiredToolChoiceWithoutTools(t *testing.T) {
 	}
 }
 
+func TestLoopValidateRejectsInvalidToolChoiceMode(t *testing.T) {
+	t.Parallel()
+
+	l := loop.New(&scriptedStreamModel{}, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
+	l.ToolChoice = ai.ToolChoice{Mode: ai.ToolChoiceMode("requred")}
+
+	if err := l.Validate(); err == nil {
+		t.Fatal("Validate() succeeded with an invalid tool choice mode")
+	}
+}
+
 func TestLoopDowngradesRequiredToolChoiceAfterToolCall(t *testing.T) {
 	t.Parallel()
 

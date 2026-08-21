@@ -824,6 +824,40 @@ func TestAgentTextTransportRejectsUnsatisfiableRequiredToolChoice(t *testing.T) 
 	}
 }
 
+func TestAgentRejectsInvalidToolChoiceMode(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name  string
+		model ai.Model
+	}{
+		{
+			name:  "native transport",
+			model: nativeToolWorkflowModel{scriptedWorkflowModel: &scriptedWorkflowModel{}},
+		},
+		{
+			name:  "text transport",
+			model: disabledNativeToolWorkflowModel{&scriptedWorkflowModel{}},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			assistant := agent.New(agent.Definition{
+				Model: tt.model,
+				Tools: []loop.Tool{namedTool{name: "search"}},
+				Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+					return gaictx.New(gaictx.Definition{Renderer: &gaictx.SimpleRenderer{}}), nil
+				},
+			})
+			input := textRunInput("use a tool")
+			input.Execution.ToolChoice = &ai.ToolChoice{Mode: ai.ToolChoiceMode("requred")}
+
+			if _, err := assistant.NewRun(context.Background(), input); err == nil {
+				t.Fatal("NewRun succeeded with an invalid tool choice mode")
+			}
+		})
+	}
+}
+
 func TestAgentDoesNotDuplicateExistingToolDefinitions(t *testing.T) {
 	t.Parallel()
 
