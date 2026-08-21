@@ -54,6 +54,8 @@ func (p RetryPolicy) Validate() error {
 		return errors.New("retry policy AttemptTimeout must be non-negative")
 	case p.TotalTimeout < 0:
 		return errors.New("retry policy TotalTimeout must be non-negative")
+	case math.IsNaN(p.Multiplier) || math.IsInf(p.Multiplier, 0):
+		return errors.New("retry policy Multiplier must be finite")
 	case math.IsNaN(p.Jitter) || p.Jitter < 0 || p.Jitter > 1:
 		return errors.New("retry policy Jitter must be within [0, 1]")
 	}
@@ -103,10 +105,7 @@ func (p RetryPolicy) Backoff(retries int, err error) time.Duration {
 		m = 2
 	}
 	for range retries {
-		d = time.Duration(float64(d) * m)
-	}
-	if p.MaxBackoff > 0 && d > p.MaxBackoff {
-		d = p.MaxBackoff
+		d = cappedDuration(float64(d)*m, p.MaxBackoff)
 	}
 	if p.Jitter > 0 {
 		source := p.JitterSource
@@ -120,12 +119,22 @@ func (p RetryPolicy) Backoff(retries int, err error) time.Duration {
 		case jitter >= 1:
 			jitter = math.Nextafter(1, 0)
 		}
-		d = time.Duration(float64(d) * (1 - p.Jitter + jitter*2*p.Jitter))
-	}
-	if p.MaxBackoff > 0 && d > p.MaxBackoff {
-		d = p.MaxBackoff
+		d = cappedDuration(float64(d)*(1-p.Jitter+jitter*2*p.Jitter), p.MaxBackoff)
 	}
 	return d
+}
+
+func cappedDuration(value float64, maximum time.Duration) time.Duration {
+	if value <= 0 || math.IsNaN(value) {
+		return 0
+	}
+	if maximum <= 0 {
+		maximum = time.Duration(math.MaxInt64)
+	}
+	if value >= float64(maximum) {
+		return maximum
+	}
+	return time.Duration(value)
 }
 
 func (p RetryPolicy) wait(ctx context.Context, delay time.Duration) error {

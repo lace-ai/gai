@@ -3,6 +3,7 @@ package loop_test
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 	"time"
 
@@ -76,6 +77,34 @@ func TestRetryPolicyBackoffUsesInjectedJitterSource(t *testing.T) {
 	}
 }
 
+func TestRetryPolicyBackoffCapsScaledDurationsBeforeConversion(t *testing.T) {
+	t.Run("multiplier", func(t *testing.T) {
+		policy := loop.RetryPolicy{
+			InitialBackoff: time.Second,
+			MaxBackoff:     time.Millisecond,
+			Multiplier:     math.MaxFloat64,
+		}
+
+		if backoff := policy.Backoff(1, nil); backoff != policy.MaxBackoff {
+			t.Fatalf("backoff = %s, want maximum %s", backoff, policy.MaxBackoff)
+		}
+	})
+
+	t.Run("jitter", func(t *testing.T) {
+		policy := loop.RetryPolicy{
+			InitialBackoff: time.Duration(math.MaxInt64),
+			Jitter:         1,
+			JitterSource: func() float64 {
+				return math.Nextafter(1, 0)
+			},
+		}
+
+		if backoff := policy.Backoff(0, nil); backoff != time.Duration(math.MaxInt64) {
+			t.Fatalf("backoff = %s, want maximum duration", backoff)
+		}
+	})
+}
+
 func TestRetryPolicyValidateRejectsInvalidPublicValues(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -86,6 +115,9 @@ func TestRetryPolicyValidateRejectsInvalidPublicValues(t *testing.T) {
 		{name: "negative maximum backoff", policy: loop.RetryPolicy{MaxBackoff: -time.Nanosecond}},
 		{name: "negative attempt timeout", policy: loop.RetryPolicy{AttemptTimeout: -time.Nanosecond}},
 		{name: "negative total timeout", policy: loop.RetryPolicy{TotalTimeout: -time.Nanosecond}},
+		{name: "NaN multiplier", policy: loop.RetryPolicy{Multiplier: math.NaN()}},
+		{name: "positive infinite multiplier", policy: loop.RetryPolicy{Multiplier: math.Inf(1)}},
+		{name: "negative infinite multiplier", policy: loop.RetryPolicy{Multiplier: math.Inf(-1)}},
 		{name: "negative jitter", policy: loop.RetryPolicy{Jitter: -0.01}},
 		{name: "jitter above one", policy: loop.RetryPolicy{Jitter: 1.01}},
 	}
