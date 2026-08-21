@@ -266,7 +266,8 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 			var iterationErr error
 			var iterCtx context.Context
 			var cancel context.CancelFunc
-			deferTokens := l.ToolTransport == ToolTransportText && !requiredToolCallSatisfied
+			deferTokens := l.ToolTransport == ToolTransportText && (!requiredToolCallSatisfied ||
+				(l.ToolChoice.Mode == ai.ToolChoiceRequired && len(l.ToolChoice.Names) > 0))
 
 			for attempt := 1; ; attempt++ {
 				attemptIteration := Iteration{Count: iteration.Count, UserMessage: userMessage}
@@ -485,7 +486,8 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 				iterState.finish(nil)
 			}
 
-			if deferTokens && !hasPermittedToolCall(toolCalls, l.Tools, l.ToolChoice.Names) {
+			if deferTokens && (!requiredToolCallSatisfied || len(toolCalls) > 0) &&
+				!hasPermittedToolCall(toolCalls, l.Tools, l.ToolChoice.Names) {
 				// A text-transport response that does not satisfy a required tool
 				// call is not part of the conversation and must not be observable.
 				cancel()
