@@ -385,6 +385,11 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 						return
 					}
 
+					if t.Type == ai.TokenTypeToolCall && l.ToolChoice.Mode == ai.ToolChoiceNone {
+						// A provider can still emit a tool-call token after tools are
+						// disabled. Do not expose or retain a disabled call.
+						continue
+					}
 					if t.Type == ai.TokenTypeToolCall && t.ToolCall != nil {
 						attemptIteration.AppendToken(t)
 

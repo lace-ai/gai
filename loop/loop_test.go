@@ -549,11 +549,24 @@ func TestLoopTextTransportDoesNotExecuteToolWhenChoiceIsNone(t *testing.T) {
 	l.ToolTransport = loop.ToolTransportText
 	l.ToolChoice = ai.ToolChoice{Mode: ai.ToolChoiceNone}
 
-	if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
+	events := collectLoopEvents(t, l, context.Background())
+	if err := loopError(events); err != nil {
 		t.Fatalf("unexpected loop error: %v", err)
 	}
 	if calls := tool.calls.Load(); calls != 0 {
 		t.Fatalf("disabled tool calls = %d, want 0", calls)
+	}
+	for _, event := range events {
+		if event.Type == loop.EventToken && event.Token.Type == ai.TokenTypeToolCall {
+			t.Fatalf("disabled tool call must not be observable, got %#v", event)
+		}
+	}
+	for _, iteration := range l.Iterations {
+		for _, part := range iteration.Parts {
+			if part.ToolReq != nil {
+				t.Fatalf("disabled tool call must not be retained, got %#v", part.ToolReq)
+			}
+		}
 	}
 }
 
