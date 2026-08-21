@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -423,6 +424,47 @@ func TestModelGenerateStreamWithResponsesTransportFallsBackForEmptyFailedRespons
 	}
 	if len(tokens) != 1 || tokens[0].Type != ai.TokenTypeErr || tokens[0].Err == nil || tokens[0].Err.Error() != "OpenAI Responses API: response failed" {
 		t.Fatalf("tokens = %#v", tokens)
+	}
+}
+
+func TestModelGenerateStreamWithResponsesTransportClassifiesFailedResponse(t *testing.T) {
+	tests := []struct {
+		name string
+		code string
+		want ai.ProviderErrorKind
+	}{
+		{name: "rate limit", code: "rate_limit_exceeded", want: ai.ProviderErrorRateLimited},
+		{name: "server error", code: "server_error", want: ai.ProviderErrorTransient},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/responses" {
+					t.Fatalf("unexpected path %q", r.URL.Path)
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = fmt.Fprintf(w, "data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_1\",\"error\":{\"code\":%q,\"message\":\"provider failed\"}}}\n\n", tt.code)
+			}))
+			defer ts.Close()
+
+			p := New("test-key", nil, WithResponsesTransport())
+			p.baseURL = ts.URL
+			m, err := p.Model("gpt-5.6-terra")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for token := range m.GenerateStream(t.Context(), ai.AIRequest{Prompt: "hello"}) {
+				if token.Type != ai.TokenTypeErr {
+					continue
+				}
+				var providerErr *ai.ProviderError
+				if !errors.As(token.Err, &providerErr) || providerErr.Kind != tt.want || providerErr.Code != tt.code || providerErr.RequestID != "resp_1" || errors.Unwrap(providerErr) == nil {
+					t.Fatalf("provider error = %#v", token.Err)
+				}
+				return
+			}
+			t.Fatal("expected stream error")
+		})
 	}
 }
 
