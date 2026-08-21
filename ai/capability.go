@@ -191,16 +191,22 @@ const (
 	ToolChoiceNone     ToolChoiceMode = "none"
 )
 
-// ToolChoice controls whether and how the model may call tools.
+// ToolChoice controls whether and how the model may call tools. Names may
+// restrict calls only when Mode is ToolChoiceRequired.
 type ToolChoice struct {
 	Mode  ToolChoiceMode
 	Names []string
 }
 
-// Validate checks that the tool-choice mode is supported by the neutral API.
+// Validate checks that the tool-choice configuration is supported by the neutral API.
 func (choice ToolChoice) Validate() error {
 	switch choice.Mode {
-	case "", ToolChoiceAuto, ToolChoiceRequired, ToolChoiceNone:
+	case "", ToolChoiceAuto, ToolChoiceNone:
+		if len(choice.Names) != 0 {
+			return fmt.Errorf("tool choice names require mode %q", ToolChoiceRequired)
+		}
+		return nil
+	case ToolChoiceRequired:
 		return nil
 	default:
 		return fmt.Errorf("unsupported tool choice mode %q", choice.Mode)

@@ -250,8 +250,8 @@ func TestGenerateMapsAdaptiveReasoningAndToolChoice(t *testing.T) {
 		})
 	}
 	m := testModel(t, func(http.ResponseWriter, *http.Request) { t.Fatal("unexpected request") })
-	if _, err := m.Generate(context.Background(), ai.AIRequest{Prompt: "hello", Tools: []ai.ToolDefinition{{Type: "function", Name: "search", Description: "Search", Parameters: json.RawMessage(`{"type":"object"}`)}}, ToolChoice: ai.ToolChoice{Mode: ai.ToolChoiceAuto, Names: []string{"search"}}}); !errors.Is(err, ai.ErrUnsupportedCapability) {
-		t.Fatalf("restricted auto error = %v", err)
+	if _, err := m.Generate(context.Background(), ai.AIRequest{Prompt: "hello", Tools: []ai.ToolDefinition{{Type: "function", Name: "search", Description: "Search", Parameters: json.RawMessage(`{"type":"object"}`)}}, ToolChoice: ai.ToolChoice{Mode: ai.ToolChoiceAuto, Names: []string{"search"}}}); err == nil {
+		t.Fatal("restricted auto error = nil, want error")
 	}
 }
 
