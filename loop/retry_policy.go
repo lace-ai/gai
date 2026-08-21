@@ -88,7 +88,11 @@ func (p RetryPolicy) isRetryable(err error) bool {
 func (p RetryPolicy) Backoff(retries int, err error) time.Duration {
 	var provider *ai.ProviderError
 	if p.RespectRetryAfter && errors.As(err, &provider) && provider.RetryAfter > 0 {
-		return provider.RetryAfter
+		d := provider.RetryAfter
+		if p.MaxBackoff > 0 && d > p.MaxBackoff {
+			d = p.MaxBackoff
+		}
+		return d
 	}
 	d := p.InitialBackoff
 	if d <= 0 {
