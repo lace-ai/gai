@@ -526,7 +526,9 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 			}
 
 			executionTools := l.Tools
-			if l.ToolChoice.Mode == ai.ToolChoiceRequired && !requiredToolCallSatisfied && len(l.ToolChoice.Names) > 0 {
+			if l.ToolChoice.Mode == ai.ToolChoiceRequired && len(l.ToolChoice.Names) > 0 {
+				// Named tool selection remains a run-scoped dispatch constraint after
+				// the required call has let later generations use auto tool choice.
 				executionTools = toolsNamed(l.Tools, l.ToolChoice.Names)
 			}
 			if err := l.executeToolCalls(iterCtx, &iteration, toolCalls, executionTools, events, iteration.Count, iterState.attemptID(), runState.retryCount); err != nil {

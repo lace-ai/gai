@@ -493,13 +493,14 @@ func TestLoopDowngradesRequiredToolChoiceAfterToolCall(t *testing.T) {
 	}
 }
 
-func TestLoopNativeTransportDoesNotExecuteDifferentConfiguredToolBeforeNamedRequiredChoice(t *testing.T) {
+func TestLoopNativeTransportDoesNotExecuteDifferentConfiguredToolOutsideNamedRequiredChoice(t *testing.T) {
 	t.Parallel()
 
 	unselected := &countingTool{}
 	model := &scriptedStreamModel{sequences: [][]ai.Token{
-		{{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-count", Type: "function", Name: "count", Args: json.RawMessage(`{"text":"unselected"}`)}}},
+		{{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-count-before", Type: "function", Name: "count", Args: json.RawMessage(`{"text":"unselected before"}`)}}},
 		{{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-echo", Type: "function", Name: "echo", Args: json.RawMessage(`{"text":"selected"}`)}}},
+		{{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-count-after", Type: "function", Name: "count", Args: json.RawMessage(`{"text":"unselected after"}`)}}},
 		{{Type: ai.TokenTypeText, Text: "done"}},
 	}}
 	l := loop.New(model, []loop.Tool{loop.NewEchoTool(), unselected}, testPromptBuilder(), nil)
@@ -512,11 +513,11 @@ func TestLoopNativeTransportDoesNotExecuteDifferentConfiguredToolBeforeNamedRequ
 		t.Fatalf("unselected tool calls = %d, want 0", calls)
 	}
 	requests := model.Requests()
-	if len(requests) != 3 {
-		t.Fatalf("requests = %d, want 3", len(requests))
+	if len(requests) != 4 {
+		t.Fatalf("requests = %d, want 4", len(requests))
 	}
-	if requests[0].ToolChoice.Mode != ai.ToolChoiceRequired || requests[1].ToolChoice.Mode != ai.ToolChoiceRequired || requests[2].ToolChoice.Mode != ai.ToolChoiceAuto {
-		t.Fatalf("tool choices = %#v, %#v, %#v; want required, required, auto", requests[0].ToolChoice, requests[1].ToolChoice, requests[2].ToolChoice)
+	if requests[0].ToolChoice.Mode != ai.ToolChoiceRequired || requests[1].ToolChoice.Mode != ai.ToolChoiceRequired || requests[2].ToolChoice.Mode != ai.ToolChoiceAuto || requests[3].ToolChoice.Mode != ai.ToolChoiceAuto {
+		t.Fatalf("tool choices = %#v, %#v, %#v, %#v; want required, required, auto, auto", requests[0].ToolChoice, requests[1].ToolChoice, requests[2].ToolChoice, requests[3].ToolChoice)
 	}
 }
 
