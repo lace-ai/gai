@@ -519,6 +519,11 @@ func TestLoopNativeTransportDoesNotExecuteDifferentConfiguredToolOutsideNamedReq
 	if requests[0].ToolChoice.Mode != ai.ToolChoiceRequired || requests[1].ToolChoice.Mode != ai.ToolChoiceRequired || requests[2].ToolChoice.Mode != ai.ToolChoiceAuto || requests[3].ToolChoice.Mode != ai.ToolChoiceAuto {
 		t.Fatalf("tool choices = %#v, %#v, %#v, %#v; want required, required, auto, auto", requests[0].ToolChoice, requests[1].ToolChoice, requests[2].ToolChoice, requests[3].ToolChoice)
 	}
+	for i, request := range requests {
+		if len(request.Tools) != 1 || request.Tools[0].Name != "echo" {
+			t.Fatalf("request %d tools = %#v, want only echo", i, request.Tools)
+		}
+	}
 }
 
 func TestLoopTextTransportDoesNotFinishBeforeRequiredToolCall(t *testing.T) {

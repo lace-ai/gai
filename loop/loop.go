@@ -224,12 +224,19 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 			return
 		}
 
+		executionTools := l.Tools
+		if l.ToolChoice.Mode == ai.ToolChoiceRequired && len(l.ToolChoice.Names) > 0 {
+			// Named tool selection is a run-scoped constraint. Keep advertised
+			// definitions and executable tools in the same effective snapshot.
+			executionTools = toolsNamed(l.Tools, l.ToolChoice.Names)
+		}
+
 		var (
 			toolDefinitions []ai.ToolDefinition
 			err             error
 		)
 		if l.ToolTransport == ToolTransportNative {
-			toolDefinitions, err = ToolDefinitions(l.Tools)
+			toolDefinitions, err = ToolDefinitions(executionTools)
 			if err != nil {
 				if cancelErr := cancellationError(ctx, err); cancelErr != nil {
 					sendLoopCanceled(ctx, events, runState, cancelErr)
@@ -525,12 +532,6 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 				}
 			}
 
-			executionTools := l.Tools
-			if l.ToolChoice.Mode == ai.ToolChoiceRequired && len(l.ToolChoice.Names) > 0 {
-				// Named tool selection remains a run-scoped dispatch constraint after
-				// the required call has let later generations use auto tool choice.
-				executionTools = toolsNamed(l.Tools, l.ToolChoice.Names)
-			}
 			if err := l.executeToolCalls(iterCtx, &iteration, toolCalls, executionTools, events, iteration.Count, iterState.attemptID(), runState.retryCount); err != nil {
 				if cancelErr := cancellationError(iterCtx, err); cancelErr != nil {
 					sendAttemptCanceled(ctx, events, runState, iteration.Count, iterState.attemptID(), runState.retryCount, &iteration, cancelErr)
