@@ -1,1 +1,8 @@
-graphify-out/cache/
+# Durable Graphify deliverables are tracked: graph.json, graph.html, and GRAPH_REPORT.md.
+# Everything below is regenerated or local-only state.
+/graphify-out/cache/
+/graphify-out/obsidian/
+/graphify-out/.graphify_*
+/graphify-out/cost.json
+/graphify-out/manifest.json
+/graphify-out/go.mod
