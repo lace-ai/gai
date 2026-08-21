@@ -70,6 +70,18 @@ func geminiHTTPStatus(err error) int {
 	return 0
 }
 
+func classifyProviderError(err error) error {
+	var apiErr *genai.APIError
+	if errors.As(err, &apiErr) && apiErr != nil {
+		return ai.ClassifyProviderError(err, apiErr.Code, "", "", nil)
+	}
+	var apiErrValue genai.APIError
+	if errors.As(err, &apiErrValue) {
+		return ai.ClassifyProviderError(err, apiErrValue.Code, "", "", nil)
+	}
+	return err
+}
+
 func (m *Model) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -164,7 +176,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 		ctx = generationCtx
 		for resp, err := range client.Models.GenerateContentStream(generationCtx, m.name, contents, config) {
 			if err != nil {
-				streamErr = fmt.Errorf("error generating content stream: %w", err)
+				streamErr = classifyProviderError(fmt.Errorf("error generating content stream: %w", err))
 				if m.debug != nil {
 					m.debug.Emit(ctx, gai.DebugEvent{
 						Name:   "gemini_stream_generation_failed",

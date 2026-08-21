@@ -254,6 +254,10 @@ func TestModelGenerateStreamRecordsAPIErrorStatus(t *testing.T) {
 	if streamErr == nil {
 		t.Fatal("stream error = nil, want API error")
 	}
+	var providerErr *ai.ProviderError
+	if !errors.As(streamErr, &providerErr) || providerErr.Kind != ai.ProviderErrorRateLimited || providerErr.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("stream error = %#v, want classified rate-limit error", streamErr)
+	}
 	span := obstest.RequireGenerationSpans(t, recorder, 1)[0]
 	attrs := obstest.Attributes(span)
 	if attrs["http.response.status_code"].AsInt64() != http.StatusTooManyRequests {

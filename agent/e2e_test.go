@@ -187,11 +187,12 @@ func TestAgentWorkflowEndToEndWithToolCall(t *testing.T) {
 }
 
 func TestAgentWorkflowMarksTerminalFailedAttemptDiscardable(t *testing.T) {
+	fatalErr := errors.New("fatal stream error")
 	model := &scriptedWorkflowModel{
 		scripts: [][]ai.Token{
 			{
 				{Type: ai.TokenTypeText, Text: "partial"},
-				{Err: errors.New("fatal stream error")},
+				{Err: fatalErr},
 			},
 		},
 	}
@@ -212,13 +213,12 @@ func TestAgentWorkflowMarksTerminalFailedAttemptDiscardable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRun failed: %v", err)
 	}
-	workflow.Loop.RetryCount = 0
 	consumed := consumeWorkflow(t, workflow)
 	if len(consumed.errs) != 1 {
 		t.Fatalf("expected one workflow error, got %d", len(consumed.errs))
 	}
-	if !errors.Is(consumed.errs[0], loop.ErrMaxRetries) {
-		t.Fatalf("error = %v, want ErrMaxRetries", consumed.errs[0])
+	if !errors.Is(consumed.errs[0], fatalErr) || errors.Is(consumed.errs[0], loop.ErrMaxRetries) {
+		t.Fatalf("error = %v, want original non-retry error", consumed.errs[0])
 	}
 	if got := tokensText(consumed.tokens); got != "partial" {
 		t.Fatalf("expected partial token to stream before failure, got %q", got)
@@ -245,7 +245,7 @@ func TestAgentWorkflowStreamsRetriedAttemptTokens(t *testing.T) {
 				{Type: ai.TokenTypeText, Text: "partial"},
 				{Type: ai.TokenTypeCompletion, Completion: &ai.Completion{Usage: ai.Usage{InputTokens: 3, OutputTokens: 2}}},
 				{Type: ai.TokenTypeCompletion, Completion: &ai.Completion{Usage: ai.Usage{InputTokens: 4, OutputTokens: 3}}},
-				{Err: errors.New("retriable stream error")},
+				{Err: &ai.ProviderError{Kind: ai.ProviderErrorTransient, Err: errors.New("retriable stream error")}},
 			},
 			{
 				{Type: ai.TokenTypeText, Text: "final"},
@@ -267,7 +267,7 @@ func TestAgentWorkflowStreamsRetriedAttemptTokens(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRun failed: %v", err)
 	}
-	workflow.Loop.RetryCount = 1
+	workflow.Loop.RetryPolicy = &loop.RetryPolicy{MaxRetries: 1}
 	consumed := consumeWorkflow(t, workflow)
 	if len(consumed.errs) != 0 {
 		t.Fatalf("unexpected workflow errors: %v", consumed.errs)
@@ -386,7 +386,7 @@ func TestAgentWorkflowRunEventsPreservesRetryOrdering(t *testing.T) {
 		scripts: [][]ai.Token{
 			{
 				{Type: ai.TokenTypeText, Text: "partial"},
-				{Err: errors.New("retriable stream error")},
+				{Err: &ai.ProviderError{Kind: ai.ProviderErrorTransient, Err: errors.New("retriable stream error")}},
 			},
 			{{Type: ai.TokenTypeText, Text: "final"}},
 		},
@@ -404,7 +404,7 @@ func TestAgentWorkflowRunEventsPreservesRetryOrdering(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRun failed: %v", err)
 	}
-	workflow.Loop.RetryCount = 1
+	workflow.Loop.RetryPolicy = &loop.RetryPolicy{MaxRetries: 1}
 
 	var events []loop.Event
 	for event := range workflow.RunEvents(context.Background()) {

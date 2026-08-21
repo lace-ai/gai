@@ -325,7 +325,6 @@ func TestAgentMiddlewareErrorPolicy(t *testing.T) {
 			Prompt: func(_ context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
 				return &testPromptBuilder{}, nil
 			},
-			Limits: agent.Limits{RetryCount: 1},
 		})
 	}
 
@@ -411,7 +410,6 @@ func TestAgentMiddlewareRunPolicy(t *testing.T) {
 			Prompt: func(_ context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
 				return &testPromptBuilder{}, nil
 			},
-			Limits:     agent.Limits{RetryCount: 1},
 			Middleware: []agent.Middleware{middleware},
 		})
 	}

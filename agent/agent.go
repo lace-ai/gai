@@ -29,12 +29,10 @@ type RunInput struct {
 // Prompt creates the prompt builder used by one run.
 type Prompt func(ctx context.Context, input RunInput) (gaictx.PromptBuilder, error)
 
-// Limits controls loop retries, iterations, and model output size.
+// Limits controls loop iterations and model output size.
 type Limits struct {
 	// MaxLoopIterations limits model/tool iterations. Zero uses the loop default.
 	MaxLoopIterations int
-	// RetryCount limits model retries. Zero uses the loop default.
-	RetryCount int
 	// MaxTokens is the default model output limit for the agent.
 	MaxTokens int
 }
@@ -60,6 +58,9 @@ type Definition struct {
 	Prompt Prompt
 	// Limits configures loop execution defaults.
 	Limits Limits
+	// RetryPolicy enables classified model-generation retries. Nil disables retries.
+	// Each workflow receives its own copy of the configured policy.
+	RetryPolicy *loop.RetryPolicy
 	// Reasoning configures model reasoning/thinking behavior for every model call.
 	Reasoning ai.ReasoningConfig
 	// Tokenizer overrides Model.Tokenizer when it is non-nil.
@@ -185,9 +186,6 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 	if a.def.Limits.MaxLoopIterations > 0 {
 		l.MaxLoopIterations = a.def.Limits.MaxLoopIterations
 	}
-	if a.def.Limits.RetryCount > 0 {
-		l.RetryCount = a.def.Limits.RetryCount
-	}
 	if input.MaxTokens > 0 {
 		l.MaxTokens = input.MaxTokens
 	} else {
@@ -195,6 +193,10 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 	}
 	l.ResponseFormat = cloneResponseFormat(input.ResponseFormat)
 	l.Reasoning = a.def.Reasoning
+	if a.def.RetryPolicy != nil {
+		policy := *a.def.RetryPolicy
+		l.RetryPolicy = &policy
+	}
 	return l, nil
 }
 

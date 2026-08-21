@@ -4,12 +4,24 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
+
+func retryReason(err error) string {
+	if errors.Is(err, ErrAttemptTimeout) {
+		return "attempt_timeout"
+	}
+	var providerErr *ai.ProviderError
+	if errors.As(err, &providerErr) && providerErr.Kind != "" {
+		return string(providerErr.Kind)
+	}
+	return string(ai.ProviderErrorUnknown)
+}
 
 const loopTracerName = "github.com/lace-ai/gai/loop"
 
@@ -57,6 +69,8 @@ type loopIterationStats struct {
 	AttemptID      int
 	PartCount      int
 	RetryCount     int
+	RetryReason    string
+	RetryDelay     time.Duration
 	ToolCallCount  int
 	ToolErrorCount int
 }
@@ -73,7 +87,9 @@ func newLoopRunState(ctx context.Context, l *Loop) (context.Context, *loopRunSta
 	modelName := ""
 	if l != nil {
 		maxIterations = l.MaxLoopIterations
-		retryLimit = l.RetryCount
+		if l.RetryPolicy != nil {
+			retryLimit = l.RetryPolicy.MaxRetries
+		}
 		maxTokens = l.MaxTokens
 		toolCount = len(l.Tools)
 		if l.Model != nil {
@@ -116,13 +132,6 @@ func (s *loopRunState) recordToken(token ai.Token) {
 	if token.Type == ai.TokenTypeToolCall && token.ToolCall != nil {
 		s.stats.ToolCallCount++
 	}
-}
-
-func (s *loopRunState) canRetry(limit int) bool {
-	if s == nil {
-		return false
-	}
-	return s.retryCount < limit
 }
 
 func (s *loopRunState) retry() {
@@ -210,12 +219,14 @@ func (s *loopIterationState) recordIteration(iteration Iteration) {
 	}
 }
 
-func (s *loopIterationState) markRetrying(retryCount int) {
+func (s *loopIterationState) markRetrying(retryCount int, reason string, delay time.Duration) {
 	if s == nil {
 		return
 	}
 	s.stats.Retrying = true
 	s.stats.RetryCount = retryCount
+	s.stats.RetryReason = reason
+	s.stats.RetryDelay = delay
 }
 
 func (s *loopIterationState) markFinal() {
@@ -257,7 +268,11 @@ func (o *iterationObserver) finish(err error, stats loopIterationStats) {
 		attribute.Int("loop.tool_error_count", stats.ToolErrorCount),
 	}
 	if stats.Retrying {
-		attrs = append(attrs, attribute.Bool("loop.retrying", true))
+		attrs = append(attrs,
+			attribute.Bool("loop.retrying", true),
+			attribute.String("loop.retry_reason", stats.RetryReason),
+			attribute.Int64("loop.retry_delay_ms", stats.RetryDelay.Milliseconds()),
+		)
 	}
 	if stats.Final {
 		attrs = append(attrs, attribute.Bool("loop.final_iteration", true))

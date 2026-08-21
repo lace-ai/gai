@@ -30,18 +30,35 @@ func (m wrapStreamModel) GenerateStream(ctx context.Context, req ai.AIRequest) <
 }
 
 type scriptedStreamModel struct {
-	sequences [][]ai.Token
-	idx       int
-	mu        sync.Mutex
-	requests  []ai.AIRequest
+	sequences     [][]ai.Token
+	delays        []time.Duration
+	ignoreContext bool
+	idx           int
+	mu            sync.Mutex
+	requests      []ai.AIRequest
+	requestTimes  []time.Time
 }
 
 type cancelAfterTokenModel struct {
 	cancel context.CancelFunc
 }
 
+type retryCancellationModel struct {
+	attemptCanceled chan struct{}
+	calls           atomic.Int32
+}
+
 type countingPromptBuilder struct {
 	count atomic.Int32
+}
+
+type deadlineRecordingPromptBuilder struct {
+	stubPromptBuilder
+	hasDeadline atomic.Bool
+}
+
+type deadlineRecordingTool struct {
+	hasDeadline atomic.Bool
 }
 
 type failingToolResponseProcessor struct {
@@ -84,6 +101,33 @@ func (b *countingPromptBuilder) BuildContext(ctx context.Context) ([]gaictx.Part
 func (b *countingPromptBuilder) BuildPrompt(ctx context.Context, conv gaictx.Conversation) (string, error) {
 	count := b.count.Add(1)
 	return fmt.Sprintf("prompt-%d", count), nil
+}
+
+func (b *deadlineRecordingPromptBuilder) BuildPrompt(ctx context.Context, conv gaictx.Conversation) (string, error) {
+	_, hasDeadline := ctx.Deadline()
+	b.hasDeadline.Store(hasDeadline)
+	return b.stubPromptBuilder.BuildPrompt(ctx, conv)
+}
+
+func (t *deadlineRecordingTool) Name() string { return "record-deadline" }
+func (t *deadlineRecordingTool) Description() string {
+	return "Records whether its context has a deadline."
+}
+func (t *deadlineRecordingTool) Params() ai.ToolParameters {
+	return loop.NewEchoTool().Params()
+}
+func (t *deadlineRecordingTool) Function(ctx context.Context, _ *ai.ToolCall) *loop.ToolResponse {
+	_, hasDeadline := ctx.Deadline()
+	t.hasDeadline.Store(hasDeadline)
+	return loop.NewToolSuccess("ok")
+}
+
+func (b *deadlineRecordingPromptBuilder) BuildRequest(ctx context.Context, conv gaictx.Conversation) (string, []ai.RequestMessage, error) {
+	prompt, err := b.BuildPrompt(ctx, conv)
+	if err != nil {
+		return "", nil, err
+	}
+	return prompt, []ai.RequestMessage{{Role: ai.RequestMessageRoleUser, Text: prompt}}, nil
 }
 
 func (b *countingPromptBuilder) Input() gaictx.PromptInput {
@@ -216,15 +260,27 @@ func (m *scriptedStreamModel) GenerateStream(ctx context.Context, req ai.AIReque
 		defer close(out)
 		m.mu.Lock()
 		m.requests = append(m.requests, req)
+		m.requestTimes = append(m.requestTimes, time.Now())
 		m.mu.Unlock()
 
 		if m.idx >= len(m.sequences) {
 			return
 		}
 		seq := m.sequences[m.idx]
+		var delay time.Duration
+		if m.idx < len(m.delays) {
+			delay = m.delays[m.idx]
+		}
 		m.idx++
+		if delay > 0 {
+			time.Sleep(delay)
+		}
 
 		for _, tok := range seq {
+			if m.ignoreContext {
+				out <- tok
+				continue
+			}
 			select {
 			case <-ctx.Done():
 				return
@@ -253,6 +309,15 @@ func (m *scriptedStreamModel) Requests() []ai.AIRequest {
 	return requests
 }
 
+func (m *scriptedStreamModel) RequestTimes() []time.Time {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	times := make([]time.Time, len(m.requestTimes))
+	copy(times, m.requestTimes)
+	return times
+}
+
 func (m *cancelAfterTokenModel) Name() string {
 	return "cancel-after-token-model"
 }
@@ -276,6 +341,34 @@ func (m *cancelAfterTokenModel) Close() error {
 }
 
 func (m *cancelAfterTokenModel) Tokenizer() ai.Tokenizer {
+	return &mocks.MockTokenizer{}
+}
+
+func (m *retryCancellationModel) Name() string { return "retry-cancellation-model" }
+
+func (m *retryCancellationModel) Generate(context.Context, ai.AIRequest) (*ai.AIResponse, error) {
+	return &ai.AIResponse{}, nil
+}
+
+func (m *retryCancellationModel) GenerateStream(ctx context.Context, _ ai.AIRequest) <-chan ai.Token {
+	out := make(chan ai.Token)
+	attempt := m.calls.Add(1)
+	go func() {
+		defer close(out)
+		if attempt == 1 {
+			out <- ai.Token{Err: &ai.ProviderError{Kind: ai.ProviderErrorTransient}}
+			<-ctx.Done()
+			close(m.attemptCanceled)
+			return
+		}
+		out <- ai.Token{Type: ai.TokenTypeText, Data: []byte("done")}
+	}()
+	return out
+}
+
+func (m *retryCancellationModel) Close() error { return nil }
+
+func (m *retryCancellationModel) Tokenizer() ai.Tokenizer {
 	return &mocks.MockTokenizer{}
 }
 
@@ -449,7 +542,7 @@ func TestLoop(t *testing.T) {
 			name: "Tool call with error",
 			iterations: []mocks.MockModelResponse{
 				{Res: ai.AIResponse{Text: `{"id":"call-1","type":"function","name":"echo","arguments":{"text":"test"}}`}, Err: nil},
-				{Res: ai.AIResponse{Text: `{"id":"call-2","type":"function","name":"echo","arguments":{"text":"second test"}}`}, Err: errors.New("tool execution failed")},
+				{Res: ai.AIResponse{Text: `{"id":"call-2","type":"function","name":"echo","arguments":{"text":"second test"}}`}, Err: &ai.ProviderError{Kind: ai.ProviderErrorTransient, Err: errors.New("tool execution failed")}},
 				{Res: ai.AIResponse{Text: `{"id":"call-3","type":"function","name":"echo","arguments":{"text":"third test"}}`}, Err: nil},
 				{Res: ai.AIResponse{Text: "How are you?"}, Err: nil},
 			},
@@ -468,6 +561,7 @@ func TestLoop(t *testing.T) {
 			tools := []loop.Tool{loop.NewEchoTool()}
 			l := loop.New(wrapStreamModel{Model: model}, tools, testPromptBuilder(), nil)
 			l.MaxLoopIterations = tt.maxIterations
+			l.RetryPolicy = &loop.RetryPolicy{MaxRetries: 1}
 
 			err := loopError(collectLoopEvents(t, l, context.Background()))
 
@@ -652,15 +746,15 @@ func TestLoopRetriesDoNotConsumeIterations(t *testing.T) {
 
 	model := &scriptedStreamModel{
 		sequences: [][]ai.Token{
-			{{Err: errors.New("temporary 1")}},
-			{{Err: errors.New("temporary 2")}},
-			{{Err: errors.New("temporary 3")}},
+			{{Err: &ai.ProviderError{Kind: ai.ProviderErrorTransient, Err: errors.New("temporary 1")}}},
+			{{Err: &ai.ProviderError{Kind: ai.ProviderErrorTransient, Err: errors.New("temporary 2")}}},
+			{{Err: &ai.ProviderError{Kind: ai.ProviderErrorTransient, Err: errors.New("temporary 3")}}},
 			{{Type: ai.TokenTypeText, Data: []byte("done")}},
 		},
 	}
 	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
 	l.MaxLoopIterations = 1
-	l.RetryCount = 3
+	l.RetryPolicy = &loop.RetryPolicy{MaxRetries: 3}
 
 	events := collectLoopEvents(t, l, context.Background())
 	if err := loopError(events); err != nil {
@@ -705,22 +799,313 @@ func TestLoopRetriesDoNotConsumeIterations(t *testing.T) {
 	}
 }
 
-func TestLoopStreamErrorsIncludeAttemptMetadata(t *testing.T) {
+func TestLoopWithoutRetryPolicyDoesNotRetry(t *testing.T) {
+	t.Parallel()
+
+	streamErr := errors.New("temporary stream failure")
+	model := &scriptedStreamModel{sequences: [][]ai.Token{
+		{{Err: streamErr}},
+		{{Type: ai.TokenTypeText, Data: []byte("must not be requested")}},
+	}}
+	l := loop.New(model, nil, testPromptBuilder(), nil)
+	l.MaxLoopIterations = 1
+
+	events := collectLoopEvents(t, l, context.Background())
+	err := loopError(events)
+	if !errors.Is(err, streamErr) {
+		t.Fatalf("error = %v, want original stream error", err)
+	}
+	if errors.Is(err, loop.ErrMaxRetries) {
+		t.Fatalf("error = %v, must not report retry exhaustion without a policy", err)
+	}
+	for _, event := range events {
+		if event.Type == loop.EventRetry {
+			t.Fatal("nil retry policy must not emit EventRetry")
+		}
+	}
+	if got := len(model.Requests()); got != 1 {
+		t.Fatalf("model attempts = %d, want 1 without a retry policy", got)
+	}
+}
+
+func TestLoopAttemptTimeoutDoesNotApplyToPromptConstruction(t *testing.T) {
+	t.Parallel()
+
+	model := &scriptedStreamModel{sequences: [][]ai.Token{{{Type: ai.TokenTypeText, Data: []byte("done")}}}}
+	promptBuilder := &deadlineRecordingPromptBuilder{stubPromptBuilder: stubPromptBuilder{userPrompt: "user"}}
+	l := loop.New(model, nil, promptBuilder, nil)
+	l.MaxLoopIterations = 1
+	l.RetryPolicy = &loop.RetryPolicy{MaxRetries: 1, AttemptTimeout: time.Second}
+
+	if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+	if promptBuilder.hasDeadline.Load() {
+		t.Fatal("prompt construction must not receive the model attempt deadline")
+	}
+}
+
+func TestLoopAttemptTimeoutDoesNotApplyToToolExecution(t *testing.T) {
+	t.Parallel()
+
+	tool := &deadlineRecordingTool{}
+	model := &scriptedStreamModel{sequences: [][]ai.Token{
+		{{
+			Type: ai.TokenTypeToolCall,
+			ToolCall: &ai.ToolCall{
+				ID:   "call-1",
+				Type: "function",
+				Name: "record-deadline",
+				Args: json.RawMessage(`{"text":"payload"}`),
+			},
+		}},
+		{{Type: ai.TokenTypeText, Data: []byte("done")}},
+	}}
+	l := loop.New(model, []loop.Tool{tool}, testPromptBuilder(), nil)
+	l.MaxLoopIterations = 2
+	l.RetryPolicy = &loop.RetryPolicy{MaxRetries: 1, AttemptTimeout: time.Second}
+
+	if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+	if tool.hasDeadline.Load() {
+		t.Fatal("tool execution must not receive the model attempt deadline")
+	}
+}
+
+func TestLoopAttemptTimeoutPreservesProviderRetryAfter(t *testing.T) {
+	t.Parallel()
+
+	retryAfter := 40 * time.Millisecond
+	model := &scriptedStreamModel{
+		sequences: [][]ai.Token{
+			{{Err: &ai.ProviderError{Kind: ai.ProviderErrorTransient, RetryAfter: retryAfter}}},
+			{{Type: ai.TokenTypeText, Data: []byte("done")}},
+		},
+		delays:        []time.Duration{5 * time.Millisecond},
+		ignoreContext: true,
+	}
+	l := loop.New(model, nil, testPromptBuilder(), nil)
+	l.MaxLoopIterations = 1
+	l.RetryPolicy = &loop.RetryPolicy{
+		MaxRetries:        1,
+		AttemptTimeout:    time.Millisecond,
+		RespectRetryAfter: true,
+	}
+
+	if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+	times := model.RequestTimes()
+	if len(times) != 2 {
+		t.Fatalf("expected 2 model attempts, got %d", len(times))
+	}
+	if elapsed := times[1].Sub(times[0]); elapsed < retryAfter {
+		t.Fatalf("retry began after %s, want at least provider RetryAfter %s", elapsed, retryAfter)
+	}
+}
+
+func TestLoopRetryObservabilityReportsClassificationAndDelay(t *testing.T) {
+	previousProvider := otel.GetTracerProvider()
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	otel.SetTracerProvider(provider)
+	t.Cleanup(func() {
+		_ = provider.Shutdown(context.Background())
+		otel.SetTracerProvider(previousProvider)
+	})
+
+	retryDelay := 7 * time.Millisecond
+	model := &scriptedStreamModel{sequences: [][]ai.Token{
+		{{Err: &ai.ProviderError{Kind: ai.ProviderErrorRateLimited}}},
+		{{Type: ai.TokenTypeText, Data: []byte("done")}},
+	}}
+	l := loop.New(model, nil, testPromptBuilder(), nil)
+	l.MaxLoopIterations = 1
+	l.RetryPolicy = &loop.RetryPolicy{
+		MaxRetries:     1,
+		InitialBackoff: retryDelay,
+		Wait:           func(context.Context, time.Duration) error { return nil },
+	}
+
+	events := collectLoopEvents(t, l, context.Background())
+	if err := loopError(events); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+	retries := loopEventsOfType(events, loop.EventRetry)
+	if len(retries) != 1 {
+		t.Fatalf("retry events = %d, want 1", len(retries))
+	}
+	if retries[0].RetryReason != "rate_limited" || retries[0].RetryDelay != retryDelay {
+		t.Fatalf("retry event observability = %#v, want reason rate_limited and delay %s", retries[0], retryDelay)
+	}
+
+	for _, span := range recorder.Ended() {
+		if span.Name() != "loop.iteration" {
+			continue
+		}
+		attributes := map[string]any{}
+		for _, attribute := range span.Attributes() {
+			attributes[string(attribute.Key)] = attribute.Value.AsInterface()
+		}
+		if attributes["loop.retry_reason"] == "rate_limited" && attributes["loop.retry_delay_ms"] == int64(retryDelay/time.Millisecond) {
+			return
+		}
+	}
+	t.Fatalf("retrying iteration span missing classification or delay: %#v", recorder.Ended())
+}
+
+func TestLoopRetryUsesInjectedWait(t *testing.T) {
 	t.Parallel()
 
 	model := &scriptedStreamModel{
 		sequences: [][]ai.Token{
-			{{Err: errors.New("fatal stream error")}},
+			{{Err: &ai.ProviderError{Kind: ai.ProviderErrorTransient}}},
+			{{Type: ai.TokenTypeText, Data: []byte("done")}},
+		},
+	}
+	var waited time.Duration
+	l := loop.New(model, nil, testPromptBuilder(), nil)
+	l.MaxLoopIterations = 1
+	l.RetryPolicy = &loop.RetryPolicy{
+		MaxRetries:     1,
+		InitialBackoff: time.Hour,
+		Wait: func(_ context.Context, delay time.Duration) error {
+			waited = delay
+			return nil
+		},
+	}
+
+	if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+	if waited != time.Hour {
+		t.Fatalf("waited %s, want %s", waited, time.Hour)
+	}
+}
+
+func TestLoopCancelsFailedAttemptBeforeRetryBackoff(t *testing.T) {
+	model := &retryCancellationModel{attemptCanceled: make(chan struct{})}
+	l := loop.New(model, nil, testPromptBuilder(), nil)
+	l.MaxLoopIterations = 1
+	l.RetryPolicy = &loop.RetryPolicy{
+		MaxRetries:     1,
+		InitialBackoff: time.Hour,
+		Wait: func(_ context.Context, _ time.Duration) error {
+			select {
+			case <-model.attemptCanceled:
+				return nil
+			case <-time.After(100 * time.Millisecond):
+				return errors.New("model attempt was still active during retry backoff")
+			}
+		},
+	}
+
+	if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+	if calls := model.calls.Load(); calls != 2 {
+		t.Fatalf("model attempts = %d, want 2", calls)
+	}
+}
+
+func TestLoopTerminalRetryErrorReportsPolicyLimit(t *testing.T) {
+	t.Parallel()
+
+	model := &scriptedStreamModel{
+		sequences: [][]ai.Token{{{Err: &ai.ProviderError{Kind: ai.ProviderErrorTransient}}}},
+	}
+	l := loop.New(model, nil, testPromptBuilder(), nil)
+	l.MaxLoopIterations = 1
+	l.RetryPolicy = &loop.RetryPolicy{MaxRetries: 0}
+
+	err := loopError(collectLoopEvents(t, l, context.Background()))
+	if !errors.Is(err, loop.ErrMaxRetries) {
+		t.Fatalf("error = %v, want ErrMaxRetries", err)
+	}
+	if !strings.Contains(err.Error(), "limit=0") {
+		t.Fatalf("error = %q, want active policy limit", err)
+	}
+}
+
+func TestLoopNonRetryablePolicyErrorIsNotReportedAsRetryExhaustion(t *testing.T) {
+	t.Parallel()
+
+	providerErr := &ai.ProviderError{Kind: ai.ProviderErrorInvalidRequest, Err: errors.New("bad request")}
+	model := &scriptedStreamModel{
+		sequences: [][]ai.Token{{{Err: providerErr}}},
+	}
+	l := loop.New(model, nil, testPromptBuilder(), nil)
+	l.MaxLoopIterations = 1
+	l.RetryPolicy = &loop.RetryPolicy{MaxRetries: 3}
+
+	err := loopError(collectLoopEvents(t, l, context.Background()))
+	if errors.Is(err, loop.ErrMaxRetries) {
+		t.Fatalf("error = %v, must not report retry exhaustion", err)
+	}
+	var got *ai.ProviderError
+	if !errors.As(err, &got) || got != providerErr {
+		t.Fatalf("error = %v, want original provider error", err)
+	}
+}
+
+func TestLoopPolicyWithNoRetriesReturnsNonRetryableProviderError(t *testing.T) {
+	t.Parallel()
+
+	providerErr := &ai.ProviderError{Kind: ai.ProviderErrorInvalidRequest, Err: errors.New("bad request")}
+	model := &scriptedStreamModel{sequences: [][]ai.Token{{{Err: providerErr}}}}
+	l := loop.New(model, nil, testPromptBuilder(), nil)
+	l.MaxLoopIterations = 1
+	l.RetryPolicy = &loop.RetryPolicy{MaxRetries: 0}
+
+	err := loopError(collectLoopEvents(t, l, context.Background()))
+	if errors.Is(err, loop.ErrMaxRetries) {
+		t.Fatalf("error = %v, must not report retry exhaustion", err)
+	}
+	var got *ai.ProviderError
+	if !errors.As(err, &got) || got != providerErr {
+		t.Fatalf("error = %v, want original provider error", err)
+	}
+}
+
+func TestLoopPolicyReturnsNonRetryableErrorAfterBudgetIsConsumed(t *testing.T) {
+	t.Parallel()
+
+	providerErr := &ai.ProviderError{Kind: ai.ProviderErrorAuthentication, Err: errors.New("invalid credentials")}
+	model := &scriptedStreamModel{sequences: [][]ai.Token{
+		{{Err: &ai.ProviderError{Kind: ai.ProviderErrorTransient}}},
+		{{Err: providerErr}},
+	}}
+	l := loop.New(model, nil, testPromptBuilder(), nil)
+	l.MaxLoopIterations = 1
+	l.RetryPolicy = &loop.RetryPolicy{MaxRetries: 1}
+
+	err := loopError(collectLoopEvents(t, l, context.Background()))
+	if errors.Is(err, loop.ErrMaxRetries) {
+		t.Fatalf("error = %v, must not report retry exhaustion", err)
+	}
+	var got *ai.ProviderError
+	if !errors.As(err, &got) || got != providerErr {
+		t.Fatalf("error = %v, want original provider error", err)
+	}
+}
+
+func TestLoopStreamErrorsIncludeAttemptMetadata(t *testing.T) {
+	t.Parallel()
+
+	fatalErr := errors.New("fatal stream error")
+	model := &scriptedStreamModel{
+		sequences: [][]ai.Token{
+			{{Err: fatalErr}},
 		},
 	}
 	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
 	l.MaxLoopIterations = 1
-	l.RetryCount = 0
 
 	events := collectLoopEvents(t, l, context.Background())
 	err := loopError(events)
-	if !errors.Is(err, loop.ErrMaxRetries) {
-		t.Fatalf("error = %v, want ErrMaxRetries", err)
+	if !errors.Is(err, fatalErr) || errors.Is(err, loop.ErrMaxRetries) {
+		t.Fatalf("error = %v, want original non-retry error", err)
 	}
 	errorEvents := loopEventsOfType(events, loop.EventError)
 	if len(errorEvents) != 1 {
@@ -732,30 +1117,30 @@ func TestLoopStreamErrorsIncludeAttemptMetadata(t *testing.T) {
 	if errorEvents[0].Iteration == nil || errorEvents[0].Iteration.UserMessage == nil {
 		t.Fatalf("expected failed attempt snapshot to retain user message, got %#v", errorEvents[0].Iteration)
 	}
-	if strings.Count(errorEvents[0].Err.Error(), loop.ErrMaxRetries.Error()) != 1 {
-		t.Fatalf("expected terminal error once, got %q", errorEvents[0].Err)
+	if !errors.Is(errorEvents[0].Err, fatalErr) || errors.Is(errorEvents[0].Err, loop.ErrMaxRetries) {
+		t.Fatalf("expected original terminal error, got %q", errorEvents[0].Err)
 	}
 }
 
 func TestLoopTerminalStreamErrorIncludesPartialAttemptIteration(t *testing.T) {
 	t.Parallel()
 
+	fatalErr := errors.New("fatal stream error")
 	model := &scriptedStreamModel{
 		sequences: [][]ai.Token{
 			{
 				{Type: ai.TokenTypeText, Data: []byte("partial")},
-				{Err: errors.New("fatal stream error")},
+				{Err: fatalErr},
 			},
 		},
 	}
 	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
 	l.MaxLoopIterations = 1
-	l.RetryCount = 0
 
 	events := collectLoopEvents(t, l, context.Background())
 	err := loopError(events)
-	if !errors.Is(err, loop.ErrMaxRetries) {
-		t.Fatalf("error = %v, want ErrMaxRetries", err)
+	if !errors.Is(err, fatalErr) || errors.Is(err, loop.ErrMaxRetries) {
+		t.Fatalf("error = %v, want original non-retry error", err)
 	}
 	errorEvents := loopEventsOfType(events, loop.EventError)
 	if len(errorEvents) != 1 {
@@ -783,7 +1168,7 @@ func TestLoopRetryStatusMarksPartialTokensDiscardable(t *testing.T) {
 		sequences: [][]ai.Token{
 			{
 				{Type: ai.TokenTypeText, Data: []byte("partial")},
-				{Err: errors.New("temporary")},
+				{Err: &ai.ProviderError{Kind: ai.ProviderErrorTransient, Err: errors.New("temporary")}},
 			},
 			{
 				{Type: ai.TokenTypeText, Data: []byte("final")},
@@ -792,7 +1177,7 @@ func TestLoopRetryStatusMarksPartialTokensDiscardable(t *testing.T) {
 	}
 	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
 	l.MaxLoopIterations = 1
-	l.RetryCount = 1
+	l.RetryPolicy = &loop.RetryPolicy{MaxRetries: 1}
 
 	events := collectLoopEvents(t, l, context.Background())
 	if err := loopError(events); err != nil {
@@ -837,7 +1222,6 @@ func TestLoopDoesNotRetryCanceledStream(t *testing.T) {
 	}
 	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
 	l.MaxLoopIterations = 1
-	l.RetryCount = 3
 
 	events := collectLoopEvents(t, l, context.Background())
 	if err := loopError(events); err != nil {

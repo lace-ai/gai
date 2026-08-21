@@ -288,7 +288,7 @@ func TestTraceContextPropagatesAcrossRetriesToolsAndNestedMiddleware(t *testing.
 	})
 
 	primaryModel := &traceTestModel{scripts: [][]ai.Token{
-		{{Type: ai.TokenTypeErr, Err: errors.New("retry")}},
+		{{Type: ai.TokenTypeErr, Err: &ai.ProviderError{Kind: ai.ProviderErrorTransient, Err: errors.New("retry")}}},
 		{{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-1", Type: "function", Name: "echo", Args: []byte(`{"text":"hello"}`)}}},
 		{{Type: ai.TokenTypeText, Text: "primary"}},
 	}}
@@ -328,6 +328,7 @@ func TestTraceContextPropagatesAcrossRetriesToolsAndNestedMiddleware(t *testing.
 	if err != nil {
 		t.Fatalf("NewRun failed: %v", err)
 	}
+	workflow.Loop.RetryPolicy = &loop.RetryPolicy{MaxRetries: 1}
 	traceContext.UserID = "mutated-user"
 	traceContext.Tags[0] = "mutated-tag"
 	traceContext.Metadata["feature"] = "mutated-feature"

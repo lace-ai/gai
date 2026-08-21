@@ -27,9 +27,9 @@ type Config struct {
 	SystemPrompt      string
 	Tools             []loop.Tool
 	MaxLoopIterations int
-	RetryCount        int
 	MaxTokens         int
 	Tokenizer         ai.Tokenizer
+	RetryPolicy       *loop.RetryPolicy
 }
 
 type Option func(*Config)
@@ -52,15 +52,17 @@ func WithMaxLoopIterations(maxLoopIterations int) Option {
 	}
 }
 
-func WithRetryCount(retryCount int) Option {
-	return func(config *Config) {
-		config.RetryCount = retryCount
-	}
-}
-
 func WithMaxTokens(maxTokens int) Option {
 	return func(config *Config) {
 		config.MaxTokens = maxTokens
+	}
+}
+
+// WithRetryPolicy configures opt-in classified retries for summary runs.
+func WithRetryPolicy(policy loop.RetryPolicy) Option {
+	return func(config *Config) {
+		copy := policy
+		config.RetryPolicy = &copy
 	}
 }
 
@@ -93,10 +95,10 @@ func Definition(model ai.Model, opts ...Option) agent.Definition {
 				Tokenizer:          config.Tokenizer,
 			}), nil
 		},
-		Tokenizer: config.Tokenizer,
+		Tokenizer:   config.Tokenizer,
+		RetryPolicy: config.RetryPolicy,
 		Limits: agent.Limits{
 			MaxLoopIterations: config.MaxLoopIterations,
-			RetryCount:        config.RetryCount,
 			MaxTokens:         config.MaxTokens,
 		},
 	}

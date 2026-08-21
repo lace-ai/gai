@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
@@ -853,4 +854,31 @@ func TestModelGenerateStreamDetectsTextEncodedToolCall(t *testing.T) {
 	if gotText != "" {
 		t.Fatalf("expected no text tokens after tool-call detection, got %q", gotText)
 	}
+}
+
+func TestModelGenerateStreamClassifiesProviderRateLimit(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("x-request-id", "req_mistral")
+		w.Header().Set("Retry-After", "2")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"code":"rate_limit_exceeded"}}`))
+	}))
+	defer ts.Close()
+	p := New("test-key", nil)
+	p.baseURL = ts.URL
+	m, err := p.Model(MistralSmallLatest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for token := range m.GenerateStream(t.Context(), ai.AIRequest{Prompt: "hello"}) {
+		if token.Type != ai.TokenTypeErr {
+			continue
+		}
+		var providerErr *ai.ProviderError
+		if !errors.As(token.Err, &providerErr) || providerErr.Kind != ai.ProviderErrorRateLimited || providerErr.StatusCode != http.StatusTooManyRequests || providerErr.Code != "rate_limit_exceeded" || providerErr.RequestID != "req_mistral" || providerErr.RetryAfter != 2*time.Second || errors.Unwrap(providerErr) == nil {
+			t.Fatalf("provider error = %#v", token.Err)
+		}
+		return
+	}
+	t.Fatal("expected stream error")
 }
