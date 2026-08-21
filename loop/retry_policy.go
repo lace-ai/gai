@@ -61,7 +61,15 @@ func (p RetryPolicy) Validate() error {
 }
 
 func (p RetryPolicy) ShouldRetry(retries int, err error) bool {
-	if retries >= p.MaxRetries || err == nil || errors.Is(err, context.Canceled) {
+	return p.hasRetryBudget(retries) && p.isRetryable(err)
+}
+
+func (p RetryPolicy) hasRetryBudget(retries int) bool {
+	return retries < p.MaxRetries
+}
+
+func (p RetryPolicy) isRetryable(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) {
 		return false
 	}
 	if errors.Is(err, ErrAttemptTimeout) {

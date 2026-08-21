@@ -327,16 +327,18 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 
 						retryLimit := l.RetryCount
 						canRetry := runState.canRetry(retryLimit)
+						retryable := canRetry
 						if l.RetryPolicy != nil {
 							retryLimit = l.RetryPolicy.MaxRetries
-							canRetry = l.RetryPolicy.ShouldRetry(runState.retryCount, t.Err)
+							retryable = l.RetryPolicy.isRetryable(t.Err)
+							canRetry = l.RetryPolicy.hasRetryBudget(runState.retryCount) && retryable
 						}
 						if canRetry {
 							retrying = true
 							break
 						}
 
-						if l.RetryPolicy != nil && runState.retryCount < retryLimit {
+						if l.RetryPolicy != nil && !retryable {
 							iterationErr = t.Err
 						} else {
 							iterationErr = fmt.Errorf("%w: limit=%d: %w", ErrMaxRetries, retryLimit, t.Err)
