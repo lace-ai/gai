@@ -3,10 +3,36 @@ package ai_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"net/http"
 	"testing"
 
 	"github.com/lace-ai/gai/ai"
 )
+
+func TestClassifyProviderErrorPrioritizesUnsupported(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		code       string
+	}{
+		{name: "not implemented", statusCode: http.StatusNotImplemented},
+		{name: "unsupported server error", statusCode: http.StatusInternalServerError, code: "unsupported_feature"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ai.ClassifyProviderError(errors.New("provider error"), tt.statusCode, tt.code, "", nil)
+			var providerErr *ai.ProviderError
+			if !errors.As(err, &providerErr) {
+				t.Fatalf("error = %T, want *ai.ProviderError", err)
+			}
+			if providerErr.Kind != ai.ProviderErrorUnsupported {
+				t.Fatalf("kind = %q, want %q", providerErr.Kind, ai.ProviderErrorUnsupported)
+			}
+		})
+	}
+}
 
 func TestSendTokenStopsWhenContextCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())

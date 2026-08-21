@@ -41,6 +41,10 @@ type Event struct {
 	AttemptID      int
 	RetryCount     int
 	PartCount      int
+	// RetryReason classifies the error that triggered a retry.
+	RetryReason string
+	// RetryDelay is the backoff selected before the next attempt.
+	RetryDelay time.Duration
 
 	Token        *ai.Token
 	Iteration    *Iteration
@@ -69,12 +73,14 @@ func TokenEvent(iteration, attempt, retry int, token ai.Token) Event {
 	}
 }
 
-func RetryEvent(iteration, attempt, retry int, attemptIteration Iteration) Event {
+func RetryEvent(iteration, attempt, retry int, reason string, delay time.Duration, attemptIteration Iteration) Event {
 	return Event{
 		Type:           EventRetry,
 		IterationCount: iteration,
 		AttemptID:      attempt,
 		RetryCount:     retry,
+		RetryReason:    reason,
+		RetryDelay:     delay,
 		PartCount:      len(attemptIteration.Parts),
 		Iteration:      &attemptIteration,
 	}

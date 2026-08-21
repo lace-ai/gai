@@ -7,6 +7,7 @@ import (
 
 	"github.com/lace-ai/gai/agent/summary"
 	"github.com/lace-ai/gai/ai"
+	"github.com/lace-ai/gai/loop"
 	"github.com/lace-ai/gai/testutil/mocks"
 )
 
@@ -52,6 +53,15 @@ func TestDefinitionAllowsSystemPromptOverride(t *testing.T) {
 	}
 	if !strings.Contains(model.request.Prompt, "custom summary system") {
 		t.Fatalf("expected custom system prompt: %q", model.request.Prompt)
+	}
+}
+
+func TestDefinitionConfiguresRetryPolicy(t *testing.T) {
+	t.Parallel()
+
+	def := summary.Definition(&recordingModel{}, summary.WithRetryPolicy(loop.RetryPolicy{MaxRetries: 2}))
+	if def.RetryPolicy == nil || def.RetryPolicy.MaxRetries != 2 {
+		t.Fatalf("retry policy = %#v, want MaxRetries 2", def.RetryPolicy)
 	}
 }
 

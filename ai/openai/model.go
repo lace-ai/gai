@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 
@@ -15,6 +16,18 @@ import (
 	"github.com/openai/openai-go/packages/param"
 	"github.com/openai/openai-go/shared"
 )
+
+func classifyProviderError(err error) error {
+	var apiErr *sdk.Error
+	if !errors.As(err, &apiErr) || apiErr == nil {
+		return err
+	}
+	var header http.Header
+	if apiErr.Response != nil {
+		header = apiErr.Response.Header
+	}
+	return ai.ClassifyProviderError(err, apiErr.StatusCode, apiErr.Code, header.Get("x-request-id"), header)
+}
 
 // Model is an OpenAI chat-completions model.
 type Model struct {
@@ -210,8 +223,8 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			}
 		}
 		if err := stream.Err(); err != nil {
-			streamErr = err
-			emit(ai.Token{Type: ai.TokenTypeErr, Err: err, Text: err.Error()})
+			streamErr = classifyProviderError(err)
+			emit(ai.Token{Type: ai.TokenTypeErr, Err: streamErr, Text: streamErr.Error()})
 			return
 		}
 		sendStreamToolCalls(emit, calls)
