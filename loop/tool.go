@@ -119,9 +119,13 @@ func ToolDefinitions(tools []Tool) ([]ai.ToolDefinition, error) {
 		if err != nil {
 			return nil, fmt.Errorf("tool %q: %w", tool.Name(), err)
 		}
-		definition, err := ai.NewToolDefinition(tool.Name(), tool.Description(), params)
+		name := tool.Name()
+		definition, err := ai.NewToolDefinition(name, tool.Description(), params)
 		if err != nil {
-			return nil, fmt.Errorf("tool %q: %w", tool.Name(), err)
+			return nil, fmt.Errorf("tool %q: %w", name, err)
+		}
+		if name != definition.Name {
+			return nil, fmt.Errorf("%w: tool name %q must be canonical", ai.ErrInvalidToolDefinition, name)
 		}
 		if _, duplicate := names[definition.Name]; duplicate {
 			return nil, fmt.Errorf("%w: duplicate tool name %q", ai.ErrInvalidToolDefinition, definition.Name)
