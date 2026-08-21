@@ -433,6 +433,18 @@ func TestLoopValidateRejectsMissingNamedRequiredTool(t *testing.T) {
 	}
 }
 
+func TestLoopValidateRejectsRequiredToolChoiceWithoutTools(t *testing.T) {
+	t.Parallel()
+
+	l := loop.New(&scriptedStreamModel{}, nil, testPromptBuilder(), nil)
+	l.ToolChoice = ai.ToolChoice{Mode: ai.ToolChoiceRequired}
+
+	err := l.Validate()
+	if !errors.Is(err, loop.ErrRequiredToolNotConfigured) {
+		t.Fatalf("Validate() error = %v, want ErrRequiredToolNotConfigured", err)
+	}
+}
+
 func TestLoopDowngradesRequiredToolChoiceAfterToolCall(t *testing.T) {
 	t.Parallel()
 

@@ -93,6 +93,9 @@ func (l *Loop) Validate() error {
 		return err
 	}
 	if l.ToolChoice.Mode == ai.ToolChoiceRequired {
+		if len(l.Tools) == 0 {
+			return ErrRequiredToolNotConfigured
+		}
 		for _, requiredName := range l.ToolChoice.Names {
 			configured := false
 			for _, tool := range l.Tools {
