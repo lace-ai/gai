@@ -1802,6 +1802,40 @@ func TestLoopToolTransportControlsProviderToolDefinitions(t *testing.T) {
 	}
 }
 
+func TestLoopNeutralToolChoiceWithoutToolsIsTransportIndependent(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		transport loop.ToolTransportMode
+		choice    ai.ToolChoiceMode
+	}{
+		{name: "native auto", choice: ai.ToolChoiceAuto},
+		{name: "native none", choice: ai.ToolChoiceNone},
+		{name: "text auto", transport: loop.ToolTransportText, choice: ai.ToolChoiceAuto},
+		{name: "text none", transport: loop.ToolTransportText, choice: ai.ToolChoiceNone},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			model := &scriptedStreamModel{sequences: [][]ai.Token{{{Type: ai.TokenTypeText, Text: "done"}}}}
+			l := loop.New(model, nil, testPromptBuilder(), nil)
+			l.ToolTransport = tt.transport
+			l.ToolChoice = ai.ToolChoice{Mode: tt.choice}
+
+			if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
+				t.Fatalf("unexpected loop error: %v", err)
+			}
+			requests := model.Requests()
+			if len(requests) != 1 {
+				t.Fatalf("requests = %d, want 1", len(requests))
+			}
+			if err := requests[0].Validate(); err != nil {
+				t.Fatalf("request must validate: %v", err)
+			}
+			if requests[0].ToolChoice.Mode != "" {
+				t.Fatalf("request tool choice = %#v, want empty without tools", requests[0].ToolChoice)
+			}
+		})
+	}
+}
+
 func TestLoopNativeHistoryIncludesBaseRequestWithoutRenderedHistory(t *testing.T) {
 	t.Parallel()
 

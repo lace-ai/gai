@@ -334,6 +334,10 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 					// Text transport exposes tools through the rendered prompt, not
 					// AIRequest.Tools. Provider-native tool choice is therefore invalid.
 					toolChoice = ai.ToolChoice{}
+				} else if len(toolDefinitions) == 0 {
+					// A neutral choice cannot affect a request with no provider-native
+					// tools, and AIRequest rejects that redundant combination.
+					toolChoice = ai.ToolChoice{}
 				}
 				request := renderedPromptRequest(prompt, l.MaxTokens, toolDefinitions, toolChoice, l.ResponseFormat, l.Reasoning)
 				request.Messages = nativeMessages
