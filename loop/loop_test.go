@@ -633,6 +633,39 @@ func TestLoopTextTransportDoesNotSatisfyNamedRequiredToolChoiceWithDifferentConf
 	}
 }
 
+func TestLoopTextTransportDiscardsMixedRequiredToolResponse(t *testing.T) {
+	t.Parallel()
+
+	unselected := &countingTool{}
+	model := &scriptedStreamModel{sequences: [][]ai.Token{
+		{
+			{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-echo-1", Type: "function", Name: "echo", Args: json.RawMessage(`{"text":"selected"}`)}},
+			{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-count", Type: "function", Name: "count", Args: json.RawMessage(`{"text":"unselected"}`)}},
+		},
+		{{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-echo-2", Type: "function", Name: "echo", Args: json.RawMessage(`{"text":"selected"}`)}}},
+		{{Type: ai.TokenTypeText, Text: "done"}},
+	}}
+	l := loop.New(model, []loop.Tool{loop.NewEchoTool(), unselected}, testPromptBuilder(), nil)
+	l.ToolTransport = loop.ToolTransportText
+	l.ToolChoice = ai.ToolChoice{Mode: ai.ToolChoiceRequired, Names: []string{"echo"}}
+
+	events := collectLoopEvents(t, l, context.Background())
+	if err := loopError(events); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+	if calls := unselected.calls.Load(); calls != 0 {
+		t.Fatalf("unselected tool calls = %d, want 0", calls)
+	}
+	if requests := len(model.Requests()); requests != 3 {
+		t.Fatalf("requests = %d, want 3 after discarding the mixed response", requests)
+	}
+	for _, event := range events {
+		if event.IterationCount == 1 && (event.Type == loop.EventToken || event.Type == loop.EventIterationDone) {
+			t.Fatalf("mixed response must not be observable, got %#v", event)
+		}
+	}
+}
+
 func TestLoopTextTransportDoesNotExposeMixedResponseWithUnknownTool(t *testing.T) {
 	t.Parallel()
 

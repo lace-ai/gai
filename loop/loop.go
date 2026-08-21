@@ -605,24 +605,31 @@ func userMessageForIteration(promptBuilder gaictx.PromptBuilder, index int) *gai
 	return &gaictx.Message{Role: gaictx.RoleUser, Content: input.User}
 }
 
-// hasPermittedToolCall reports whether the model requested a valid configured
-// tool allowed by the required tool choice. Rejected calls, including calls for
-// unavailable or unselected tools, do not satisfy a required tool choice.
+// hasPermittedToolCall reports whether the model requested at least one valid
+// configured tool allowed by the required tool choice, with no rejected calls.
+// Calls for unavailable, malformed, or unselected tools reject the response.
 func hasPermittedToolCall(toolCalls []pendingToolCall, tools []Tool, allowedNames []string) bool {
+	hasPermittedCall := false
 	for _, toolCall := range toolCalls {
 		if err := toolCall.call.Validate(); err != nil {
-			continue
+			return false
 		}
 		if len(allowedNames) > 0 && !slices.Contains(allowedNames, toolCall.call.Name) {
-			continue
+			return false
 		}
+		configured := false
 		for _, tool := range tools {
 			if tool != nil && tool.Name() == toolCall.call.Name {
-				return true
+				configured = true
+				break
 			}
 		}
+		if !configured {
+			return false
+		}
+		hasPermittedCall = true
 	}
-	return false
+	return hasPermittedCall
 }
 
 // executeToolCalls records tool responses on iteration. Tool execution
