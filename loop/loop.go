@@ -483,6 +483,10 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 				// A text-transport response that does not satisfy a required tool
 				// call is not part of the conversation and must not be observable.
 				cancel()
+				if err := sendEvent(ctx, events, DiscardEvent(iteration.Count, iterState.attemptID(), runState.retryCount, iteration)); err != nil {
+					iterState.finish(nil)
+					return
+				}
 				runState.resetRetries()
 				iterState.finish(iterationErr)
 				continue

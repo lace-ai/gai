@@ -240,6 +240,18 @@ func loopEventsToStream(ctx context.Context, events <-chan loop.Event) Stream {
 					status.Iteration = *event.Iteration
 				}
 				send(ctx, statuses, status)
+			case loop.EventDiscard:
+				status := loop.IterationInformation{
+					IterationCount:   event.IterationCount,
+					AttemptID:        event.AttemptID,
+					RetryCount:       event.RetryCount,
+					PartCount:        event.PartCount,
+					DiscardIteration: true,
+				}
+				if event.Iteration != nil {
+					status.Iteration = *event.Iteration
+				}
+				send(ctx, statuses, status)
 			case loop.EventIterationDone:
 				status := loop.IterationInformation{
 					IterationCount: event.IterationCount,

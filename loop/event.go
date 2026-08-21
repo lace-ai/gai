@@ -17,6 +17,9 @@ const (
 	EventAttemptStart EventType = "attempt_start"
 	// EventRetry reports that a failed attempt will be retried.
 	EventRetry EventType = "retry"
+	// EventDiscard reports an attempt that is excluded from the conversation but
+	// remains available for lifecycle and billing accounting.
+	EventDiscard EventType = "discard"
 	// EventIterationDone carries a completed agent iteration.
 	EventIterationDone EventType = "iteration_done"
 	// EventToolStart reports that a tool invocation has started.
@@ -83,6 +86,21 @@ func RetryEvent(iteration, attempt, retry int, reason string, delay time.Duratio
 		RetryDelay:     delay,
 		PartCount:      len(attemptIteration.Parts),
 		Iteration:      &attemptIteration,
+	}
+}
+
+// DiscardEvent reports a rejected attempt without exposing its response content.
+func DiscardEvent(iteration, attempt, retry int, attemptIteration Iteration) Event {
+	return Event{
+		Type:           EventDiscard,
+		IterationCount: iteration,
+		AttemptID:      attempt,
+		RetryCount:     retry,
+		PartCount:      len(attemptIteration.Parts),
+		Iteration: &Iteration{
+			Count: attemptIteration.Count,
+			Usage: attemptIteration.Usage,
+		},
 	}
 }
 

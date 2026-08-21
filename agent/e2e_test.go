@@ -299,6 +299,65 @@ func TestAgentWorkflowStreamsRetriedAttemptTokens(t *testing.T) {
 	}
 }
 
+func TestAgentWorkflowBillsRejectedRequiredToolAttemptWithoutExposingIt(t *testing.T) {
+	model := &scriptedWorkflowModel{
+		scripts: [][]ai.Token{
+			{
+				{Type: ai.TokenTypeText, Text: "rejected response"},
+				{Type: ai.TokenTypeCompletion, Completion: &ai.Completion{Usage: ai.Usage{InputTokens: 3, OutputTokens: 2}}},
+			},
+			{
+				{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-1", Type: "function", Name: "echo", Args: []byte(`{"text":"payload"}`)}},
+				{Type: ai.TokenTypeCompletion, Completion: &ai.Completion{Usage: ai.Usage{InputTokens: 5, OutputTokens: 4}}},
+			},
+			{
+				{Type: ai.TokenTypeText, Text: "final answer"},
+				{Type: ai.TokenTypeCompletion, Completion: &ai.Completion{Usage: ai.Usage{InputTokens: 7, OutputTokens: 6}}},
+			},
+		},
+	}
+	assistant := agent.New(agent.Definition{
+		Name:  "required-tool-billing",
+		Model: model,
+		Tools: []loop.Tool{loop.NewEchoTool()},
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return gaictx.New(gaictx.Definition{Renderer: &gaictx.SimpleRenderer{}}), nil
+		},
+		Limits: agent.Limits{MaxLoopIterations: 3},
+	})
+
+	input := textRunInput("use echo")
+	input.Execution.ToolChoice = &ai.ToolChoice{Mode: ai.ToolChoiceRequired}
+	workflow, err := assistant.NewRun(context.Background(), input)
+	if err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	consumed := consumeWorkflow(t, workflow)
+	if len(consumed.errs) != 0 {
+		t.Fatalf("unexpected workflow errors: %v", consumed.errs)
+	}
+	if got := tokensText(consumed.tokens); got != "final answer" {
+		t.Fatalf("visible tokens = %q, want only the accepted final response", got)
+	}
+	if len(consumed.statuses) != 3 {
+		t.Fatalf("statuses = %#v, want discarded attempt plus two accepted iterations", consumed.statuses)
+	}
+	discarded := consumed.statuses[0]
+	if !discarded.DiscardIteration || discarded.Retrying || discarded.Iteration.Usage != (ai.Usage{InputTokens: 3, OutputTokens: 2}) || len(discarded.Iteration.Parts) != 0 {
+		t.Fatalf("discarded status = %#v, want usage metadata without response content", discarded)
+	}
+	result := workflow.Result()
+	if got := result.Text; got != "final answer" {
+		t.Fatalf("result text = %q, want final answer", got)
+	}
+	if result.Usage != (ai.Usage{InputTokens: 12, OutputTokens: 10}) {
+		t.Fatalf("accepted usage = %#v", result.Usage)
+	}
+	if result.BilledUsage != (ai.Usage{InputTokens: 15, OutputTokens: 12}) {
+		t.Fatalf("billed usage = %#v", result.BilledUsage)
+	}
+}
+
 func TestAgentWorkflowReportsCancellationWithoutError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
