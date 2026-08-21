@@ -525,7 +525,11 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 				}
 			}
 
-			if err := l.executeToolCalls(iterCtx, &iteration, toolCalls, events, iteration.Count, iterState.attemptID(), runState.retryCount); err != nil {
+			executionTools := l.Tools
+			if l.ToolChoice.Mode == ai.ToolChoiceRequired && !requiredToolCallSatisfied && len(l.ToolChoice.Names) > 0 {
+				executionTools = toolsNamed(l.Tools, l.ToolChoice.Names)
+			}
+			if err := l.executeToolCalls(iterCtx, &iteration, toolCalls, executionTools, events, iteration.Count, iterState.attemptID(), runState.retryCount); err != nil {
 				if cancelErr := cancellationError(iterCtx, err); cancelErr != nil {
 					sendAttemptCanceled(ctx, events, runState, iteration.Count, iterState.attemptID(), runState.retryCount, &iteration, cancelErr)
 					cancel()
@@ -639,10 +643,20 @@ func hasPermittedToolCall(toolCalls []pendingToolCall, tools []Tool, allowedName
 	return hasPermittedCall
 }
 
+func toolsNamed(tools []Tool, names []string) []Tool {
+	selected := make([]Tool, 0, len(names))
+	for _, tool := range tools {
+		if tool != nil && slices.Contains(names, tool.Name()) {
+			selected = append(selected, tool)
+		}
+	}
+	return selected
+}
+
 // executeToolCalls records tool responses on iteration. Tool execution
 // failures are stored in ToolResponse.Err and are not returned. Only framework
 // or tool-response processing failures are returned.
-func (l *Loop) executeToolCalls(ctx context.Context, iteration *Iteration, toolCalls []pendingToolCall, events chan<- Event, iterationCount, attemptID, retryCount int) error {
+func (l *Loop) executeToolCalls(ctx context.Context, iteration *Iteration, toolCalls []pendingToolCall, tools []Tool, events chan<- Event, iterationCount, attemptID, retryCount int) error {
 	var wg sync.WaitGroup
 	var toolErr error
 	var toolErrMu sync.Mutex
@@ -658,7 +672,7 @@ func (l *Loop) executeToolCalls(ctx context.Context, iteration *Iteration, toolC
 			defer wg.Done()
 
 			started := time.Now()
-			toolRes := callObservedTool(ctx, tc.call, l.Tools)
+			toolRes := callObservedTool(ctx, tc.call, tools)
 			duration := time.Since(started)
 			iteration.Parts[tc.partIndex].ToolResp = toolRes
 			if l.ToolResponseProcessor != nil {

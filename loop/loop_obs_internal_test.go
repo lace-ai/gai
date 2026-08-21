@@ -292,7 +292,7 @@ func TestExecuteToolCallsCreatesConcurrentChildSpans(t *testing.T) {
 	}
 	ctx, parent := otel.Tracer("test").Start(t.Context(), "loop.iteration")
 	done := make(chan error, 1)
-	go func() { done <- l.executeToolCalls(ctx, iteration, calls, nil, 0, 0, 0) }()
+	go func() { done <- l.executeToolCalls(ctx, iteration, calls, l.Tools, nil, 0, 0, 0) }()
 
 	seen := map[string]bool{}
 	for range calls {
@@ -335,7 +335,7 @@ func TestExecuteToolCallsEmitsToolEvents(t *testing.T) {
 	}}
 	events := make(chan Event, 2)
 
-	if err := l.executeToolCalls(t.Context(), iteration, calls, events, 3, 4, 5); err != nil {
+	if err := l.executeToolCalls(t.Context(), iteration, calls, l.Tools, events, 3, 4, 5); err != nil {
 		t.Fatalf("executeToolCalls error: %v", err)
 	}
 	close(events)
@@ -375,7 +375,7 @@ func TestExecuteToolCallsEmitsToolErrorWhenResponseProcessingFails(t *testing.T)
 	}}
 	events := make(chan Event, 2)
 
-	err := l.executeToolCalls(t.Context(), iteration, calls, events, 3, 4, 5)
+	err := l.executeToolCalls(t.Context(), iteration, calls, l.Tools, events, 3, 4, 5)
 	if !errors.Is(err, ErrToolResponseProcess) || !errors.Is(err, processorErr) {
 		t.Fatalf("executeToolCalls error = %v, want wrapped processor error", err)
 	}
@@ -412,7 +412,7 @@ func TestExecuteToolCallsReturnsCanceledWhenToolResultEventCannotBeSent(t *testi
 	}}
 	events := make(chan Event)
 	done := make(chan error, 1)
-	go func() { done <- l.executeToolCalls(ctx, iteration, calls, events, 3, 4, 5) }()
+	go func() { done <- l.executeToolCalls(ctx, iteration, calls, l.Tools, events, 3, 4, 5) }()
 
 	if event := <-events; event.Type != EventToolStart {
 		t.Fatalf("first tool event = %v, want %v", event.Type, EventToolStart)

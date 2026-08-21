@@ -493,6 +493,33 @@ func TestLoopDowngradesRequiredToolChoiceAfterToolCall(t *testing.T) {
 	}
 }
 
+func TestLoopNativeTransportDoesNotExecuteDifferentConfiguredToolBeforeNamedRequiredChoice(t *testing.T) {
+	t.Parallel()
+
+	unselected := &countingTool{}
+	model := &scriptedStreamModel{sequences: [][]ai.Token{
+		{{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-count", Type: "function", Name: "count", Args: json.RawMessage(`{"text":"unselected"}`)}}},
+		{{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-echo", Type: "function", Name: "echo", Args: json.RawMessage(`{"text":"selected"}`)}}},
+		{{Type: ai.TokenTypeText, Text: "done"}},
+	}}
+	l := loop.New(model, []loop.Tool{loop.NewEchoTool(), unselected}, testPromptBuilder(), nil)
+	l.ToolChoice = ai.ToolChoice{Mode: ai.ToolChoiceRequired, Names: []string{"echo"}}
+
+	if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+	if calls := unselected.calls.Load(); calls != 0 {
+		t.Fatalf("unselected tool calls = %d, want 0", calls)
+	}
+	requests := model.Requests()
+	if len(requests) != 3 {
+		t.Fatalf("requests = %d, want 3", len(requests))
+	}
+	if requests[0].ToolChoice.Mode != ai.ToolChoiceRequired || requests[1].ToolChoice.Mode != ai.ToolChoiceRequired || requests[2].ToolChoice.Mode != ai.ToolChoiceAuto {
+		t.Fatalf("tool choices = %#v, %#v, %#v; want required, required, auto", requests[0].ToolChoice, requests[1].ToolChoice, requests[2].ToolChoice)
+	}
+}
+
 func TestLoopTextTransportDoesNotFinishBeforeRequiredToolCall(t *testing.T) {
 	t.Parallel()
 
