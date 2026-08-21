@@ -27,7 +27,6 @@ type Config struct {
 	SystemPrompt      string
 	Tools             []loop.Tool
 	MaxLoopIterations int
-	RetryCount        int
 	MaxTokens         int
 	Tokenizer         ai.Tokenizer
 }
@@ -49,12 +48,6 @@ func WithTools(tools ...loop.Tool) Option {
 func WithMaxLoopIterations(maxLoopIterations int) Option {
 	return func(config *Config) {
 		config.MaxLoopIterations = maxLoopIterations
-	}
-}
-
-func WithRetryCount(retryCount int) Option {
-	return func(config *Config) {
-		config.RetryCount = retryCount
 	}
 }
 
@@ -96,7 +89,6 @@ func Definition(model ai.Model, opts ...Option) agent.Definition {
 		Tokenizer: config.Tokenizer,
 		Limits: agent.Limits{
 			MaxLoopIterations: config.MaxLoopIterations,
-			RetryCount:        config.RetryCount,
 			MaxTokens:         config.MaxTokens,
 		},
 	}

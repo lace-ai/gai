@@ -30,7 +30,7 @@ func (f toolResponseProcessorFunc) Process(call ai.ToolCall, response *ToolRespo
 
 func TestLoopRunSpanUsesRetryPolicyLimit(t *testing.T) {
 	recorder := obstest.Install(t)
-	l := &Loop{RetryCount: 3, RetryPolicy: &RetryPolicy{MaxRetries: 0}}
+	l := &Loop{RetryPolicy: &RetryPolicy{MaxRetries: 0}}
 
 	_, state := newLoopRunState(t.Context(), l)
 	state.finish()

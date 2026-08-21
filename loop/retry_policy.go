@@ -20,8 +20,8 @@ type attemptTimeoutError struct{}
 func (attemptTimeoutError) Error() string { return "retry attempt timeout" }
 func (attemptTimeoutError) Unwrap() error { return context.DeadlineExceeded }
 
-// RetryPolicy controls classified model-generation retries. A non-nil policy
-// takes precedence over RetryCount; MaxRetries: 0 explicitly disables retries.
+// RetryPolicy controls classified model-generation retries. MaxRetries: 0
+// explicitly disables retries.
 type RetryPolicy struct {
 	MaxRetries     int
 	InitialBackoff time.Duration

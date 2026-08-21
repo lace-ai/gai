@@ -542,7 +542,7 @@ func TestLoop(t *testing.T) {
 			name: "Tool call with error",
 			iterations: []mocks.MockModelResponse{
 				{Res: ai.AIResponse{Text: `{"id":"call-1","type":"function","name":"echo","arguments":{"text":"test"}}`}, Err: nil},
-				{Res: ai.AIResponse{Text: `{"id":"call-2","type":"function","name":"echo","arguments":{"text":"second test"}}`}, Err: errors.New("tool execution failed")},
+				{Res: ai.AIResponse{Text: `{"id":"call-2","type":"function","name":"echo","arguments":{"text":"second test"}}`}, Err: &ai.ProviderError{Kind: ai.ProviderErrorTransient, Err: errors.New("tool execution failed")}},
 				{Res: ai.AIResponse{Text: `{"id":"call-3","type":"function","name":"echo","arguments":{"text":"third test"}}`}, Err: nil},
 				{Res: ai.AIResponse{Text: "How are you?"}, Err: nil},
 			},
@@ -561,6 +561,7 @@ func TestLoop(t *testing.T) {
 			tools := []loop.Tool{loop.NewEchoTool()}
 			l := loop.New(wrapStreamModel{Model: model}, tools, testPromptBuilder(), nil)
 			l.MaxLoopIterations = tt.maxIterations
+			l.RetryPolicy = &loop.RetryPolicy{MaxRetries: 1}
 
 			err := loopError(collectLoopEvents(t, l, context.Background()))
 
@@ -745,15 +746,15 @@ func TestLoopRetriesDoNotConsumeIterations(t *testing.T) {
 
 	model := &scriptedStreamModel{
 		sequences: [][]ai.Token{
-			{{Err: errors.New("temporary 1")}},
-			{{Err: errors.New("temporary 2")}},
-			{{Err: errors.New("temporary 3")}},
+			{{Err: &ai.ProviderError{Kind: ai.ProviderErrorTransient, Err: errors.New("temporary 1")}}},
+			{{Err: &ai.ProviderError{Kind: ai.ProviderErrorTransient, Err: errors.New("temporary 2")}}},
+			{{Err: &ai.ProviderError{Kind: ai.ProviderErrorTransient, Err: errors.New("temporary 3")}}},
 			{{Type: ai.TokenTypeText, Data: []byte("done")}},
 		},
 	}
 	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
 	l.MaxLoopIterations = 1
-	l.RetryCount = 3
+	l.RetryPolicy = &loop.RetryPolicy{MaxRetries: 3}
 
 	events := collectLoopEvents(t, l, context.Background())
 	if err := loopError(events); err != nil {
@@ -795,6 +796,25 @@ func TestLoopRetriesDoNotConsumeIterations(t *testing.T) {
 	}
 	if l.Iterations[0].UserMessage == nil {
 		t.Fatal("expected completed first iteration to retain user message")
+	}
+}
+
+func TestLoopWithoutRetryPolicyDoesNotRetry(t *testing.T) {
+	t.Parallel()
+
+	model := &scriptedStreamModel{sequences: [][]ai.Token{
+		{{Err: errors.New("temporary stream failure")}},
+		{{Type: ai.TokenTypeText, Data: []byte("must not be requested")}},
+	}}
+	l := loop.New(model, nil, testPromptBuilder(), nil)
+	l.MaxLoopIterations = 1
+
+	err := loopError(collectLoopEvents(t, l, context.Background()))
+	if !errors.Is(err, loop.ErrMaxRetries) {
+		t.Fatalf("error = %v, want ErrMaxRetries", err)
+	}
+	if got := len(model.Requests()); got != 1 {
+		t.Fatalf("model attempts = %d, want 1 without a retry policy", got)
 	}
 }
 
@@ -987,7 +1007,6 @@ func TestLoopTerminalRetryErrorReportsPolicyLimit(t *testing.T) {
 	}
 	l := loop.New(model, nil, testPromptBuilder(), nil)
 	l.MaxLoopIterations = 1
-	l.RetryCount = 3
 	l.RetryPolicy = &loop.RetryPolicy{MaxRetries: 0}
 
 	err := loopError(collectLoopEvents(t, l, context.Background()))
@@ -1071,7 +1090,6 @@ func TestLoopStreamErrorsIncludeAttemptMetadata(t *testing.T) {
 	}
 	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
 	l.MaxLoopIterations = 1
-	l.RetryCount = 0
 
 	events := collectLoopEvents(t, l, context.Background())
 	err := loopError(events)
@@ -1106,7 +1124,6 @@ func TestLoopTerminalStreamErrorIncludesPartialAttemptIteration(t *testing.T) {
 	}
 	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
 	l.MaxLoopIterations = 1
-	l.RetryCount = 0
 
 	events := collectLoopEvents(t, l, context.Background())
 	err := loopError(events)
@@ -1139,7 +1156,7 @@ func TestLoopRetryStatusMarksPartialTokensDiscardable(t *testing.T) {
 		sequences: [][]ai.Token{
 			{
 				{Type: ai.TokenTypeText, Data: []byte("partial")},
-				{Err: errors.New("temporary")},
+				{Err: &ai.ProviderError{Kind: ai.ProviderErrorTransient, Err: errors.New("temporary")}},
 			},
 			{
 				{Type: ai.TokenTypeText, Data: []byte("final")},
@@ -1148,7 +1165,7 @@ func TestLoopRetryStatusMarksPartialTokensDiscardable(t *testing.T) {
 	}
 	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
 	l.MaxLoopIterations = 1
-	l.RetryCount = 1
+	l.RetryPolicy = &loop.RetryPolicy{MaxRetries: 1}
 
 	events := collectLoopEvents(t, l, context.Background())
 	if err := loopError(events); err != nil {
@@ -1193,7 +1210,6 @@ func TestLoopDoesNotRetryCanceledStream(t *testing.T) {
 	}
 	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
 	l.MaxLoopIterations = 1
-	l.RetryCount = 3
 
 	events := collectLoopEvents(t, l, context.Background())
 	if err := loopError(events); err != nil {

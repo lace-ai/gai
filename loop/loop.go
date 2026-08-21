@@ -13,7 +13,6 @@ import (
 
 const (
 	defaultMaxLoopIterations = 8
-	defaultRetryCount        = 3
 )
 
 // ToolTransportMode controls whether a loop sends tool definitions through the
@@ -60,9 +59,7 @@ type Loop struct {
 	ResponseFormat ai.ResponseFormat
 	// Reasoning configures model reasoning/thinking behavior for each model generation.
 	Reasoning ai.ReasoningConfig
-	// RetryCount is the number of model stream failures retried before stopping.
-	RetryCount int
-	// RetryPolicy enables classified retries. Nil preserves RetryCount behavior.
+	// RetryPolicy enables classified retries. Nil disables retries.
 	RetryPolicy *RetryPolicy
 	// PromptBuilder constructs the prompt for each iteration.
 	PromptBuilder gaictx.PromptBuilder
@@ -95,13 +92,12 @@ func (l *Loop) Validate() error {
 	return nil
 }
 
-// New constructs a Loop with default iteration and retry limits.
+// New constructs a Loop with the default iteration limit.
 func New(model ai.Model, tools []Tool, promptBuilder gaictx.PromptBuilder, toolResponseProcessor ToolResponseProcessor) *Loop {
 	l := &Loop{
 		Model:                 model,
 		Tools:                 tools,
 		MaxLoopIterations:     defaultMaxLoopIterations,
-		RetryCount:            defaultRetryCount,
 		PromptBuilder:         promptBuilder,
 		ToolResponseProcessor: toolResponseProcessor,
 	}
@@ -325,9 +321,9 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 							}
 						}
 
-						retryLimit := l.RetryCount
-						canRetry := runState.canRetry(retryLimit)
-						retryable := canRetry
+						retryLimit := 0
+						canRetry := false
+						retryable := false
 						if l.RetryPolicy != nil {
 							retryLimit = l.RetryPolicy.MaxRetries
 							retryable = l.RetryPolicy.isRetryable(t.Err)

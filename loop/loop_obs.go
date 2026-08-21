@@ -87,7 +87,6 @@ func newLoopRunState(ctx context.Context, l *Loop) (context.Context, *loopRunSta
 	modelName := ""
 	if l != nil {
 		maxIterations = l.MaxLoopIterations
-		retryLimit = l.RetryCount
 		if l.RetryPolicy != nil {
 			retryLimit = l.RetryPolicy.MaxRetries
 		}
@@ -133,13 +132,6 @@ func (s *loopRunState) recordToken(token ai.Token) {
 	if token.Type == ai.TokenTypeToolCall && token.ToolCall != nil {
 		s.stats.ToolCallCount++
 	}
-}
-
-func (s *loopRunState) canRetry(limit int) bool {
-	if s == nil {
-		return false
-	}
-	return s.retryCount < limit
 }
 
 func (s *loopRunState) retry() {
