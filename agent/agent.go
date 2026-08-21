@@ -58,6 +58,9 @@ type Definition struct {
 	Prompt Prompt
 	// Limits configures loop execution defaults.
 	Limits Limits
+	// RetryPolicy enables classified model-generation retries. Nil disables retries.
+	// Each workflow receives its own copy of the configured policy.
+	RetryPolicy *loop.RetryPolicy
 	// Reasoning configures model reasoning/thinking behavior for every model call.
 	Reasoning ai.ReasoningConfig
 	// Tokenizer overrides Model.Tokenizer when it is non-nil.
@@ -190,6 +193,10 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 	}
 	l.ResponseFormat = cloneResponseFormat(input.ResponseFormat)
 	l.Reasoning = a.def.Reasoning
+	if a.def.RetryPolicy != nil {
+		policy := *a.def.RetryPolicy
+		l.RetryPolicy = &policy
+	}
 	return l, nil
 }
 

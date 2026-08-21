@@ -802,16 +802,26 @@ func TestLoopRetriesDoNotConsumeIterations(t *testing.T) {
 func TestLoopWithoutRetryPolicyDoesNotRetry(t *testing.T) {
 	t.Parallel()
 
+	streamErr := errors.New("temporary stream failure")
 	model := &scriptedStreamModel{sequences: [][]ai.Token{
-		{{Err: errors.New("temporary stream failure")}},
+		{{Err: streamErr}},
 		{{Type: ai.TokenTypeText, Data: []byte("must not be requested")}},
 	}}
 	l := loop.New(model, nil, testPromptBuilder(), nil)
 	l.MaxLoopIterations = 1
 
-	err := loopError(collectLoopEvents(t, l, context.Background()))
-	if !errors.Is(err, loop.ErrMaxRetries) {
-		t.Fatalf("error = %v, want ErrMaxRetries", err)
+	events := collectLoopEvents(t, l, context.Background())
+	err := loopError(events)
+	if !errors.Is(err, streamErr) {
+		t.Fatalf("error = %v, want original stream error", err)
+	}
+	if errors.Is(err, loop.ErrMaxRetries) {
+		t.Fatalf("error = %v, must not report retry exhaustion without a policy", err)
+	}
+	for _, event := range events {
+		if event.Type == loop.EventRetry {
+			t.Fatal("nil retry policy must not emit EventRetry")
+		}
 	}
 	if got := len(model.Requests()); got != 1 {
 		t.Fatalf("model attempts = %d, want 1 without a retry policy", got)
@@ -1083,9 +1093,10 @@ func TestLoopPolicyReturnsNonRetryableErrorAfterBudgetIsConsumed(t *testing.T) {
 func TestLoopStreamErrorsIncludeAttemptMetadata(t *testing.T) {
 	t.Parallel()
 
+	fatalErr := errors.New("fatal stream error")
 	model := &scriptedStreamModel{
 		sequences: [][]ai.Token{
-			{{Err: errors.New("fatal stream error")}},
+			{{Err: fatalErr}},
 		},
 	}
 	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
@@ -1093,8 +1104,8 @@ func TestLoopStreamErrorsIncludeAttemptMetadata(t *testing.T) {
 
 	events := collectLoopEvents(t, l, context.Background())
 	err := loopError(events)
-	if !errors.Is(err, loop.ErrMaxRetries) {
-		t.Fatalf("error = %v, want ErrMaxRetries", err)
+	if !errors.Is(err, fatalErr) || errors.Is(err, loop.ErrMaxRetries) {
+		t.Fatalf("error = %v, want original non-retry error", err)
 	}
 	errorEvents := loopEventsOfType(events, loop.EventError)
 	if len(errorEvents) != 1 {
@@ -1106,19 +1117,20 @@ func TestLoopStreamErrorsIncludeAttemptMetadata(t *testing.T) {
 	if errorEvents[0].Iteration == nil || errorEvents[0].Iteration.UserMessage == nil {
 		t.Fatalf("expected failed attempt snapshot to retain user message, got %#v", errorEvents[0].Iteration)
 	}
-	if strings.Count(errorEvents[0].Err.Error(), loop.ErrMaxRetries.Error()) != 1 {
-		t.Fatalf("expected terminal error once, got %q", errorEvents[0].Err)
+	if !errors.Is(errorEvents[0].Err, fatalErr) || errors.Is(errorEvents[0].Err, loop.ErrMaxRetries) {
+		t.Fatalf("expected original terminal error, got %q", errorEvents[0].Err)
 	}
 }
 
 func TestLoopTerminalStreamErrorIncludesPartialAttemptIteration(t *testing.T) {
 	t.Parallel()
 
+	fatalErr := errors.New("fatal stream error")
 	model := &scriptedStreamModel{
 		sequences: [][]ai.Token{
 			{
 				{Type: ai.TokenTypeText, Data: []byte("partial")},
-				{Err: errors.New("fatal stream error")},
+				{Err: fatalErr},
 			},
 		},
 	}
@@ -1127,8 +1139,8 @@ func TestLoopTerminalStreamErrorIncludesPartialAttemptIteration(t *testing.T) {
 
 	events := collectLoopEvents(t, l, context.Background())
 	err := loopError(events)
-	if !errors.Is(err, loop.ErrMaxRetries) {
-		t.Fatalf("error = %v, want ErrMaxRetries", err)
+	if !errors.Is(err, fatalErr) || errors.Is(err, loop.ErrMaxRetries) {
+		t.Fatalf("error = %v, want original non-retry error", err)
 	}
 	errorEvents := loopEventsOfType(events, loop.EventError)
 	if len(errorEvents) != 1 {

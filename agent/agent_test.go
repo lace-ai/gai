@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lace-ai/gai/agent"
 	"github.com/lace-ai/gai/ai"
@@ -155,6 +156,34 @@ func TestAgentNewRunCreatesLoop(t *testing.T) {
 	}
 	if builder == nil || builder.tokenizer == nil {
 		t.Fatal("expected model tokenizer to be set on prompt builder")
+	}
+}
+
+func TestAgentNewRunCopiesRetryPolicy(t *testing.T) {
+	t.Parallel()
+
+	policy := &loop.RetryPolicy{MaxRetries: 2, InitialBackoff: time.Second}
+	assistant := agent.New(agent.Definition{
+		Model:       &mocks.MockModel{},
+		RetryPolicy: policy,
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return &testPromptBuilder{}, nil
+		},
+	})
+
+	first, err := assistant.NewRun(context.Background(), textRunInput("first"))
+	if err != nil {
+		t.Fatalf("first NewRun failed: %v", err)
+	}
+	second, err := assistant.NewRun(context.Background(), textRunInput("second"))
+	if err != nil {
+		t.Fatalf("second NewRun failed: %v", err)
+	}
+	if first.Loop.RetryPolicy == nil || first.Loop.RetryPolicy.MaxRetries != policy.MaxRetries || first.Loop.RetryPolicy.InitialBackoff != policy.InitialBackoff {
+		t.Fatalf("first retry policy = %#v, want %#v", first.Loop.RetryPolicy, policy)
+	}
+	if first.Loop.RetryPolicy == policy || second.Loop.RetryPolicy == policy || first.Loop.RetryPolicy == second.Loop.RetryPolicy {
+		t.Fatal("each workflow must receive an independent retry policy copy")
 	}
 }
 

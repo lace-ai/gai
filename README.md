@@ -259,6 +259,27 @@ for event := range workflow.RunEvents(ctx) {
 
 `Workflow.Run` remains available for workflows that use post-processing middleware. It exposes compatibility token, status, and error channels; consumers must drain all three concurrently.
 
+## Retries
+
+Retries are opt-in. A loop or agent with no `RetryPolicy` performs one model-generation attempt and returns the original error; it never emits a retry event. Configure an explicit policy when classified transient failures, rate limits, or attempt timeouts should retry:
+
+```go
+policy := &loop.RetryPolicy{
+  MaxRetries:     3,
+  InitialBackoff: time.Second,
+  MaxBackoff:     10 * time.Second,
+}
+
+support := agent.New(agent.Definition{
+  Name:        "support",
+  Model:       model,
+  Prompt:      supportPrompt,
+  RetryPolicy: policy,
+})
+```
+
+`Loop.RetryCount`, `agent.Limits.RetryCount`, and `summary.WithRetryCount` were removed while GAI is pre-v1. Migrate to `loop.RetryPolicy{MaxRetries: n}` or `summary.WithRetryPolicy(loop.RetryPolicy{MaxRetries: n})`. Runtime event retry counters remain available for observability.
+
 ## Prompt and context construction
 
 The `context` package builds prompts from separate, typed inputs:

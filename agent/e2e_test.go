@@ -187,11 +187,12 @@ func TestAgentWorkflowEndToEndWithToolCall(t *testing.T) {
 }
 
 func TestAgentWorkflowMarksTerminalFailedAttemptDiscardable(t *testing.T) {
+	fatalErr := errors.New("fatal stream error")
 	model := &scriptedWorkflowModel{
 		scripts: [][]ai.Token{
 			{
 				{Type: ai.TokenTypeText, Text: "partial"},
-				{Err: errors.New("fatal stream error")},
+				{Err: fatalErr},
 			},
 		},
 	}
@@ -216,8 +217,8 @@ func TestAgentWorkflowMarksTerminalFailedAttemptDiscardable(t *testing.T) {
 	if len(consumed.errs) != 1 {
 		t.Fatalf("expected one workflow error, got %d", len(consumed.errs))
 	}
-	if !errors.Is(consumed.errs[0], loop.ErrMaxRetries) {
-		t.Fatalf("error = %v, want ErrMaxRetries", consumed.errs[0])
+	if !errors.Is(consumed.errs[0], fatalErr) || errors.Is(consumed.errs[0], loop.ErrMaxRetries) {
+		t.Fatalf("error = %v, want original non-retry error", consumed.errs[0])
 	}
 	if got := tokensText(consumed.tokens); got != "partial" {
 		t.Fatalf("expected partial token to stream before failure, got %q", got)
