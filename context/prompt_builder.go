@@ -46,20 +46,6 @@ type NativeMessageBuilder interface {
 	BuildRequest(ctx context.Context, conv Conversation) (string, []ai.RequestMessage, error)
 }
 
-// ContextSourceReplacer optionally replaces all context sources with a name.
-// PromptBuilder implementations that do not provide it remain compatible with
-// consumers that only append or prepend prompt context.
-type ContextSourceReplacer interface {
-	ReplaceContextSource(ctx context.Context, name string, source ContextSource) error
-}
-
-// ContextSourceRemover optionally removes all context sources with a name.
-// PromptBuilder implementations that do not provide it remain compatible with
-// consumers that only append or prepend prompt context.
-type ContextSourceRemover interface {
-	RemoveContextSource(ctx context.Context, name string) error
-}
-
 // NativeConversation exposes provider-neutral conversation history alongside
 // the rendered conversation used to construct a compatibility prompt.
 type NativeConversation interface {

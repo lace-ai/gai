@@ -204,13 +204,10 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 		tools = selectedTextTools(*input.Execution.ToolChoice, tools)
 	}
 	if !nativeTools {
-		hasToolDefinitions := hasContextSource(promptBuilder, "tool_definitions")
+		manager, hasContextSourceManager := promptBuilder.(contextSourceManager)
+		hasToolDefinitions := hasContextSourceManager && manager.HasContextSource("tool_definitions")
 		if (input.Execution.Tools != nil || textToolsDisabled) && hasToolDefinitions && len(tools) == 0 {
-			remover, ok := promptBuilder.(gaictx.ContextSourceRemover)
-			if !ok {
-				return nil, fmt.Errorf("prompt builder cannot remove tool definitions for execution tool override")
-			}
-			if err := remover.RemoveContextSource(ctx, "tool_definitions"); err != nil {
+			if err := manager.RemoveContextSource(ctx, "tool_definitions"); err != nil {
 				return nil, err
 			}
 		} else if len(tools) > 0 && (!hasToolDefinitions || input.Execution.Tools != nil || (input.Execution.ToolChoice != nil && input.Execution.ToolChoice.Mode == ai.ToolChoiceRequired && len(input.Execution.ToolChoice.Names) > 0)) {
@@ -219,11 +216,7 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 				return nil, err
 			}
 			if hasToolDefinitions {
-				replacer, ok := promptBuilder.(gaictx.ContextSourceReplacer)
-				if !ok {
-					return nil, fmt.Errorf("prompt builder cannot replace tool definitions for execution tool override")
-				}
-				if err := replacer.ReplaceContextSource(ctx, "tool_definitions", toolSource); err != nil {
+				if err := manager.ReplaceContextSource(ctx, "tool_definitions", toolSource); err != nil {
 					return nil, err
 				}
 			} else if err := promptBuilder.PrependContextSource(ctx, toolSource); err != nil {
@@ -337,17 +330,17 @@ func usesNativeTools(model ai.Model) bool {
 	return ok && native.NativeTools()
 }
 
-type contextSourceLookup interface {
+// contextSourceManager is the optional agent-internal prompt-builder
+// capability for atomically inspecting and mutating named context sources.
+// Builders that only append or prepend context remain supported.
+type contextSourceManager interface {
 	HasContextSource(name string) bool
+	ReplaceContextSource(ctx context.Context, name string, source gaictx.ContextSource) error
+	RemoveContextSource(ctx context.Context, name string) error
 }
 
 // promptBuilderCloner is an optional agent-internal capability for callbacks
 // that reuse a prompt builder across runs.
 type promptBuilderCloner interface {
 	ClonePromptBuilder() gaictx.PromptBuilder
-}
-
-func hasContextSource(builder gaictx.PromptBuilder, name string) bool {
-	lookup, ok := builder.(contextSourceLookup)
-	return ok && lookup.HasContextSource(name)
 }
