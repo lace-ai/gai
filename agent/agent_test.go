@@ -23,8 +23,8 @@ type testPromptBuilder struct {
 	tokenizer ai.Tokenizer
 }
 
-// unclonablePromptBuilder models a third-party mutable builder that cannot
-// establish per-run isolation.
+// unclonablePromptBuilder models a fresh third-party builder returned for one
+// run. It intentionally does not implement PromptBuilderCloner.
 type unclonablePromptBuilder struct{}
 
 func (*unclonablePromptBuilder) PrependContextSource(context.Context, gaictx.ContextSource) error {
@@ -146,18 +146,23 @@ func (b *testPromptBuilder) ClonePromptBuilder() gaictx.PromptBuilder {
 	return &cloned
 }
 
-func TestAgentNewRunRejectsUnclonablePromptBuilder(t *testing.T) {
+func TestAgentNewRunAcceptsFreshUnclonablePromptBuilder(t *testing.T) {
 	t.Parallel()
 
+	builder := &unclonablePromptBuilder{}
 	assistant := agent.New(agent.Definition{
 		Model: &mocks.MockModel{},
 		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
-			return &unclonablePromptBuilder{}, nil
+			return builder, nil
 		},
 	})
 
-	if _, err := assistant.NewRun(context.Background(), agent.RunInput{}); !errors.Is(err, loop.ErrPromptNotConfigured) {
-		t.Fatalf("NewRun error = %v, want ErrPromptNotConfigured", err)
+	run, err := assistant.NewRun(context.Background(), agent.RunInput{})
+	if err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	if run.Loop.PromptBuilder != builder {
+		t.Fatalf("PromptBuilder = %T (%p), want original unclonable builder (%p)", run.Loop.PromptBuilder, run.Loop.PromptBuilder, builder)
 	}
 }
 
