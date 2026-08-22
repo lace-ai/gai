@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
@@ -234,7 +233,7 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 			}
 		}
 		if input.Execution.ToolChoice != nil {
-			if instruction := textToolChoiceInstruction(*input.Execution.ToolChoice); instruction != "" {
+			if instruction := tooldefinitions.ToolChoiceInstruction(*input.Execution.ToolChoice); instruction != "" {
 				if err := promptBuilder.AppendSystemInstructions(ctx, gaictx.NewTextPart(instruction)); err != nil {
 					return nil, err
 				}
@@ -291,16 +290,6 @@ func cloneToolChoice(choice ai.ToolChoice) ai.ToolChoice {
 	cloned := choice
 	cloned.Names = append([]string(nil), choice.Names...)
 	return cloned
-}
-
-func textToolChoiceInstruction(choice ai.ToolChoice) string {
-	if choice.Mode != ai.ToolChoiceRequired {
-		return ""
-	}
-	if len(choice.Names) == 0 {
-		return "You must make at least one tool call before producing a normal response."
-	}
-	return "You must make at least one tool call before producing a normal response. You may call only these selected tools: " + strings.Join(choice.Names, ", ") + "."
 }
 
 func validateTextToolChoice(choice ai.ToolChoice, tools []loop.Tool) error {

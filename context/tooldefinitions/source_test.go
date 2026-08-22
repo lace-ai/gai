@@ -118,6 +118,38 @@ func TestSourceAllowsCustomUsageProtocol(t *testing.T) {
 	}
 }
 
+func TestToolChoiceInstruction(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		choice ai.ToolChoice
+		want   string
+	}{
+		{
+			name:   "auto",
+			choice: ai.ToolChoice{Mode: ai.ToolChoiceAuto},
+		},
+		{
+			name:   "required any tool",
+			choice: ai.ToolChoice{Mode: ai.ToolChoiceRequired},
+			want:   "You must make at least one tool call before producing a normal response.",
+		},
+		{
+			name:   "required named tools",
+			choice: ai.ToolChoice{Mode: ai.ToolChoiceRequired, Names: []string{"search", "weather"}},
+			want:   "You must make at least one tool call before producing a normal response. You may call only these selected tools: search, weather.",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tooldefinitions.ToolChoiceInstruction(tt.choice); got != tt.want {
+				t.Fatalf("ToolChoiceInstruction() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestSourceErrorHandling(t *testing.T) {
 	tests := []struct {
 		name    string

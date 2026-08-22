@@ -50,6 +50,18 @@ func WithUsageProtocol(protocol string) Option {
 	}
 }
 
+// ToolChoiceInstruction returns the text-transport instruction for choice.
+// Native transports enforce the choice through their provider request instead.
+func ToolChoiceInstruction(choice ai.ToolChoice) string {
+	if choice.Mode != ai.ToolChoiceRequired {
+		return ""
+	}
+	if len(choice.Names) == 0 {
+		return "You must make at least one tool call before producing a normal response."
+	}
+	return "You must make at least one tool call before producing a normal response. You may call only these selected tools: " + strings.Join(choice.Names, ", ") + "."
+}
+
 // New creates a context source from tools and a renderer. The slice is copied
 // so callers can safely reuse or modify their input slice after construction.
 func New(renderer gaictx.Renderer, tools []loop.Tool, debug gai.DebugSink, options ...Option) (*Source, error) {
