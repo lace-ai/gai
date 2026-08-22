@@ -44,7 +44,9 @@ type ExecutionConfig struct {
 	Reasoning *ai.ReasoningConfig
 }
 
-// Prompt creates the prompt builder used by one run.
+// Prompt creates and returns a run-owned prompt builder used by one workflow.
+// Callers must return a fresh builder for every invocation; Agent mutates the
+// returned builder while applying that run's input and execution configuration.
 type Prompt func(ctx context.Context, input RunInput) (gaictx.PromptBuilder, error)
 
 // Limits controls loop iterations and model output size.
@@ -180,12 +182,6 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 	}
 	if promptBuilder == nil {
 		return nil, loop.ErrPromptNotConfigured
-	}
-	if cloner, ok := promptBuilder.(promptBuilderCloner); ok {
-		promptBuilder = cloner.ClonePromptBuilder()
-		if promptBuilder == nil {
-			return nil, loop.ErrPromptNotConfigured
-		}
 	}
 	promptBuilder.SetInput(input.Prompt)
 	if !nativeTools {
@@ -367,10 +363,4 @@ type contextSourceLookup interface {
 type contextSourceManager interface {
 	ReplaceContextSource(ctx context.Context, name string, source gaictx.ContextSource) error
 	RemoveContextSource(ctx context.Context, name string) error
-}
-
-// promptBuilderCloner is an optional agent-internal capability for callbacks
-// that reuse a prompt builder across runs.
-type promptBuilderCloner interface {
-	ClonePromptBuilder() gaictx.PromptBuilder
 }

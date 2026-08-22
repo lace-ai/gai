@@ -156,12 +156,6 @@ func (b *testPromptBuilder) SetTokenizer(tokenizer ai.Tokenizer) {
 	b.tokenizer = tokenizer
 }
 
-func (b *testPromptBuilder) ClonePromptBuilder() gaictx.PromptBuilder {
-	cloned := *b
-	cloned.input = b.input.Clone()
-	return &cloned
-}
-
 func TestAgentNewRunAcceptsFreshUnclonablePromptBuilder(t *testing.T) {
 	t.Parallel()
 
@@ -1033,7 +1027,7 @@ func TestAgentExecutionToolsReplaceExistingPromptToolDefinitions(t *testing.T) {
 	}
 }
 
-func TestAgentExecutionToolOverridesDoNotMutateSharedPromptBuilder(t *testing.T) {
+func TestAgentExecutionToolOverridesUseRunOwnedPromptBuilders(t *testing.T) {
 	t.Parallel()
 
 	definitionTool := namedTool{name: "definition_tool"}
@@ -1042,15 +1036,17 @@ func TestAgentExecutionToolOverridesDoNotMutateSharedPromptBuilder(t *testing.T)
 	if err != nil {
 		t.Fatalf("new stale tool source: %v", err)
 	}
-	builder := gaictx.New(gaictx.Definition{
-		Renderer:       &gaictx.SimpleRenderer{},
-		ContextSources: []gaictx.ContextSource{staleSource},
-	})
+	newBuilder := func() *gaictx.Builder {
+		return gaictx.New(gaictx.Definition{
+			Renderer:       &gaictx.SimpleRenderer{},
+			ContextSources: []gaictx.ContextSource{staleSource},
+		})
+	}
 	assistant := agent.New(agent.Definition{
 		Model: disabledNativeToolWorkflowModel{&scriptedWorkflowModel{}},
 		Tools: []loop.Tool{definitionTool},
 		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
-			return builder, nil
+			return newBuilder(), nil
 		},
 	})
 

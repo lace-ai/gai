@@ -234,6 +234,9 @@ support := agent.New(agent.Definition{
 
 The loop sends definitions to the model, executes requested calls, appends tool results to the conversation, and continues until the model commits a normal response or the iteration limit is reached.
 
+`Prompt` must return a fresh, run-owned builder for every invocation. The agent
+applies the run input and execution configuration directly to that builder.
+
 For session- or user-specific tools, set `RunInput.Execution.Tools`. A nil slice
 inherits `Definition.Tools`; a non-nil slice replaces them, and an empty slice
 disables definition-level tools for that run. `NewRun` snapshots the slice's

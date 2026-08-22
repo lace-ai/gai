@@ -128,27 +128,6 @@ func NewBuilder(renderer Renderer, tokenBudget int) *Builder {
 	})
 }
 
-// ClonePromptBuilder returns an independent builder copy suitable for one
-// workflow. Context sources and render components are shared because they are
-// configured dependencies; the slices that hold run-specific builder state are
-// copied.
-func (b *Builder) ClonePromptBuilder() PromptBuilder {
-	if b == nil {
-		return nil
-	}
-	cloned := *b
-	cloned.SystemInstructions = make([]Part, len(b.SystemInstructions))
-	copy(cloned.SystemInstructions, b.SystemInstructions)
-	cloned.ContextSources = make([]ContextSource, len(b.ContextSources))
-	copy(cloned.ContextSources, b.ContextSources)
-	cloned.ContextParts = make([]Part, len(b.ContextParts))
-	copy(cloned.ContextParts, b.ContextParts)
-	cloned.Iteration = make([]Part, len(b.Iteration))
-	copy(cloned.Iteration, b.Iteration)
-	cloned.input = b.input.Clone()
-	return &cloned
-}
-
 func (b *Builder) SetDebugSink(debugSink gai.DebugSink) {
 	b.debugSink = debugSink
 }
