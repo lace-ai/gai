@@ -3,7 +3,9 @@ package agent_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,6 +21,52 @@ type testPromptBuilder struct {
 	prompt    string
 	input     gaictx.PromptInput
 	tokenizer ai.Tokenizer
+}
+
+// unclonablePromptBuilder models a fresh third-party builder returned for one
+// run. It intentionally does not offer a clone operation.
+type unclonablePromptBuilder struct{}
+
+func (*unclonablePromptBuilder) PrependContextSource(context.Context, gaictx.ContextSource) error {
+	return nil
+}
+
+func (*unclonablePromptBuilder) AppendContextSource(context.Context, gaictx.ContextSource) error {
+	return nil
+}
+
+func (*unclonablePromptBuilder) AppendContextSources(context.Context, ...gaictx.ContextSource) error {
+	return nil
+}
+
+func (*unclonablePromptBuilder) AppendSystemInstructions(context.Context, ...gaictx.Part) error {
+	return nil
+}
+
+func (*unclonablePromptBuilder) BuildContext(context.Context) ([]gaictx.Part, error) { return nil, nil }
+
+func (*unclonablePromptBuilder) BuildPrompt(context.Context, gaictx.Conversation) (string, error) {
+	return "", nil
+}
+
+func (*unclonablePromptBuilder) Input() gaictx.PromptInput { return gaictx.PromptInput{} }
+
+func (*unclonablePromptBuilder) SetInput(gaictx.PromptInput) {}
+
+// hasToolDefinitionsPromptBuilder models a third-party builder that can report
+// its configured tool definitions but cannot replace or remove them.
+type hasToolDefinitionsPromptBuilder struct {
+	*unclonablePromptBuilder
+	prependedSources int
+}
+
+func (b *hasToolDefinitionsPromptBuilder) PrependContextSource(context.Context, gaictx.ContextSource) error {
+	b.prependedSources++
+	return nil
+}
+
+func (*hasToolDefinitionsPromptBuilder) HasContextSource(name string) bool {
+	return name == "tool_definitions"
 }
 
 type testContextSource struct{ name string }
@@ -108,6 +156,26 @@ func (b *testPromptBuilder) SetTokenizer(tokenizer ai.Tokenizer) {
 	b.tokenizer = tokenizer
 }
 
+func TestAgentNewRunAcceptsFreshUnclonablePromptBuilder(t *testing.T) {
+	t.Parallel()
+
+	builder := &unclonablePromptBuilder{}
+	assistant := agent.New(agent.Definition{
+		Model: &mocks.MockModel{},
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return builder, nil
+		},
+	})
+
+	run, err := assistant.NewRun(context.Background(), agent.RunInput{})
+	if err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	if run.Loop.PromptBuilder != builder {
+		t.Fatalf("PromptBuilder = %T (%p), want original unclonable builder (%p)", run.Loop.PromptBuilder, run.Loop.PromptBuilder, builder)
+	}
+}
+
 func TestAgentNewRunCreatesLoop(t *testing.T) {
 	t.Parallel()
 
@@ -154,7 +222,8 @@ func TestAgentNewRunCreatesLoop(t *testing.T) {
 	if run.Loop.Reasoning != (ai.ReasoningConfig{Enabled: true, IncludeThoughts: true, BudgetTokens: 128, Effort: ai.ReasoningEffortHigh}) {
 		t.Fatalf("expected configured reasoning, got %+v", run.Loop.Reasoning)
 	}
-	if builder == nil || builder.tokenizer == nil {
+	runBuilder, ok := run.Loop.PromptBuilder.(*testPromptBuilder)
+	if !ok || runBuilder.tokenizer == nil {
 		t.Fatal("expected model tokenizer to be set on prompt builder")
 	}
 }
@@ -187,6 +256,176 @@ func TestAgentNewRunCopiesRetryPolicy(t *testing.T) {
 	}
 }
 
+func TestAgentNewRunPreservesNilAndEmptyExecutionToolOverrides(t *testing.T) {
+	t.Parallel()
+
+	definitionTool := loop.NewEchoTool()
+	assistant := agent.New(agent.Definition{
+		Model: nativeToolWorkflowModel{scriptedWorkflowModel: &scriptedWorkflowModel{}},
+		Tools: []loop.Tool{definitionTool},
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return &testPromptBuilder{}, nil
+		},
+	})
+
+	inherited, err := assistant.NewRun(context.Background(), textRunInput("inherit tools"))
+	if err != nil {
+		t.Fatalf("NewRun with nil tools failed: %v", err)
+	}
+	if len(inherited.Loop.Tools) != 1 || inherited.Loop.Tools[0] != definitionTool {
+		t.Fatalf("nil execution tools = %#v, want definition tools", inherited.Loop.Tools)
+	}
+
+	disabledInput := textRunInput("disable tools")
+	disabledInput.Execution.Tools = []loop.Tool{}
+	disabled, err := assistant.NewRun(context.Background(), disabledInput)
+	if err != nil {
+		t.Fatalf("NewRun with empty tools failed: %v", err)
+	}
+	if disabled.Loop.Tools == nil {
+		t.Fatal("empty execution tools became nil, which would restore definition tools when reused")
+	}
+	if len(disabled.Loop.Tools) != 0 {
+		t.Fatalf("empty execution tools = %#v, want no tools", disabled.Loop.Tools)
+	}
+}
+
+func TestAgentNewRunExecutionOverridesSnapshotToolsAndConfiguration(t *testing.T) {
+	t.Parallel()
+
+	definitionTool := loop.NewEchoTool()
+	runTool := namedTool{name: "run_tool"}
+	assistant := agent.New(agent.Definition{
+		Model:     nativeToolWorkflowModel{scriptedWorkflowModel: &scriptedWorkflowModel{}},
+		Tools:     []loop.Tool{definitionTool},
+		Reasoning: ai.ReasoningConfig{Effort: ai.ReasoningEffortLow},
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return &testPromptBuilder{}, nil
+		},
+	})
+	input := textRunInput("hello")
+	input.Execution = agent.ExecutionConfig{
+		Tools:      []loop.Tool{runTool},
+		ToolChoice: &ai.ToolChoice{Mode: ai.ToolChoiceRequired, Names: []string{"run_tool"}},
+		Reasoning:  &ai.ReasoningConfig{Enabled: true, Effort: ai.ReasoningEffortHigh},
+	}
+
+	workflow, err := assistant.NewRun(context.Background(), input)
+	if err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	input.Execution.Tools[0] = definitionTool
+	input.Execution.ToolChoice.Names[0] = "changed"
+	input.Execution.Reasoning.Effort = ai.ReasoningEffortLow
+
+	if len(workflow.Loop.Tools) != 1 || workflow.Loop.Tools[0] != runTool {
+		t.Fatalf("loop tools = %#v, want execution tool snapshot", workflow.Loop.Tools)
+	}
+	if got := workflow.Loop.ToolChoice; !reflect.DeepEqual(got, ai.ToolChoice{Mode: ai.ToolChoiceRequired, Names: []string{"run_tool"}}) {
+		t.Fatalf("tool choice = %#v", got)
+	}
+	if got := workflow.Loop.Reasoning; got != (ai.ReasoningConfig{Enabled: true, Effort: ai.ReasoningEffortHigh}) {
+		t.Fatalf("reasoning = %#v", got)
+	}
+}
+
+func TestAgentNewRunRejectsDuplicateExecutionToolNamesBeforeRun(t *testing.T) {
+	t.Parallel()
+
+	tool := loop.NewEchoTool()
+	assistant := agent.New(agent.Definition{
+		Model: nativeToolWorkflowModel{scriptedWorkflowModel: &scriptedWorkflowModel{}},
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return &testPromptBuilder{}, nil
+		},
+	})
+	input := textRunInput("hello")
+	input.Execution.Tools = []loop.Tool{tool, tool}
+
+	_, err := assistant.NewRun(context.Background(), input)
+	if err == nil || !strings.Contains(err.Error(), "duplicate tool name") {
+		t.Fatalf("NewRun error = %v, want duplicate tool name", err)
+	}
+}
+
+func TestAgentConcurrentRunsUseIndependentExecutionToolSets(t *testing.T) {
+	t.Parallel()
+
+	model := nativeToolWorkflowModel{scriptedWorkflowModel: &scriptedWorkflowModel{
+		scripts: [][]ai.Token{{{Type: ai.TokenTypeText, Text: "done"}}, {{Type: ai.TokenTypeText, Text: "done"}}},
+	}}
+	assistant := agent.New(agent.Definition{
+		Model: model,
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return &testPromptBuilder{}, nil
+		},
+	})
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	for _, name := range []string{"first", "second"} {
+		wg.Add(1)
+		go func(name string) {
+			defer wg.Done()
+			input := textRunInput("hello")
+			input.Execution.Tools = []loop.Tool{namedTool{name: name}}
+			workflow, err := assistant.NewRun(context.Background(), input)
+			if err == nil {
+				consumeWorkflow(t, workflow)
+			}
+			errs <- err
+		}(name)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("NewRun failed: %v", err)
+		}
+	}
+
+	requests := model.Requests()
+	if len(requests) != 2 {
+		t.Fatalf("requests = %d, want 2", len(requests))
+	}
+	names := map[string]bool{}
+	for _, request := range requests {
+		if len(request.Tools) != 1 {
+			t.Fatalf("request tools = %#v", request.Tools)
+		}
+		names[request.Tools[0].Name] = true
+	}
+	if !names["first"] || !names["second"] {
+		t.Fatalf("request tool names = %#v", names)
+	}
+}
+
+type namedTool struct{ name string }
+
+func (t namedTool) Name() string        { return t.name }
+func (t namedTool) Description() string { return "test tool" }
+func (t namedTool) Params() ai.ToolParameters {
+	return ai.ToolParameters{}
+}
+func (t namedTool) Function(context.Context, *ai.ToolCall) *loop.ToolResponse {
+	return loop.NewToolSuccess("ok")
+}
+
+type recordingTool struct {
+	name  string
+	calls int
+}
+
+func (t *recordingTool) Name() string        { return t.name }
+func (t *recordingTool) Description() string { return "test tool" }
+func (t *recordingTool) Params() ai.ToolParameters {
+	return ai.ToolParameters{}
+}
+func (t *recordingTool) Function(context.Context, *ai.ToolCall) *loop.ToolResponse {
+	t.calls++
+	return loop.NewToolSuccess("called")
+}
+
 func TestAgentToolsAutomaticallyAddPromptContract(t *testing.T) {
 	t.Parallel()
 
@@ -206,8 +445,9 @@ func TestAgentToolsAutomaticallyAddPromptContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRun failed: %v", err)
 	}
-	if len(builder.ContextSources) != 2 || builder.ContextSources[0].Name() != "tool_definitions" || builder.ContextSources[1].Name() != "application_context" {
-		t.Fatalf("tool definitions were not prepended: %+v", builder.ContextSources)
+	runBuilder := run.Loop.PromptBuilder.(*gaictx.Builder)
+	if len(runBuilder.ContextSources) != 2 || runBuilder.ContextSources[0].Name() != "tool_definitions" || runBuilder.ContextSources[1].Name() != "application_context" {
+		t.Fatalf("tool definitions were not prepended: %+v", runBuilder.ContextSources)
 	}
 	if _, err := run.Loop.PromptBuilder.BuildContext(context.Background()); err != nil {
 		t.Fatalf("BuildContext failed: %v", err)
@@ -282,8 +522,9 @@ func TestAgentNativeToolModelWithoutSupportAddsPromptToolProtocol(t *testing.T) 
 	if err != nil {
 		t.Fatalf("NewRun failed: %v", err)
 	}
-	if len(builder.ContextSources) != 1 || builder.ContextSources[0].Name() != "tool_definitions" {
-		t.Fatalf("disabled native tool model did not add prompt tool protocol: %+v", builder.ContextSources)
+	runBuilder := run.Loop.PromptBuilder.(*gaictx.Builder)
+	if len(runBuilder.ContextSources) != 1 || runBuilder.ContextSources[0].Name() != "tool_definitions" {
+		t.Fatalf("disabled native tool model did not add prompt tool protocol: %+v", runBuilder.ContextSources)
 	}
 	if _, err := run.Loop.PromptBuilder.BuildContext(context.Background()); err != nil {
 		t.Fatalf("BuildContext failed: %v", err)
@@ -326,12 +567,14 @@ func TestAgentModelDescriberControlsPromptToolProtocol(t *testing.T) {
 				},
 			})
 
-			if _, err := assistant.NewRun(context.Background(), textRunInput("use echo")); err != nil {
+			run, err := assistant.NewRun(context.Background(), textRunInput("use echo"))
+			if err != nil {
 				t.Fatalf("NewRun failed: %v", err)
 			}
-			hasPromptProtocol := len(builder.ContextSources) == 1 && builder.ContextSources[0].Name() == "tool_definitions"
+			runBuilder := run.Loop.PromptBuilder.(*gaictx.Builder)
+			hasPromptProtocol := len(runBuilder.ContextSources) == 1 && runBuilder.ContextSources[0].Name() == "tool_definitions"
 			if hasPromptProtocol != tt.wantPromptProtocol {
-				t.Fatalf("prompt protocol = %t, want %t; sources: %+v", hasPromptProtocol, tt.wantPromptProtocol, builder.ContextSources)
+				t.Fatalf("prompt protocol = %t, want %t; sources: %+v", hasPromptProtocol, tt.wantPromptProtocol, runBuilder.ContextSources)
 			}
 		})
 	}
@@ -383,8 +626,9 @@ func TestAgentResolvesToolTransportForPromptAndRequest(t *testing.T) {
 			if len(consumed.errs) != 0 {
 				t.Fatalf("workflow errors: %v", consumed.errs)
 			}
-			if got := len(builder.ContextSources) == 1 && builder.ContextSources[0].Name() == "tool_definitions"; got != tt.wantPromptProtocol {
-				t.Fatalf("prompt protocol = %t, want %t; sources: %+v", got, tt.wantPromptProtocol, builder.ContextSources)
+			runBuilder := workflow.Loop.PromptBuilder.(*gaictx.Builder)
+			if got := len(runBuilder.ContextSources) == 1 && runBuilder.ContextSources[0].Name() == "tool_definitions"; got != tt.wantPromptProtocol {
+				t.Fatalf("prompt protocol = %t, want %t; sources: %+v", got, tt.wantPromptProtocol, runBuilder.ContextSources)
 			}
 			requests := model.Requests()
 			if len(requests) != 1 {
@@ -432,6 +676,255 @@ func TestAgentToolDefinitionOptionsCustomizeAutomaticPromptContract(t *testing.T
 	}
 }
 
+func TestAgentTextTransportRequiresSelectedToolInPrompt(t *testing.T) {
+	t.Parallel()
+
+	builder := gaictx.New(gaictx.Definition{Renderer: &gaictx.SimpleRenderer{}})
+	assistant := agent.New(agent.Definition{
+		Model: disabledNativeToolWorkflowModel{&scriptedWorkflowModel{}},
+		Tools: []loop.Tool{
+			namedTool{name: "search"},
+			namedTool{name: "weather"},
+		},
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return builder, nil
+		},
+	})
+
+	input := textRunInput("find the weather")
+	input.Execution.ToolChoice = &ai.ToolChoice{
+		Mode:  ai.ToolChoiceRequired,
+		Names: []string{"weather"},
+	}
+	run, err := assistant.NewRun(context.Background(), input)
+	if err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	if _, err := run.Loop.PromptBuilder.BuildContext(context.Background()); err != nil {
+		t.Fatalf("BuildContext failed: %v", err)
+	}
+	prompt, err := run.Loop.PromptBuilder.BuildPrompt(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("BuildPrompt failed: %v", err)
+	}
+	if !strings.Contains(prompt, "You must make at least one tool call before producing a normal response.") {
+		t.Fatalf("prompt missing required-tool instruction:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "You may call only these selected tools: weather.") {
+		t.Fatalf("prompt missing selected-tool restriction:\n%s", prompt)
+	}
+}
+
+func TestAgentTextTransportSelectedToolsReplaceExistingPromptToolDefinitions(t *testing.T) {
+	t.Parallel()
+
+	search := namedTool{name: "search"}
+	weather := namedTool{name: "weather"}
+	staleSource, err := tooldefinitions.New(&gaictx.SimpleRenderer{}, []loop.Tool{search, weather}, nil)
+	if err != nil {
+		t.Fatalf("new stale tool source: %v", err)
+	}
+	builder := gaictx.New(gaictx.Definition{
+		Renderer:       &gaictx.SimpleRenderer{},
+		ContextSources: []gaictx.ContextSource{staleSource},
+	})
+	assistant := agent.New(agent.Definition{
+		Model: disabledNativeToolWorkflowModel{&scriptedWorkflowModel{}},
+		Tools: []loop.Tool{search, weather},
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return builder, nil
+		},
+	})
+
+	input := textRunInput("find the weather")
+	input.Execution.ToolChoice = &ai.ToolChoice{
+		Mode:  ai.ToolChoiceRequired,
+		Names: []string{"weather"},
+	}
+	run, err := assistant.NewRun(context.Background(), input)
+	if err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	if _, err := run.Loop.PromptBuilder.BuildContext(context.Background()); err != nil {
+		t.Fatalf("BuildContext failed: %v", err)
+	}
+	prompt, err := run.Loop.PromptBuilder.BuildPrompt(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("BuildPrompt failed: %v", err)
+	}
+	if strings.Contains(prompt, "tool: search") {
+		t.Fatalf("prompt advertised unselected tool:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "tool: weather") {
+		t.Fatalf("prompt omitted selected tool:\n%s", prompt)
+	}
+}
+
+func TestAgentTextTransportDoesNotExecuteUnselectedRequiredTool(t *testing.T) {
+	selected := &recordingTool{name: "weather"}
+	unselected := &recordingTool{name: "search"}
+	model := &scriptedWorkflowModel{scripts: [][]ai.Token{
+		{{
+			Type: ai.TokenTypeToolCall,
+			ToolCall: &ai.ToolCall{
+				ID:   "call-1",
+				Type: "function",
+				Name: "search",
+				Args: []byte(`{}`),
+			},
+		}},
+		{},
+	}}
+	assistant := agent.New(agent.Definition{
+		Model: disabledNativeToolWorkflowModel{model},
+		Tools: []loop.Tool{selected, unselected},
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return gaictx.New(gaictx.Definition{Renderer: &gaictx.SimpleRenderer{}}), nil
+		},
+	})
+	input := textRunInput("use weather")
+	input.Execution.ToolChoice = &ai.ToolChoice{Mode: ai.ToolChoiceRequired, Names: []string{"weather"}}
+
+	workflow, err := assistant.NewRun(context.Background(), input)
+	if err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	consumed := consumeWorkflow(t, workflow)
+	if len(consumed.errs) != 1 || !errors.Is(consumed.errs[0], loop.ErrMaxIterations) {
+		t.Fatalf("workflow errors = %v, want ErrMaxIterations after no selected tool call", consumed.errs)
+	}
+	if unselected.calls != 0 {
+		t.Fatalf("unselected tool was called %d times", unselected.calls)
+	}
+	if selected.calls != 0 {
+		t.Fatalf("selected tool was called %d times", selected.calls)
+	}
+	if len(workflow.Loop.Tools) != 1 || workflow.Loop.Tools[0].Name() != "weather" {
+		t.Fatalf("executable tools = %#v, want only weather", workflow.Loop.Tools)
+	}
+}
+
+func TestAgentTextTransportDoesNotAdvertiseOrExecuteDisabledTools(t *testing.T) {
+	disabled := &recordingTool{name: "search"}
+	model := &scriptedWorkflowModel{scripts: [][]ai.Token{
+		{{
+			Type: ai.TokenTypeToolCall,
+			ToolCall: &ai.ToolCall{
+				ID:   "call-1",
+				Type: "function",
+				Name: "search",
+				Args: []byte(`{}`),
+			},
+		}},
+		{},
+	}}
+	assistant := agent.New(agent.Definition{
+		Model: disabledNativeToolWorkflowModel{model},
+		Tools: []loop.Tool{disabled},
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return gaictx.New(gaictx.Definition{Renderer: &gaictx.SimpleRenderer{}}), nil
+		},
+	})
+	input := textRunInput("do not use tools")
+	input.Execution.ToolChoice = &ai.ToolChoice{Mode: ai.ToolChoiceNone}
+
+	workflow, err := assistant.NewRun(context.Background(), input)
+	if err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	if _, err := workflow.Loop.PromptBuilder.BuildContext(context.Background()); err != nil {
+		t.Fatalf("BuildContext failed: %v", err)
+	}
+	prompt, err := workflow.Loop.PromptBuilder.BuildPrompt(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("BuildPrompt failed: %v", err)
+	}
+	if strings.Contains(prompt, "tool: search") {
+		t.Fatalf("prompt advertised disabled tool:\n%s", prompt)
+	}
+	consumed := consumeWorkflow(t, workflow)
+	if len(consumed.errs) != 0 {
+		t.Fatalf("workflow errors: %v", consumed.errs)
+	}
+	if disabled.calls != 0 {
+		t.Fatalf("disabled tool was called %d times", disabled.calls)
+	}
+	if len(workflow.Loop.Tools) != 0 {
+		t.Fatalf("executable tools = %#v, want none", workflow.Loop.Tools)
+	}
+}
+
+func TestAgentTextTransportRejectsUnsatisfiableRequiredToolChoice(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name   string
+		tools  []loop.Tool
+		choice ai.ToolChoice
+	}{
+		{
+			name:   "no tools",
+			tools:  nil,
+			choice: ai.ToolChoice{Mode: ai.ToolChoiceRequired},
+		},
+		{
+			name:   "selected tool is unavailable",
+			tools:  []loop.Tool{namedTool{name: "search"}},
+			choice: ai.ToolChoice{Mode: ai.ToolChoiceRequired, Names: []string{"weather"}},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			assistant := agent.New(agent.Definition{
+				Model: disabledNativeToolWorkflowModel{&scriptedWorkflowModel{}},
+				Tools: tt.tools,
+				Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+					return gaictx.New(gaictx.Definition{Renderer: &gaictx.SimpleRenderer{}}), nil
+				},
+			})
+			input := textRunInput("use a tool")
+			input.Execution.ToolChoice = &tt.choice
+
+			if _, err := assistant.NewRun(context.Background(), input); err == nil {
+				t.Fatal("NewRun succeeded with an unsatisfiable required tool choice")
+			}
+		})
+	}
+}
+
+func TestAgentRejectsInvalidToolChoiceMode(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name  string
+		model ai.Model
+	}{
+		{
+			name:  "native transport",
+			model: nativeToolWorkflowModel{scriptedWorkflowModel: &scriptedWorkflowModel{}},
+		},
+		{
+			name:  "text transport",
+			model: disabledNativeToolWorkflowModel{&scriptedWorkflowModel{}},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			assistant := agent.New(agent.Definition{
+				Model: tt.model,
+				Tools: []loop.Tool{namedTool{name: "search"}},
+				Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+					return gaictx.New(gaictx.Definition{Renderer: &gaictx.SimpleRenderer{}}), nil
+				},
+			})
+			input := textRunInput("use a tool")
+			input.Execution.ToolChoice = &ai.ToolChoice{Mode: ai.ToolChoiceMode("requred")}
+
+			if _, err := assistant.NewRun(context.Background(), input); err == nil {
+				t.Fatal("NewRun succeeded with an invalid tool choice mode")
+			}
+		})
+	}
+}
+
 func TestAgentDoesNotDuplicateExistingToolDefinitions(t *testing.T) {
 	t.Parallel()
 
@@ -465,6 +958,172 @@ func TestAgentDoesNotDuplicateExistingToolDefinitions(t *testing.T) {
 	}
 	if got := strings.Count(prompt, "tool: echo"); got != 1 {
 		t.Fatalf("tool definitions rendered %d times:\n%s", got, prompt)
+	}
+}
+
+func TestAgentPreservesExistingToolDefinitionsFromLookupOnlyBuilder(t *testing.T) {
+	t.Parallel()
+
+	builder := &hasToolDefinitionsPromptBuilder{unclonablePromptBuilder: &unclonablePromptBuilder{}}
+	assistant := agent.New(agent.Definition{
+		Model: &mocks.MockModel{},
+		Tools: []loop.Tool{loop.NewEchoTool()},
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return builder, nil
+		},
+	})
+
+	if _, err := assistant.NewRun(context.Background(), agent.RunInput{}); err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	if builder.prependedSources != 0 {
+		t.Fatalf("tool definitions were prepended %d times despite an existing source", builder.prependedSources)
+	}
+}
+
+func TestAgentExecutionToolsReplaceExistingPromptToolDefinitions(t *testing.T) {
+	t.Parallel()
+
+	definitionTool := namedTool{name: "definition_tool"}
+	runTool := namedTool{name: "run_tool"}
+	staleSource, err := tooldefinitions.New(&gaictx.SimpleRenderer{}, []loop.Tool{definitionTool}, nil)
+	if err != nil {
+		t.Fatalf("new stale tool source: %v", err)
+	}
+	builder := gaictx.New(gaictx.Definition{
+		Renderer:       &gaictx.SimpleRenderer{},
+		ContextSources: []gaictx.ContextSource{staleSource},
+	})
+	assistant := agent.New(agent.Definition{
+		Model: disabledNativeToolWorkflowModel{&scriptedWorkflowModel{}},
+		Tools: []loop.Tool{definitionTool},
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return builder, nil
+		},
+	})
+
+	input := textRunInput("use the run tool")
+	input.Execution.Tools = []loop.Tool{runTool}
+	run, err := assistant.NewRun(context.Background(), input)
+	if err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	runBuilder := run.Loop.PromptBuilder.(*gaictx.Builder)
+	if len(runBuilder.ContextSources) != 1 || runBuilder.ContextSources[0].Name() != "tool_definitions" {
+		t.Fatalf("context sources = %+v, want one tool-definitions source", runBuilder.ContextSources)
+	}
+	if _, err := run.Loop.PromptBuilder.BuildContext(context.Background()); err != nil {
+		t.Fatalf("BuildContext failed: %v", err)
+	}
+	prompt, err := run.Loop.PromptBuilder.BuildPrompt(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("BuildPrompt failed: %v", err)
+	}
+	if strings.Contains(prompt, "tool: definition_tool") {
+		t.Fatalf("prompt retained definition-level tool:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "tool: run_tool") {
+		t.Fatalf("prompt missing run-level tool:\n%s", prompt)
+	}
+}
+
+func TestAgentExecutionToolOverridesUseRunOwnedPromptBuilders(t *testing.T) {
+	t.Parallel()
+
+	definitionTool := namedTool{name: "definition_tool"}
+	runTool := namedTool{name: "run_tool"}
+	staleSource, err := tooldefinitions.New(&gaictx.SimpleRenderer{}, []loop.Tool{definitionTool}, nil)
+	if err != nil {
+		t.Fatalf("new stale tool source: %v", err)
+	}
+	newBuilder := func() *gaictx.Builder {
+		return gaictx.New(gaictx.Definition{
+			Renderer:       &gaictx.SimpleRenderer{},
+			ContextSources: []gaictx.ContextSource{staleSource},
+		})
+	}
+	assistant := agent.New(agent.Definition{
+		Model: disabledNativeToolWorkflowModel{&scriptedWorkflowModel{}},
+		Tools: []loop.Tool{definitionTool},
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return newBuilder(), nil
+		},
+	})
+
+	firstInput := textRunInput("use the run tool")
+	firstInput.Execution.Tools = []loop.Tool{runTool}
+	first, err := assistant.NewRun(context.Background(), firstInput)
+	if err != nil {
+		t.Fatalf("first NewRun failed: %v", err)
+	}
+
+	secondInput := textRunInput("do not use tools")
+	secondInput.Execution.Tools = []loop.Tool{}
+	second, err := assistant.NewRun(context.Background(), secondInput)
+	if err != nil {
+		t.Fatalf("second NewRun failed: %v", err)
+	}
+
+	for name, run := range map[string]*agent.Workflow{"first": first, "second": second} {
+		if _, err := run.Loop.PromptBuilder.BuildContext(context.Background()); err != nil {
+			t.Fatalf("%s BuildContext failed: %v", name, err)
+		}
+	}
+	firstPrompt, err := first.Loop.PromptBuilder.BuildPrompt(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("first BuildPrompt failed: %v", err)
+	}
+	secondPrompt, err := second.Loop.PromptBuilder.BuildPrompt(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("second BuildPrompt failed: %v", err)
+	}
+	if strings.Contains(firstPrompt, "tool: definition_tool") || !strings.Contains(firstPrompt, "tool: run_tool") {
+		t.Fatalf("first prompt tool definitions = %q", firstPrompt)
+	}
+	if strings.Contains(secondPrompt, "tool: definition_tool") || strings.Contains(secondPrompt, "tool: run_tool") {
+		t.Fatalf("second prompt tool definitions = %q", secondPrompt)
+	}
+}
+
+func TestAgentExecutionEmptyToolsRemoveExistingPromptToolDefinitions(t *testing.T) {
+	t.Parallel()
+
+	definitionTool := namedTool{name: "definition_tool"}
+	staleSource, err := tooldefinitions.New(&gaictx.SimpleRenderer{}, []loop.Tool{definitionTool}, nil)
+	if err != nil {
+		t.Fatalf("new stale tool source: %v", err)
+	}
+	builder := gaictx.New(gaictx.Definition{
+		Renderer:       &gaictx.SimpleRenderer{},
+		ContextSources: []gaictx.ContextSource{staleSource},
+	})
+	assistant := agent.New(agent.Definition{
+		Model: disabledNativeToolWorkflowModel{&scriptedWorkflowModel{}},
+		Tools: []loop.Tool{definitionTool},
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return builder, nil
+		},
+	})
+
+	input := textRunInput("do not use tools")
+	input.Execution.Tools = []loop.Tool{}
+	run, err := assistant.NewRun(context.Background(), input)
+	if err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	runBuilder := run.Loop.PromptBuilder.(*gaictx.Builder)
+	if len(runBuilder.ContextSources) != 0 {
+		t.Fatalf("context sources = %+v, want no tool definitions", runBuilder.ContextSources)
+	}
+	if _, err := run.Loop.PromptBuilder.BuildContext(context.Background()); err != nil {
+		t.Fatalf("BuildContext failed: %v", err)
+	}
+	prompt, err := run.Loop.PromptBuilder.BuildPrompt(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("BuildPrompt failed: %v", err)
+	}
+	if strings.Contains(prompt, "tool: definition_tool") {
+		t.Fatalf("prompt retained definition-level tool:\n%s", prompt)
 	}
 }
 
@@ -530,11 +1189,13 @@ func TestAgentNewRunUsesConfiguredTokenizerOverride(t *testing.T) {
 		},
 	})
 
-	if _, err := assistant.NewRun(context.Background(), agent.RunInput{}); err != nil {
+	run, err := assistant.NewRun(context.Background(), agent.RunInput{})
+	if err != nil {
 		t.Fatalf("NewRun failed: %v", err)
 	}
-	if builder.tokenizer != overrideTokenizer {
-		t.Fatalf("expected configured tokenizer override, got %v", builder.tokenizer)
+	runBuilder := run.Loop.PromptBuilder.(*testPromptBuilder)
+	if runBuilder.tokenizer != overrideTokenizer {
+		t.Fatalf("expected configured tokenizer override, got %v", runBuilder.tokenizer)
 	}
 }
 
@@ -550,11 +1211,13 @@ func TestAgentNewRunFallsBackToModelTokenizer(t *testing.T) {
 		},
 	})
 
-	if _, err := assistant.NewRun(context.Background(), agent.RunInput{}); err != nil {
+	run, err := assistant.NewRun(context.Background(), agent.RunInput{})
+	if err != nil {
 		t.Fatalf("NewRun failed: %v", err)
 	}
-	if builder.tokenizer != modelTokenizer {
-		t.Fatalf("expected model tokenizer fallback, got %v", builder.tokenizer)
+	runBuilder := run.Loop.PromptBuilder.(*testPromptBuilder)
+	if runBuilder.tokenizer != modelTokenizer {
+		t.Fatalf("expected model tokenizer fallback, got %v", runBuilder.tokenizer)
 	}
 }
 

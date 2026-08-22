@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -48,6 +49,8 @@ type Loop struct {
 	Model ai.Model
 	// Tools contains the functions available to the model.
 	Tools []Tool
+	// ToolChoice controls whether and how the model may call Tools.
+	ToolChoice ai.ToolChoice
 	// ToolTransport controls whether Tools are serialized into AIRequest.Tools.
 	// The default is ToolTransportNative; Tools remain executable in either mode.
 	ToolTransport ToolTransportMode
@@ -89,6 +92,29 @@ func (l *Loop) Validate() error {
 	if err := l.ResponseFormat.Validate(); err != nil {
 		return err
 	}
+	if err := l.ToolChoice.Validate(); err != nil {
+		return err
+	}
+	if _, err := ToolDefinitions(l.Tools); err != nil {
+		return err
+	}
+	if l.ToolChoice.Mode == ai.ToolChoiceRequired {
+		if len(l.Tools) == 0 {
+			return ErrRequiredToolNotConfigured
+		}
+		for _, requiredName := range l.ToolChoice.Names {
+			configured := false
+			for _, tool := range l.Tools {
+				if tool != nil && tool.Name() == requiredName {
+					configured = true
+					break
+				}
+			}
+			if !configured {
+				return fmt.Errorf("%w: %q", ErrRequiredToolNotConfigured, requiredName)
+			}
+		}
+	}
 	return nil
 }
 
@@ -113,11 +139,12 @@ type pendingToolCall struct {
 // Conversation state remains in Prompt until a provider-native message path is
 // introduced deliberately; this boundary keeps that future change separate
 // from the current rendered-prompt behavior.
-func renderedPromptRequest(prompt string, maxTokens int, tools []ai.ToolDefinition, responseFormat ai.ResponseFormat, reasoning ai.ReasoningConfig) ai.AIRequest {
+func renderedPromptRequest(prompt string, maxTokens int, tools []ai.ToolDefinition, toolChoice ai.ToolChoice, responseFormat ai.ResponseFormat, reasoning ai.ReasoningConfig) ai.AIRequest {
 	return ai.AIRequest{
 		Prompt:         prompt,
 		MaxTokens:      maxTokens,
 		Tools:          tools,
+		ToolChoice:     toolChoice,
 		ResponseFormat: responseFormat,
 		Reasoning:      reasoning,
 	}
@@ -200,12 +227,19 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 			return
 		}
 
+		executionTools := l.Tools
+		if l.ToolChoice.Mode == ai.ToolChoiceRequired && len(l.ToolChoice.Names) > 0 {
+			// Named tool selection is a run-scoped constraint. Keep advertised
+			// definitions and executable tools in the same effective snapshot.
+			executionTools = toolsNamed(l.Tools, l.ToolChoice.Names)
+		}
+
 		var (
 			toolDefinitions []ai.ToolDefinition
 			err             error
 		)
 		if l.ToolTransport == ToolTransportNative {
-			toolDefinitions, err = ToolDefinitions(l.Tools)
+			toolDefinitions, err = ToolDefinitions(executionTools)
 			if err != nil {
 				if cancelErr := cancellationError(ctx, err); cancelErr != nil {
 					sendLoopCanceled(ctx, events, runState, cancelErr)
@@ -230,18 +264,26 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 			return
 		}
 
+		requiredToolCallSatisfied := l.ToolChoice.Mode != ai.ToolChoiceRequired
+		// Retain the input until an iteration is accepted. A rejected required-tool
+		// response consumes an iteration slot but must not lose conversation input.
+		userMessage := userMessageForIteration(l.PromptBuilder, 0)
 		for i := range l.MaxLoopIterations {
 			iteration := Iteration{Count: i + 1}
-			userMessage := userMessageForIteration(l.PromptBuilder, i)
 			var toolCalls []pendingToolCall
+			var deferredTokens []ai.Token
 			var iterState *loopIterationState
 			var iterationErr error
 			var iterCtx context.Context
 			var cancel context.CancelFunc
+			deferTokens := (l.ToolTransport == ToolTransportText && (!requiredToolCallSatisfied ||
+				(l.ToolChoice.Mode == ai.ToolChoiceRequired && len(l.ToolChoice.Names) > 0))) ||
+				(l.ToolTransport == ToolTransportNative && len(l.ToolChoice.Names) > 0)
 
 			for attempt := 1; ; attempt++ {
 				attemptIteration := Iteration{Count: iteration.Count, UserMessage: userMessage}
 				toolCalls = nil
+				deferredTokens = nil
 
 				iterCtx, iterState = runState.startIteration(ctx, iteration.Count, attempt)
 				iterCtx, cancel = context.WithCancel(iterCtx)
@@ -287,7 +329,20 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 					return
 				}
 
-				request := renderedPromptRequest(prompt, l.MaxTokens, toolDefinitions, l.ResponseFormat, l.Reasoning)
+				toolChoice := l.ToolChoice
+				if l.ToolChoice.Mode == ai.ToolChoiceRequired && requiredToolCallSatisfied {
+					toolChoice = ai.ToolChoice{Mode: ai.ToolChoiceAuto}
+				}
+				if l.ToolTransport == ToolTransportText {
+					// Text transport exposes tools through the rendered prompt, not
+					// AIRequest.Tools. Provider-native tool choice is therefore invalid.
+					toolChoice = ai.ToolChoice{}
+				} else if len(toolDefinitions) == 0 {
+					// A neutral choice cannot affect a request with no provider-native
+					// tools, and AIRequest rejects that redundant combination.
+					toolChoice = ai.ToolChoice{}
+				}
+				request := renderedPromptRequest(prompt, l.MaxTokens, toolDefinitions, toolChoice, l.ResponseFormat, l.Reasoning)
 				request.Messages = nativeMessages
 
 				modelCtx := iterCtx
@@ -345,6 +400,11 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 						return
 					}
 
+					if t.Type == ai.TokenTypeToolCall && l.ToolChoice.Mode == ai.ToolChoiceNone {
+						// A provider can still emit a tool-call token after tools are
+						// disabled. Do not expose or retain a disabled call.
+						continue
+					}
 					if t.Type == ai.TokenTypeToolCall && t.ToolCall != nil {
 						attemptIteration.AppendToken(t)
 
@@ -357,6 +417,10 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 						})
 					} else {
 						attemptIteration.AppendToken(t)
+					}
+					if deferTokens {
+						deferredTokens = append(deferredTokens, t)
+						continue
 					}
 					runState.recordToken(t)
 					iterState.recordToken(t)
@@ -442,7 +506,41 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 				iterState.finish(nil)
 			}
 
-			if err := l.executeToolCalls(iterCtx, &iteration, toolCalls, events, iteration.Count, iterState.attemptID(), runState.retryCount); err != nil {
+			if deferTokens && (!requiredToolCallSatisfied || len(toolCalls) > 0) &&
+				!hasPermittedToolCall(toolCalls, l.Tools, l.ToolChoice.Names) {
+				// A text-transport response that does not satisfy a required tool
+				// call is not part of the conversation and must not be observable.
+				cancel()
+				if err := sendEvent(ctx, events, DiscardEvent(iteration.Count, iterState.attemptID(), runState.retryCount, iteration)); err != nil {
+					iterState.finish(nil)
+					return
+				}
+				runState.resetRetries()
+				iterState.finish(iterationErr)
+				continue
+			}
+			if l.ToolChoice.Mode == ai.ToolChoiceNone {
+				// Providers and text protocols can still emit a tool-call token even
+				// when tools are disabled. Never dispatch such a call.
+				toolCalls = nil
+			}
+			for _, token := range deferredTokens {
+				runState.recordToken(token)
+				iterState.recordToken(token)
+				if err := sendEvent(ctx, events, TokenEvent(iteration.Count, iterState.attemptID(), runState.retryCount, token)); err != nil {
+					if cancelErr := cancellationError(iterCtx, err); cancelErr != nil {
+						sendAttemptCanceled(ctx, events, runState, iteration.Count, iterState.attemptID(), runState.retryCount, &iteration, cancelErr)
+						iterState.markCanceled(cancelErr)
+					} else {
+						sendAttemptError(ctx, events, runState, iteration.Count, iterState.attemptID(), runState.retryCount, &iteration, err)
+					}
+					cancel()
+					iterState.finish(nil)
+					return
+				}
+			}
+
+			if err := l.executeToolCalls(iterCtx, &iteration, toolCalls, executionTools, events, iteration.Count, iterState.attemptID(), runState.retryCount); err != nil {
 				if cancelErr := cancellationError(iterCtx, err); cancelErr != nil {
 					sendAttemptCanceled(ctx, events, runState, iteration.Count, iterState.attemptID(), runState.retryCount, &iteration, cancelErr)
 					cancel()
@@ -481,7 +579,18 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 				return
 			}
 			l.Iterations = append(l.Iterations, iteration)
+			userMessage = nil
+			if hasPermittedToolCall(toolCalls, l.Tools, l.ToolChoice.Names) {
+				requiredToolCallSatisfied = true
+			}
 			runState.resetRetries()
+			if l.ToolTransport == ToolTransportText && len(toolCalls) == 0 && !requiredToolCallSatisfied {
+				// Text transport cannot rely on provider enforcement. Keep the
+				// run active until the required tool call has been observed.
+				cancel()
+				iterState.finish(iterationErr)
+				continue
+			}
 			if len(toolCalls) == 0 {
 				cancel()
 				iterState.markFinal()
@@ -518,10 +627,47 @@ func userMessageForIteration(promptBuilder gaictx.PromptBuilder, index int) *gai
 	return &gaictx.Message{Role: gaictx.RoleUser, Content: input.User}
 }
 
+// hasPermittedToolCall reports whether the model requested at least one valid
+// configured tool allowed by the required tool choice, with no rejected calls.
+// Calls for unavailable, malformed, or unselected tools reject the response.
+func hasPermittedToolCall(toolCalls []pendingToolCall, tools []Tool, allowedNames []string) bool {
+	hasPermittedCall := false
+	for _, toolCall := range toolCalls {
+		if err := toolCall.call.Validate(); err != nil {
+			return false
+		}
+		if len(allowedNames) > 0 && !slices.Contains(allowedNames, toolCall.call.Name) {
+			return false
+		}
+		configured := false
+		for _, tool := range tools {
+			if tool != nil && tool.Name() == toolCall.call.Name {
+				configured = true
+				break
+			}
+		}
+		if !configured {
+			return false
+		}
+		hasPermittedCall = true
+	}
+	return hasPermittedCall
+}
+
+func toolsNamed(tools []Tool, names []string) []Tool {
+	selected := make([]Tool, 0, len(names))
+	for _, tool := range tools {
+		if tool != nil && slices.Contains(names, tool.Name()) {
+			selected = append(selected, tool)
+		}
+	}
+	return selected
+}
+
 // executeToolCalls records tool responses on iteration. Tool execution
 // failures are stored in ToolResponse.Err and are not returned. Only framework
 // or tool-response processing failures are returned.
-func (l *Loop) executeToolCalls(ctx context.Context, iteration *Iteration, toolCalls []pendingToolCall, events chan<- Event, iterationCount, attemptID, retryCount int) error {
+func (l *Loop) executeToolCalls(ctx context.Context, iteration *Iteration, toolCalls []pendingToolCall, tools []Tool, events chan<- Event, iterationCount, attemptID, retryCount int) error {
 	var wg sync.WaitGroup
 	var toolErr error
 	var toolErrMu sync.Mutex
@@ -537,7 +683,7 @@ func (l *Loop) executeToolCalls(ctx context.Context, iteration *Iteration, toolC
 			defer wg.Done()
 
 			started := time.Now()
-			toolRes := callObservedTool(ctx, tc.call, l.Tools)
+			toolRes := callObservedTool(ctx, tc.call, tools)
 			duration := time.Since(started)
 			iteration.Parts[tc.partIndex].ToolResp = toolRes
 			if l.ToolResponseProcessor != nil {

@@ -9,6 +9,8 @@ var (
 	ErrModelNotConfigured = errors.New("model is not configured")
 	// ErrPromptNotConfigured indicates that a Loop has no prompt builder.
 	ErrPromptNotConfigured = errors.New("prompt builder is not configured")
+	// ErrRequiredToolNotConfigured indicates that a required named tool is absent from Loop.Tools.
+	ErrRequiredToolNotConfigured = errors.New("required tool is not configured")
 	// ErrToolReqValidation indicates that a tool request failed validation.
 	ErrToolReqValidation = errors.New("invalid tool call")
 	// ErrToolCallMalformed indicates malformed tool-call arguments.

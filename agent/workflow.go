@@ -240,6 +240,18 @@ func loopEventsToStream(ctx context.Context, events <-chan loop.Event) Stream {
 					status.Iteration = *event.Iteration
 				}
 				send(ctx, statuses, status)
+			case loop.EventDiscard:
+				status := loop.IterationInformation{
+					IterationCount:   event.IterationCount,
+					AttemptID:        event.AttemptID,
+					RetryCount:       event.RetryCount,
+					PartCount:        event.PartCount,
+					DiscardIteration: true,
+				}
+				if event.Iteration != nil {
+					status.Iteration = *event.Iteration
+				}
+				send(ctx, statuses, status)
 			case loop.EventIterationDone:
 				status := loop.IterationInformation{
 					IterationCount: event.IterationCount,
@@ -361,6 +373,7 @@ func (w *Workflow) captureEvents(ctx context.Context, upstream <-chan loop.Event
 		var errs []error
 		var canceled bool
 		var cancellationErr error
+		var billedUsage ai.Usage
 		for event := range upstream {
 			switch event.Type {
 			case loop.EventToken:
@@ -368,12 +381,22 @@ func (w *Workflow) captureEvents(ctx context.Context, upstream <-chan loop.Event
 					tokens = append(tokens, *event.Token)
 				}
 			case loop.EventError:
+				if event.Iteration != nil {
+					billedUsage.Add(event.Iteration.Usage)
+				}
 				if event.Err != nil {
 					errs = append(errs, event.Err)
 				}
 			case loop.EventCanceled:
+				if event.Iteration != nil {
+					billedUsage.Add(event.Iteration.Usage)
+				}
 				canceled = true
 				cancellationErr = event.Err
+			case loop.EventRetry, loop.EventDiscard, loop.EventIterationDone:
+				if event.Iteration != nil {
+					billedUsage.Add(event.Iteration.Usage)
+				}
 			}
 			events <- event
 		}
@@ -384,6 +407,8 @@ func (w *Workflow) captureEvents(ctx context.Context, upstream <-chan loop.Event
 			Reasoning:       tokenReasoning(tokens),
 			Messages:        cloneMessages(w.Loop.Messages()),
 			Iterations:      cloneIterations(w.Loop.Iterations),
+			Usage:           iterationUsage(w.Loop.Iterations),
+			BilledUsage:     billedUsage,
 			Errors:          append([]error(nil), errs...),
 			Canceled:        canceled,
 			CancellationErr: cancellationErr,
@@ -393,6 +418,8 @@ func (w *Workflow) captureEvents(ctx context.Context, upstream <-chan loop.Event
 		w.result.Tokens = cloneTokens(tokens)
 		w.result.Text = primary.Text
 		w.result.Reasoning = primary.Reasoning
+		w.result.Usage = primary.Usage
+		w.result.BilledUsage = primary.BilledUsage
 		w.result.Errors = append([]error(nil), errs...)
 		w.result.Canceled = canceled
 		w.result.CancellationErr = cancellationErr
@@ -610,6 +637,15 @@ func cloneRunInput(input RunInput) RunInput {
 	}
 	cloned.Prompt = input.Prompt.Clone()
 	cloned.ResponseFormat = cloneResponseFormat(input.ResponseFormat)
+	cloned.Execution.Tools = cloneTools(input.Execution.Tools)
+	if input.Execution.ToolChoice != nil {
+		choice := cloneToolChoice(*input.Execution.ToolChoice)
+		cloned.Execution.ToolChoice = &choice
+	}
+	if input.Execution.Reasoning != nil {
+		reasoning := *input.Execution.Reasoning
+		cloned.Execution.Reasoning = &reasoning
+	}
 	if input.Meta != nil {
 		cloned.Meta = make(map[string]any, len(input.Meta))
 		for key, value := range input.Meta {

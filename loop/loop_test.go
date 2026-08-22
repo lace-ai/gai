@@ -61,6 +61,10 @@ type deadlineRecordingTool struct {
 	hasDeadline atomic.Bool
 }
 
+type countingTool struct {
+	calls atomic.Int32
+}
+
 type failingToolResponseProcessor struct {
 	err error
 }
@@ -119,6 +123,14 @@ func (t *deadlineRecordingTool) Params() ai.ToolParameters {
 func (t *deadlineRecordingTool) Function(ctx context.Context, _ *ai.ToolCall) *loop.ToolResponse {
 	_, hasDeadline := ctx.Deadline()
 	t.hasDeadline.Store(hasDeadline)
+	return loop.NewToolSuccess("ok")
+}
+
+func (t *countingTool) Name() string              { return "count" }
+func (t *countingTool) Description() string       { return "Counts invocations." }
+func (t *countingTool) Params() ai.ToolParameters { return loop.NewEchoTool().Params() }
+func (t *countingTool) Function(context.Context, *ai.ToolCall) *loop.ToolResponse {
+	t.calls.Add(1)
 	return loop.NewToolSuccess("ok")
 }
 
@@ -418,6 +430,389 @@ func TestLoopPropagatesReasoningToModelRequests(t *testing.T) {
 				t.Fatalf("expected reasoning %+v, got %+v", reasoning, requests[0].Reasoning)
 			}
 		})
+	}
+}
+
+func TestLoopValidateRejectsMissingNamedRequiredTool(t *testing.T) {
+	t.Parallel()
+
+	l := loop.New(&scriptedStreamModel{}, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
+	l.ToolChoice = ai.ToolChoice{Mode: ai.ToolChoiceRequired, Names: []string{"missing"}}
+
+	err := l.Validate()
+	if !errors.Is(err, loop.ErrRequiredToolNotConfigured) {
+		t.Fatalf("Validate() error = %v, want ErrRequiredToolNotConfigured", err)
+	}
+}
+
+func TestLoopValidateRejectsRequiredToolChoiceWithoutTools(t *testing.T) {
+	t.Parallel()
+
+	l := loop.New(&scriptedStreamModel{}, nil, testPromptBuilder(), nil)
+	l.ToolChoice = ai.ToolChoice{Mode: ai.ToolChoiceRequired}
+
+	err := l.Validate()
+	if !errors.Is(err, loop.ErrRequiredToolNotConfigured) {
+		t.Fatalf("Validate() error = %v, want ErrRequiredToolNotConfigured", err)
+	}
+}
+
+func TestLoopValidateRejectsInvalidToolChoiceMode(t *testing.T) {
+	t.Parallel()
+
+	l := loop.New(&scriptedStreamModel{}, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
+	l.ToolChoice = ai.ToolChoice{Mode: ai.ToolChoiceMode("requred")}
+
+	if err := l.Validate(); err == nil {
+		t.Fatal("Validate() succeeded with an invalid tool choice mode")
+	}
+}
+
+func TestLoopValidateTextTransportRejectsInvalidToolDefinitions(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		tools []loop.Tool
+	}{
+		{
+			name:  "non-canonical name",
+			tools: []loop.Tool{namedTestTool{name: " search "}},
+		},
+		{
+			name: "duplicate names",
+			tools: []loop.Tool{
+				namedTestTool{name: "search"},
+				namedTestTool{name: "search"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := loop.New(&scriptedStreamModel{}, tt.tools, testPromptBuilder(), nil)
+			l.ToolTransport = loop.ToolTransportText
+
+			if err := l.Validate(); !errors.Is(err, ai.ErrInvalidToolDefinition) {
+				t.Fatalf("Validate() error = %v, want ErrInvalidToolDefinition", err)
+			}
+		})
+	}
+}
+
+func TestLoopDowngradesRequiredToolChoiceAfterToolCall(t *testing.T) {
+	t.Parallel()
+
+	model := &scriptedStreamModel{sequences: [][]ai.Token{
+		{{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-1", Type: "function", Name: "echo", Args: json.RawMessage(`{"text":"payload"}`)}}},
+		{{Type: ai.TokenTypeText, Text: "done"}},
+	}}
+	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
+	l.ToolChoice = ai.ToolChoice{Mode: ai.ToolChoiceRequired}
+
+	if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+	requests := model.Requests()
+	if len(requests) != 2 {
+		t.Fatalf("requests = %d, want 2", len(requests))
+	}
+	if requests[0].ToolChoice.Mode != ai.ToolChoiceRequired {
+		t.Fatalf("first tool choice = %#v, want required", requests[0].ToolChoice)
+	}
+	if requests[1].ToolChoice.Mode != ai.ToolChoiceAuto {
+		t.Fatalf("second tool choice = %#v, want auto after the required call", requests[1].ToolChoice)
+	}
+}
+
+func TestLoopNativeTransportDoesNotExecuteDifferentConfiguredToolOutsideNamedRequiredChoice(t *testing.T) {
+	t.Parallel()
+
+	unselected := &countingTool{}
+	model := &scriptedStreamModel{sequences: [][]ai.Token{
+		{{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-count-before", Type: "function", Name: "count", Args: json.RawMessage(`{"text":"unselected before"}`)}}},
+		{{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-echo", Type: "function", Name: "echo", Args: json.RawMessage(`{"text":"selected"}`)}}},
+		{{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-count-after", Type: "function", Name: "count", Args: json.RawMessage(`{"text":"unselected after"}`)}}},
+		{{Type: ai.TokenTypeText, Text: "done"}},
+	}}
+	l := loop.New(model, []loop.Tool{loop.NewEchoTool(), unselected}, testPromptBuilder(), nil)
+	l.ToolChoice = ai.ToolChoice{Mode: ai.ToolChoiceRequired, Names: []string{"echo"}}
+
+	events := collectLoopEvents(t, l, context.Background())
+	if err := loopError(events); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+	if calls := unselected.calls.Load(); calls != 0 {
+		t.Fatalf("unselected tool calls = %d, want 0", calls)
+	}
+	requests := model.Requests()
+	if len(requests) != 4 {
+		t.Fatalf("requests = %d, want 4", len(requests))
+	}
+	if requests[0].ToolChoice.Mode != ai.ToolChoiceRequired || requests[1].ToolChoice.Mode != ai.ToolChoiceRequired || requests[2].ToolChoice.Mode != ai.ToolChoiceAuto || requests[3].ToolChoice.Mode != ai.ToolChoiceAuto {
+		t.Fatalf("tool choices = %#v, %#v, %#v, %#v; want required, required, auto, auto", requests[0].ToolChoice, requests[1].ToolChoice, requests[2].ToolChoice, requests[3].ToolChoice)
+	}
+	for i, request := range requests {
+		if len(request.Tools) != 1 || request.Tools[0].Name != "echo" {
+			t.Fatalf("request %d tools = %#v, want only echo", i, request.Tools)
+		}
+	}
+	for _, event := range events {
+		if event.IterationCount == 1 && (event.Type == loop.EventToken || event.Type == loop.EventIterationDone) {
+			t.Fatalf("unselected native tool call must not be observable, got %#v", event)
+		}
+	}
+}
+
+func TestLoopTextTransportDoesNotFinishBeforeRequiredToolCall(t *testing.T) {
+	t.Parallel()
+
+	model := &scriptedStreamModel{sequences: [][]ai.Token{
+		{{Type: ai.TokenTypeText, Text: "I will answer without a tool."}},
+		{{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-1", Type: "function", Name: "echo", Args: json.RawMessage(`{"text":"payload"}`)}}},
+		{{Type: ai.TokenTypeText, Text: "done"}},
+	}}
+	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
+	l.ToolTransport = loop.ToolTransportText
+	l.ToolChoice = ai.ToolChoice{Mode: ai.ToolChoiceRequired}
+
+	events := collectLoopEvents(t, l, context.Background())
+	if err := loopError(events); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+	requests := model.Requests()
+	if len(requests) != 3 {
+		t.Fatalf("requests = %d, want 3", len(requests))
+	}
+	for i, request := range requests {
+		if len(request.Tools) != 0 || request.ToolChoice.Mode != "" {
+			t.Fatalf("text request %d must not use provider-native tools or tool choice: %#v", i, request)
+		}
+	}
+	if strings.Contains(requests[1].Prompt, "I will answer without a tool.") {
+		t.Fatalf("second prompt must not include the rejected response: %q", requests[1].Prompt)
+	}
+	for _, event := range events {
+		if event.IterationCount == 1 && (event.Type == loop.EventToken || event.Type == loop.EventIterationDone) {
+			t.Fatalf("rejected iteration must not be observable, got %#v", event)
+		}
+	}
+	if len(l.Iterations) != 2 {
+		t.Fatalf("persisted iterations = %d, want only accepted iterations", len(l.Iterations))
+	}
+	if l.Iterations[0].UserMessage == nil {
+		t.Fatal("first accepted iteration must retain the original user message")
+	}
+	messages := l.Messages()
+	if len(messages) == 0 || messages[0].Role != gaictx.RoleUser || messages[0].Content.String() != "Initial prompt" {
+		t.Fatalf("messages must begin with the original user request, got %#v", messages)
+	}
+}
+
+func TestLoopTextTransportDoesNotExecuteToolWhenChoiceIsNone(t *testing.T) {
+	t.Parallel()
+
+	tool := &countingTool{}
+	model := &scriptedStreamModel{sequences: [][]ai.Token{{
+		{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-1", Type: "function", Name: "count", Args: json.RawMessage(`{"text":"payload"}`)}},
+	}}}
+	l := loop.New(model, []loop.Tool{tool}, testPromptBuilder(), nil)
+	l.ToolTransport = loop.ToolTransportText
+	l.ToolChoice = ai.ToolChoice{Mode: ai.ToolChoiceNone}
+
+	events := collectLoopEvents(t, l, context.Background())
+	if err := loopError(events); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+	if calls := tool.calls.Load(); calls != 0 {
+		t.Fatalf("disabled tool calls = %d, want 0", calls)
+	}
+	for _, event := range events {
+		if event.Type == loop.EventToken && event.Token.Type == ai.TokenTypeToolCall {
+			t.Fatalf("disabled tool call must not be observable, got %#v", event)
+		}
+	}
+	for _, iteration := range l.Iterations {
+		for _, part := range iteration.Parts {
+			if part.ToolReq != nil {
+				t.Fatalf("disabled tool call must not be retained, got %#v", part.ToolReq)
+			}
+		}
+	}
+}
+
+func TestLoopTextTransportRejectedResponseResetsRetryBudget(t *testing.T) {
+	t.Parallel()
+
+	model := &scriptedStreamModel{sequences: [][]ai.Token{
+		{{Err: &ai.ProviderError{Kind: ai.ProviderErrorTransient, Err: errors.New("temporary before rejected response")}}},
+		{{Type: ai.TokenTypeText, Text: "I will answer without a tool."}},
+		{{Err: &ai.ProviderError{Kind: ai.ProviderErrorTransient, Err: errors.New("temporary after rejected response")}}},
+		{{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-1", Type: "function", Name: "echo", Args: json.RawMessage(`{"text":"payload"}`)}}},
+		{{Type: ai.TokenTypeText, Text: "done"}},
+	}}
+	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
+	l.ToolTransport = loop.ToolTransportText
+	l.ToolChoice = ai.ToolChoice{Mode: ai.ToolChoiceRequired}
+	l.RetryPolicy = &loop.RetryPolicy{MaxRetries: 1}
+
+	events := collectLoopEvents(t, l, context.Background())
+	if err := loopError(events); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+	if got := len(model.Requests()); got != 5 {
+		t.Fatalf("requests = %d, want 5", got)
+	}
+}
+
+func TestLoopTextTransportDoesNotSatisfyRequiredToolChoiceWithUnknownTool(t *testing.T) {
+	t.Parallel()
+
+	model := &scriptedStreamModel{sequences: [][]ai.Token{
+		{{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-1", Type: "function", Name: "missing", Args: json.RawMessage(`{"text":"payload"}`)}}},
+		{{Type: ai.TokenTypeText, Text: "done"}},
+	}}
+	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
+	l.ToolTransport = loop.ToolTransportText
+	l.ToolChoice = ai.ToolChoice{Mode: ai.ToolChoiceRequired}
+	l.MaxLoopIterations = 2
+
+	events := collectLoopEvents(t, l, context.Background())
+	if err := loopError(events); !errors.Is(err, loop.ErrMaxIterations) {
+		t.Fatalf("loop error = %v, want ErrMaxIterations after no permitted tool call", err)
+	}
+	if len(model.Requests()) != 2 {
+		t.Fatalf("requests = %d, want 2", len(model.Requests()))
+	}
+	for _, event := range events {
+		if event.Type == loop.EventDone {
+			t.Fatalf("run must not finish after an unavailable tool call")
+		}
+	}
+}
+
+func TestLoopTextTransportDoesNotSatisfyNamedRequiredToolChoiceWithDifferentConfiguredTool(t *testing.T) {
+	t.Parallel()
+
+	model := &scriptedStreamModel{sequences: [][]ai.Token{
+		{{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-echo", Type: "function", Name: "echo", Args: json.RawMessage(`{"text":"payload"}`)}}},
+		{{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-failure", Type: "function", Name: "failure", Args: json.RawMessage(`{"text":"payload"}`)}}},
+		{{Type: ai.TokenTypeText, Text: "done"}},
+	}}
+	l := loop.New(model, []loop.Tool{loop.NewEchoTool(), sentinelErrorTool{}}, testPromptBuilder(), nil)
+	l.ToolTransport = loop.ToolTransportText
+	l.ToolChoice = ai.ToolChoice{Mode: ai.ToolChoiceRequired, Names: []string{"failure"}}
+
+	events := collectLoopEvents(t, l, context.Background())
+	if err := loopError(events); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+	if got := len(model.Requests()); got != 3 {
+		t.Fatalf("requests = %d, want 3", got)
+	}
+	for _, event := range events {
+		if event.IterationCount == 1 && (event.Type == loop.EventToken || event.Type == loop.EventIterationDone) {
+			t.Fatalf("mismatched required tool call must not be observable, got %#v", event)
+		}
+	}
+}
+
+func TestLoopTextTransportDiscardsMixedRequiredToolResponse(t *testing.T) {
+	t.Parallel()
+
+	unselected := &countingTool{}
+	model := &scriptedStreamModel{sequences: [][]ai.Token{
+		{
+			{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-echo-1", Type: "function", Name: "echo", Args: json.RawMessage(`{"text":"selected"}`)}},
+			{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-count", Type: "function", Name: "count", Args: json.RawMessage(`{"text":"unselected"}`)}},
+		},
+		{{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-echo-2", Type: "function", Name: "echo", Args: json.RawMessage(`{"text":"selected"}`)}}},
+		{{Type: ai.TokenTypeText, Text: "done"}},
+	}}
+	l := loop.New(model, []loop.Tool{loop.NewEchoTool(), unselected}, testPromptBuilder(), nil)
+	l.ToolTransport = loop.ToolTransportText
+	l.ToolChoice = ai.ToolChoice{Mode: ai.ToolChoiceRequired, Names: []string{"echo"}}
+
+	events := collectLoopEvents(t, l, context.Background())
+	if err := loopError(events); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+	if calls := unselected.calls.Load(); calls != 0 {
+		t.Fatalf("unselected tool calls = %d, want 0", calls)
+	}
+	if requests := len(model.Requests()); requests != 3 {
+		t.Fatalf("requests = %d, want 3 after discarding the mixed response", requests)
+	}
+	for _, event := range events {
+		if event.IterationCount == 1 && (event.Type == loop.EventToken || event.Type == loop.EventIterationDone) {
+			t.Fatalf("mixed response must not be observable, got %#v", event)
+		}
+	}
+}
+
+func TestLoopTextTransportRetainsNamedToolRestrictionAfterRequirementIsSatisfied(t *testing.T) {
+	t.Parallel()
+
+	unselected := &countingTool{}
+	model := &scriptedStreamModel{sequences: [][]ai.Token{
+		{{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-echo", Type: "function", Name: "echo", Args: json.RawMessage(`{"text":"selected"}`)}}},
+		{{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-count", Type: "function", Name: "count", Args: json.RawMessage(`{"text":"unselected"}`)}}},
+		{{Type: ai.TokenTypeText, Text: "done"}},
+	}}
+	l := loop.New(model, []loop.Tool{loop.NewEchoTool(), unselected}, testPromptBuilder(), nil)
+	l.ToolTransport = loop.ToolTransportText
+	l.ToolChoice = ai.ToolChoice{Mode: ai.ToolChoiceRequired, Names: []string{"echo"}}
+
+	events := collectLoopEvents(t, l, context.Background())
+	if err := loopError(events); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+	if calls := unselected.calls.Load(); calls != 0 {
+		t.Fatalf("unselected tool calls = %d, want 0", calls)
+	}
+	if requests := len(model.Requests()); requests != 3 {
+		t.Fatalf("requests = %d, want 3 after discarding the later unselected call", requests)
+	}
+	for _, event := range events {
+		if event.IterationCount == 2 && (event.Type == loop.EventToken || event.Type == loop.EventIterationDone) {
+			t.Fatalf("later unselected tool call must not be observable, got %#v", event)
+		}
+	}
+}
+
+func TestLoopTextTransportDoesNotExposeMixedResponseWithUnknownTool(t *testing.T) {
+	t.Parallel()
+
+	model := &scriptedStreamModel{sequences: [][]ai.Token{
+		{
+			{Type: ai.TokenTypeText, Text: "I will answer without a tool."},
+			{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-missing", Type: "function", Name: "missing", Args: json.RawMessage(`{"text":"payload"}`)}},
+		},
+		{{Type: ai.TokenTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-echo", Type: "function", Name: "echo", Args: json.RawMessage(`{"text":"payload"}`)}}},
+		{{Type: ai.TokenTypeText, Text: "done"}},
+	}}
+	l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
+	l.ToolTransport = loop.ToolTransportText
+	l.ToolChoice = ai.ToolChoice{Mode: ai.ToolChoiceRequired}
+
+	events := collectLoopEvents(t, l, context.Background())
+	if err := loopError(events); err != nil {
+		t.Fatalf("unexpected loop error: %v", err)
+	}
+	requests := model.Requests()
+	if len(requests) != 3 {
+		t.Fatalf("requests = %d, want 3", len(requests))
+	}
+	if strings.Contains(requests[1].Prompt, "I will answer without a tool.") {
+		t.Fatalf("second prompt must not include the rejected response: %q", requests[1].Prompt)
+	}
+	for _, event := range events {
+		if event.IterationCount == 1 && (event.Type == loop.EventToken || event.Type == loop.EventIterationDone) {
+			t.Fatalf("rejected iteration must not be observable, got %#v", event)
+		}
+	}
+	if len(l.Iterations) != 2 {
+		t.Fatalf("persisted iterations = %d, want only accepted iterations", len(l.Iterations))
 	}
 }
 
@@ -1398,11 +1793,12 @@ func TestLoopFallsBackToBuildPromptEveryIteration(t *testing.T) {
 
 func TestLoopToolTransportControlsProviderToolDefinitions(t *testing.T) {
 	tests := []struct {
-		name      string
-		transport loop.ToolTransportMode
-		wantTools bool
+		name       string
+		transport  loop.ToolTransportMode
+		wantTools  bool
+		wantChoice bool
 	}{
-		{name: "default native transport", wantTools: true},
+		{name: "default native transport", wantTools: true, wantChoice: true},
 		{name: "text transport", transport: loop.ToolTransportText},
 	}
 
@@ -1411,6 +1807,9 @@ func TestLoopToolTransportControlsProviderToolDefinitions(t *testing.T) {
 			model := &scriptedStreamModel{sequences: [][]ai.Token{{{Type: ai.TokenTypeText, Text: "done"}}}}
 			l := loop.New(model, []loop.Tool{loop.NewEchoTool()}, testPromptBuilder(), nil)
 			l.ToolTransport = tt.transport
+			if tt.wantChoice {
+				l.ToolChoice = ai.ToolChoice{Mode: ai.ToolChoiceRequired}
+			}
 
 			if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
 				t.Fatalf("unexpected loop error: %v", err)
@@ -1422,8 +1821,48 @@ func TestLoopToolTransportControlsProviderToolDefinitions(t *testing.T) {
 			if got := len(requests[0].Tools) > 0; got != tt.wantTools {
 				t.Fatalf("request tools = %#v, want present=%t", requests[0].Tools, tt.wantTools)
 			}
+			if got := requests[0].ToolChoice.Mode != ""; got != tt.wantChoice {
+				t.Fatalf("request tool choice = %#v, want present=%t", requests[0].ToolChoice, tt.wantChoice)
+			}
+			if err := requests[0].Validate(); err != nil {
+				t.Fatalf("request must validate: %v", err)
+			}
 			if len(l.Tools) != 1 || l.Tools[0].Name() != "echo" {
 				t.Fatalf("loop lost executable tools: %#v", l.Tools)
+			}
+		})
+	}
+}
+
+func TestLoopNeutralToolChoiceWithoutToolsIsTransportIndependent(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		transport loop.ToolTransportMode
+		choice    ai.ToolChoiceMode
+	}{
+		{name: "native auto", choice: ai.ToolChoiceAuto},
+		{name: "native none", choice: ai.ToolChoiceNone},
+		{name: "text auto", transport: loop.ToolTransportText, choice: ai.ToolChoiceAuto},
+		{name: "text none", transport: loop.ToolTransportText, choice: ai.ToolChoiceNone},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			model := &scriptedStreamModel{sequences: [][]ai.Token{{{Type: ai.TokenTypeText, Text: "done"}}}}
+			l := loop.New(model, nil, testPromptBuilder(), nil)
+			l.ToolTransport = tt.transport
+			l.ToolChoice = ai.ToolChoice{Mode: tt.choice}
+
+			if err := loopError(collectLoopEvents(t, l, context.Background())); err != nil {
+				t.Fatalf("unexpected loop error: %v", err)
+			}
+			requests := model.Requests()
+			if len(requests) != 1 {
+				t.Fatalf("requests = %d, want 1", len(requests))
+			}
+			if err := requests[0].Validate(); err != nil {
+				t.Fatalf("request must validate: %v", err)
+			}
+			if requests[0].ToolChoice.Mode != "" {
+				t.Fatalf("request tool choice = %#v, want empty without tools", requests[0].ToolChoice)
 			}
 		})
 	}

@@ -11,6 +11,17 @@ import (
 	"github.com/lace-ai/gai/loop"
 )
 
+type namedTestTool struct {
+	name string
+}
+
+func (t namedTestTool) Name() string            { return t.name }
+func (namedTestTool) Description() string       { return "A test tool." }
+func (namedTestTool) Params() ai.ToolParameters { return loop.NewEchoTool().Params() }
+func (namedTestTool) Function(context.Context, *ai.ToolCall) *loop.ToolResponse {
+	return loop.NewToolSuccess("ok")
+}
+
 func TestNewToolErrorHandlesNilError(t *testing.T) {
 	t.Parallel()
 
@@ -49,6 +60,15 @@ func TestCallToolRejectsNilTool(t *testing.T) {
 
 	if err := response.ErrorValue(); !errors.Is(err, ai.ErrInvalidToolDefinition) {
 		t.Fatalf("error = %v, want ErrInvalidToolDefinition", err)
+	}
+}
+
+func TestToolDefinitionsRejectNonCanonicalToolName(t *testing.T) {
+	t.Parallel()
+
+	_, err := loop.ToolDefinitions([]loop.Tool{namedTestTool{name: " search "}})
+	if !errors.Is(err, ai.ErrInvalidToolDefinition) {
+		t.Fatalf("ToolDefinitions() error = %v, want ErrInvalidToolDefinition", err)
 	}
 }
 

@@ -149,3 +149,31 @@ func TestResponseFormatValidation(t *testing.T) {
 		t.Fatalf("expected ErrInvalidResponseFormat, got %v", err)
 	}
 }
+
+func TestToolChoiceValidationRejectsNamesWithoutRequiredMode(t *testing.T) {
+	tests := []struct {
+		name   string
+		choice ai.ToolChoice
+	}{
+		{
+			name:   "default auto",
+			choice: ai.ToolChoice{Names: []string{"search"}},
+		},
+		{
+			name:   "explicit auto",
+			choice: ai.ToolChoice{Mode: ai.ToolChoiceAuto, Names: []string{"search"}},
+		},
+		{
+			name:   "none",
+			choice: ai.ToolChoice{Mode: ai.ToolChoiceNone, Names: []string{"search"}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.choice.Validate(); err == nil {
+				t.Fatal("Validate error = nil, want error")
+			}
+		})
+	}
+}

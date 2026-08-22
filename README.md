@@ -234,6 +234,22 @@ support := agent.New(agent.Definition{
 
 The loop sends definitions to the model, executes requested calls, appends tool results to the conversation, and continues until the model commits a normal response or the iteration limit is reached.
 
+For per-run tools, set `RunInput.Execution.Tools`:
+
+- `nil` inherits `Definition.Tools`
+- a non-nil slice replaces them
+- an empty slice disables tools for that run
+
+```go
+workflow, err := support.NewRun(ctx, agent.RunInput{
+  Execution: agent.ExecutionConfig{
+    Tools: []loop.Tool{lookupOrderToolForUser(userID)},
+  },
+})
+```
+
+`Execution.ToolChoice` and `Execution.Reasoning` can also be configured per run.
+
 ## Ordered workflow events
 
 `RunEvents` forwards the loop's event stream without splitting it into unrelated channels:
@@ -290,6 +306,9 @@ The `context` package builds prompts from separate, typed inputs:
 - genuine user content;
 - assistant and tool conversation messages;
 - token budgets and an output reserve.
+
+`Prompt` must return a fresh, run-owned builder for every invocation. The agent
+applies the run input and execution configuration directly to that builder.
 
 Import it with an alias to avoid colliding with the standard library package:
 
@@ -524,4 +543,3 @@ Before making a large API change, open an issue describing the use case and comp
 GAI is available under the [MIT License](LICENSE).
 
 Copyright (c) 2026 Samuel Konrad.
-

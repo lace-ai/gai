@@ -149,6 +149,65 @@ func (b *Builder) PrependContextSource(ctx context.Context, source ContextSource
 	return nil
 }
 
+// ReplaceContextSource replaces all sources named name with source, preserving
+// the position of the first matching source.
+func (b *Builder) ReplaceContextSource(ctx context.Context, name string, source ContextSource) error {
+	name = strings.TrimSpace(name)
+	if b == nil {
+		return ErrPromptBuilderNil
+	}
+	if name == "" || source == nil {
+		return ErrPromptSource
+	}
+	if setter, ok := source.(TokenizerSetter); ok && b.tokenizer != nil {
+		setter.SetTokenizer(b.tokenizer)
+	}
+
+	sources := make([]ContextSource, 0, len(b.ContextSources))
+	replaced := false
+	for _, existing := range b.ContextSources {
+		if existing != nil && existing.Name() == name {
+			if !replaced {
+				sources = append(sources, source)
+				replaced = true
+			}
+			continue
+		}
+		sources = append(sources, existing)
+	}
+	if !replaced {
+		return ErrPromptSource
+	}
+	b.ContextSources = sources
+	return nil
+}
+
+// RemoveContextSource removes all sources named name.
+func (b *Builder) RemoveContextSource(ctx context.Context, name string) error {
+	name = strings.TrimSpace(name)
+	if b == nil {
+		return ErrPromptBuilderNil
+	}
+	if name == "" {
+		return ErrPromptSource
+	}
+
+	sources := make([]ContextSource, 0, len(b.ContextSources))
+	removed := false
+	for _, existing := range b.ContextSources {
+		if existing != nil && existing.Name() == name {
+			removed = true
+			continue
+		}
+		sources = append(sources, existing)
+	}
+	if !removed {
+		return ErrPromptSource
+	}
+	b.ContextSources = sources
+	return nil
+}
+
 func (b *Builder) AppendContextSources(ctx context.Context, sources ...ContextSource) error {
 	for _, source := range sources {
 		if err := b.AppendContextSource(ctx, source); err != nil {

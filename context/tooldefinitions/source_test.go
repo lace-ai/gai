@@ -118,6 +118,58 @@ func TestSourceAllowsCustomUsageProtocol(t *testing.T) {
 	}
 }
 
+func TestSourceRendersRequiredToolChoice(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		choice ai.ToolChoice
+		want   string
+	}{
+		{
+			name:   "auto",
+			choice: ai.ToolChoice{Mode: ai.ToolChoiceAuto},
+		},
+		{
+			name:   "required any tool",
+			choice: ai.ToolChoice{Mode: ai.ToolChoiceRequired},
+			want:   "You must make at least one tool call before producing a normal response.",
+		},
+		{
+			name:   "required named tools",
+			choice: ai.ToolChoice{Mode: ai.ToolChoiceRequired, Names: []string{"search", "weather"}},
+			want:   "You must make at least one tool call before producing a normal response. You may call only these selected tools: search, weather.",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source, err := tooldefinitions.New(&gaictx.SimpleRenderer{}, []loop.Tool{
+				staticTool{name: "search", description: "Searches the web.", params: testParams("query")},
+			}, nil, tooldefinitions.WithToolChoice(tt.choice))
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			part, err := source.Function(context.Background(), 2048)
+			if err != nil {
+				t.Fatalf("Function: %v", err)
+			}
+			rendered, err := (gaictx.SimpleRenderer{}).Render(context.Background(), []gaictx.Part{part})
+			if err != nil {
+				t.Fatalf("Render: %v", err)
+			}
+			if tt.want == "" {
+				if strings.Contains(rendered, "You must make at least one tool call before producing a normal response.") {
+					t.Fatalf("unexpected required-tool instruction:\n%s", rendered)
+				}
+				return
+			}
+			if !strings.Contains(rendered, tt.want) {
+				t.Fatalf("required-tool instruction missing:\n%s", rendered)
+			}
+		})
+	}
+}
+
 func TestSourceErrorHandling(t *testing.T) {
 	tests := []struct {
 		name    string
