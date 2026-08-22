@@ -468,6 +468,38 @@ func TestLoopValidateRejectsInvalidToolChoiceMode(t *testing.T) {
 	}
 }
 
+func TestLoopValidateTextTransportRejectsInvalidToolDefinitions(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		tools []loop.Tool
+	}{
+		{
+			name:  "non-canonical name",
+			tools: []loop.Tool{namedTestTool{name: " search "}},
+		},
+		{
+			name: "duplicate names",
+			tools: []loop.Tool{
+				namedTestTool{name: "search"},
+				namedTestTool{name: "search"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := loop.New(&scriptedStreamModel{}, tt.tools, testPromptBuilder(), nil)
+			l.ToolTransport = loop.ToolTransportText
+
+			if err := l.Validate(); !errors.Is(err, ai.ErrInvalidToolDefinition) {
+				t.Fatalf("Validate() error = %v, want ErrInvalidToolDefinition", err)
+			}
+		})
+	}
+}
+
 func TestLoopDowngradesRequiredToolChoiceAfterToolCall(t *testing.T) {
 	t.Parallel()
 
