@@ -53,6 +53,22 @@ func (*unclonablePromptBuilder) Input() gaictx.PromptInput { return gaictx.Promp
 
 func (*unclonablePromptBuilder) SetInput(gaictx.PromptInput) {}
 
+// hasToolDefinitionsPromptBuilder models a third-party builder that can report
+// its configured tool definitions but cannot replace or remove them.
+type hasToolDefinitionsPromptBuilder struct {
+	*unclonablePromptBuilder
+	prependedSources int
+}
+
+func (b *hasToolDefinitionsPromptBuilder) PrependContextSource(context.Context, gaictx.ContextSource) error {
+	b.prependedSources++
+	return nil
+}
+
+func (*hasToolDefinitionsPromptBuilder) HasContextSource(name string) bool {
+	return name == "tool_definitions"
+}
+
 type testContextSource struct{ name string }
 
 type nativeToolWorkflowModel struct {
@@ -948,6 +964,26 @@ func TestAgentDoesNotDuplicateExistingToolDefinitions(t *testing.T) {
 	}
 	if got := strings.Count(prompt, "tool: echo"); got != 1 {
 		t.Fatalf("tool definitions rendered %d times:\n%s", got, prompt)
+	}
+}
+
+func TestAgentPreservesExistingToolDefinitionsFromLookupOnlyBuilder(t *testing.T) {
+	t.Parallel()
+
+	builder := &hasToolDefinitionsPromptBuilder{unclonablePromptBuilder: &unclonablePromptBuilder{}}
+	assistant := agent.New(agent.Definition{
+		Model: &mocks.MockModel{},
+		Tools: []loop.Tool{loop.NewEchoTool()},
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return builder, nil
+		},
+	})
+
+	if _, err := assistant.NewRun(context.Background(), agent.RunInput{}); err != nil {
+		t.Fatalf("NewRun failed: %v", err)
+	}
+	if builder.prependedSources != 0 {
+		t.Fatalf("tool definitions were prepended %d times despite an existing source", builder.prependedSources)
 	}
 }
 

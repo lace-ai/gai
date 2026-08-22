@@ -189,9 +189,13 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 	}
 	promptBuilder.SetInput(input.Prompt)
 	if !nativeTools {
+		lookup, hasContextSourceLookup := promptBuilder.(contextSourceLookup)
+		hasToolDefinitions := hasContextSourceLookup && lookup.HasContextSource("tool_definitions")
 		manager, hasContextSourceManager := promptBuilder.(contextSourceManager)
-		hasToolDefinitions := hasContextSourceManager && manager.HasContextSource("tool_definitions")
 		if (execution.toolsOverridden || execution.textToolsConfigured) && hasToolDefinitions && len(execution.tools) == 0 {
+			if !hasContextSourceManager {
+				return nil, fmt.Errorf("prompt builder cannot remove existing tool definitions")
+			}
 			if err := manager.RemoveContextSource(ctx, "tool_definitions"); err != nil {
 				return nil, err
 			}
@@ -205,6 +209,9 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 				return nil, err
 			}
 			if hasToolDefinitions {
+				if !hasContextSourceManager {
+					return nil, fmt.Errorf("prompt builder cannot replace existing tool definitions")
+				}
 				if err := manager.ReplaceContextSource(ctx, "tool_definitions", toolSource); err != nil {
 					return nil, err
 				}
@@ -348,11 +355,16 @@ func usesNativeTools(model ai.Model) bool {
 	return ok && native.NativeTools()
 }
 
-// contextSourceManager is the optional agent-internal prompt-builder
-// capability for atomically inspecting and mutating named context sources.
-// Builders that only append or prepend context remain supported.
-type contextSourceManager interface {
+// contextSourceLookup is the optional agent-internal prompt-builder capability
+// for inspecting named context sources.
+type contextSourceLookup interface {
 	HasContextSource(name string) bool
+}
+
+// contextSourceManager is the optional agent-internal prompt-builder capability
+// for mutating named context sources. It is required only when a run changes an
+// existing source.
+type contextSourceManager interface {
 	ReplaceContextSource(ctx context.Context, name string, source gaictx.ContextSource) error
 	RemoveContextSource(ctx context.Context, name string) error
 }
