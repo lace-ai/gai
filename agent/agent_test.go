@@ -24,7 +24,7 @@ type testPromptBuilder struct {
 }
 
 // unclonablePromptBuilder models a fresh third-party builder returned for one
-// run. It intentionally does not implement PromptBuilderCloner.
+// run. It intentionally does not offer a clone operation.
 type unclonablePromptBuilder struct{}
 
 func (*unclonablePromptBuilder) PrependContextSource(context.Context, gaictx.ContextSource) error {

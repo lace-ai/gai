@@ -39,14 +39,6 @@ type PromptBuilder interface {
 	SetInput(input PromptInput)
 }
 
-// PromptBuilderCloner optionally provides an independent copy for a workflow.
-// Agent uses it to isolate per-run prompt configuration when a Prompt callback
-// returns the same builder more than once. Callbacks that return builders
-// without this interface must return an independent builder for each run.
-type PromptBuilderCloner interface {
-	ClonePromptBuilder() PromptBuilder
-}
-
 // NativeMessageBuilder optionally constructs both representations of a model
 // request. PromptBuilder implementations that do not provide it continue to
 // use the rendered prompt as their request input.

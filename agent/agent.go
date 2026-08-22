@@ -188,7 +188,7 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 	if promptBuilder == nil {
 		return nil, loop.ErrPromptNotConfigured
 	}
-	if cloner, ok := promptBuilder.(gaictx.PromptBuilderCloner); ok {
+	if cloner, ok := promptBuilder.(promptBuilderCloner); ok {
 		promptBuilder = cloner.ClonePromptBuilder()
 		if promptBuilder == nil {
 			return nil, loop.ErrPromptNotConfigured
@@ -339,6 +339,12 @@ func usesNativeTools(model ai.Model) bool {
 
 type contextSourceLookup interface {
 	HasContextSource(name string) bool
+}
+
+// promptBuilderCloner is an optional agent-internal capability for callbacks
+// that reuse a prompt builder across runs.
+type promptBuilderCloner interface {
+	ClonePromptBuilder() gaictx.PromptBuilder
 }
 
 func hasContextSource(builder gaictx.PromptBuilder, name string) bool {
