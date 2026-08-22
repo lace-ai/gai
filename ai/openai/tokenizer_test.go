@@ -2,6 +2,7 @@ package openai
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
@@ -87,25 +88,56 @@ func TestTokenizerHonorsCanceledContextWithoutProviderIO(t *testing.T) {
 	}
 }
 
-func TestTokenizerTokenizesRepresentativeToolPayloadDeterministically(t *testing.T) {
+var realisticToolSchemaJSONFixtures = []struct {
+	name string
+	json string
+	want int
+}{
+	{
+		name: "web search with nested filters",
+		json: `{"name":"web_search","description":"Search the public web for current information and return source URLs.","parameters":{"type":"object","additionalProperties":false,"properties":{"query":{"type":"string","description":"Natural-language search query"},"recency_days":{"type":"integer","minimum":1,"maximum":30},"domains":{"type":"array","items":{"type":"string","format":"hostname"}}},"required":["query"]}}`,
+		want: 85,
+	},
+	{
+		name: "calendar event with attendees",
+		json: `{"name":"create_calendar_event","description":"Create a calendar event after the user confirms the proposed time.","parameters":{"type":"object","additionalProperties":false,"properties":{"title":{"type":"string"},"starts_at":{"type":"string","format":"date-time"},"duration_minutes":{"type":"integer","minimum":15,"maximum":480},"attendees":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"email":{"type":"string","format":"email"},"optional":{"type":"boolean"}},"required":["email"]}},"send_updates":{"type":"boolean","default":true}},"required":["title","starts_at"]}}`,
+		want: 133,
+	},
+	{
+		name: "customer lookup with message context",
+		json: `{"messages":[{"role":"system","content":"Use this tool only for authorized support requests."},{"role":"user","content":"Find the subscription for ada@example.com and include the latest invoice status."}],"tool":{"name":"lookup_customer","description":"Retrieve a customer profile and recent invoices by a verified identifier.","parameters":{"type":"object","additionalProperties":false,"properties":{"email":{"type":"string","format":"email"},"include_invoices":{"type":"boolean","default":false},"invoice_limit":{"type":"integer","minimum":1,"maximum":10}},"required":["email"]}}}`,
+		want: 121,
+	},
+}
+
+func TestTokenizerCountsRealisticToolSchemaJSONFixtures(t *testing.T) {
 	tokenizer, err := NewTokenizer(GPT41)
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload := `{"name":"weather","description":"Get weather for München","parameters":{"type":"object","properties":{"city":{"type":"string"}}}}}`
-	first, err := tokenizer.Tokenize(context.Background(), payload)
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := tokenizer.Tokenize(context.Background(), payload)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(first, second) {
-		t.Fatalf("Tokenize() is not deterministic: first=%q second=%q", first, second)
-	}
-	count, err := tokenizer.CountTokens(context.Background(), payload)
-	if err != nil || count != len(first) {
-		t.Fatalf("CountTokens() = %d, %v; want %d, nil", count, err, len(first))
+	for _, fixture := range realisticToolSchemaJSONFixtures {
+		t.Run(fixture.name, func(t *testing.T) {
+			if !json.Valid([]byte(fixture.json)) {
+				t.Fatal("fixture is not valid JSON")
+			}
+			first, err := tokenizer.Tokenize(t.Context(), fixture.json)
+			if err != nil {
+				t.Fatal(err)
+			}
+			second, err := tokenizer.Tokenize(t.Context(), fixture.json)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(first, second) {
+				t.Fatalf("Tokenize() is not deterministic: first=%q second=%q", first, second)
+			}
+			count, err := tokenizer.CountTokens(t.Context(), fixture.json)
+			if err != nil || count != fixture.want {
+				t.Fatalf("CountTokens() = %d, %v; want %d, nil", count, err, fixture.want)
+			}
+			if len(first) != count {
+				t.Fatalf("len(Tokenize()) = %d, want CountTokens result %d", len(first), count)
+			}
+		})
 	}
 }
