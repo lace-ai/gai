@@ -81,7 +81,7 @@ func (t *Tokenizer) Tokenize(ctx context.Context, text string) ([]string, error)
 func openAIEncodingForModel(model string) (tiktoken.Encoding, bool) {
 	model = strings.ToLower(strings.TrimSpace(model))
 	switch model {
-	case "gpt-5", GPT56, GPT56Terra, GPT56Sol, GPT56Luna, GPT41, GPT41Mini, GPT41Nano, GPT4o, GPT4oMini, O3, O3Mini, O4Mini:
+	case "gpt-5", GPT56, GPT56Terra, GPT56Sol, GPT56Luna, GPT41, GPT41Mini, GPT41Nano, GPT4o, GPT4oMini, "o1", O3, O3Mini, O4Mini:
 		return tiktoken.O200kBase, true
 	case "gpt-4":
 		return tiktoken.Cl100kBase, true

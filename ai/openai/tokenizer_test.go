@@ -17,6 +17,7 @@ func TestNewTokenizerResolvesKnownOpenAIModels(t *testing.T) {
 		want   int
 	}{
 		{model: "gpt-5", wantID: "openai.tiktoken-go/v0.8.1:o200k_base", text: "hello", want: 1},
+		{model: "o1", wantID: "openai.tiktoken-go/v0.8.1:o200k_base", text: "hello", want: 1},
 		{model: GPT41, wantID: "openai.tiktoken-go/v0.8.1:o200k_base", text: "hello", want: 1},
 		{model: GPT4oMini, wantID: "openai.tiktoken-go/v0.8.1:o200k_base", text: "hello", want: 1},
 		{model: "gpt-4-0125-preview", wantID: "openai.tiktoken-go/v0.8.1:cl100k_base", text: `{"tool":"weather","city":"München"}`, want: 10},
