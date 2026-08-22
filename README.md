@@ -234,15 +234,11 @@ support := agent.New(agent.Definition{
 
 The loop sends definitions to the model, executes requested calls, appends tool results to the conversation, and continues until the model commits a normal response or the iteration limit is reached.
 
-`Prompt` must return a fresh, run-owned builder for every invocation. The agent
-applies the run input and execution configuration directly to that builder.
+For per-run tools, set `RunInput.Execution.Tools`:
 
-For session- or user-specific tools, set `RunInput.Execution.Tools`. A nil slice
-inherits `Definition.Tools`; a non-nil slice replaces them, and an empty slice
-disables definition-level tools for that run. `NewRun` snapshots the slice's
-membership and order, then uses that same snapshot for prompt definitions,
-provider requests, and execution. Tool implementations must still be safe for
-concurrent use.
+- `nil` inherits `Definition.Tools`
+- a non-nil slice replaces them
+- an empty slice disables tools for that run
 
 ```go
 workflow, err := support.NewRun(ctx, agent.RunInput{
@@ -252,8 +248,7 @@ workflow, err := support.NewRun(ctx, agent.RunInput{
 })
 ```
 
-`Execution.ToolChoice` configures tool choice for a single run.
-`Execution.Reasoning` optionally overrides `Definition.Reasoning` for that run.
+`Execution.ToolChoice` and `Execution.Reasoning` can also be configured per run.
 
 ## Ordered workflow events
 
@@ -311,6 +306,9 @@ The `context` package builds prompts from separate, typed inputs:
 - genuine user content;
 - assistant and tool conversation messages;
 - token budgets and an output reserve.
+
+`Prompt` must return a fresh, run-owned builder for every invocation. The agent
+applies the run input and execution configuration directly to that builder.
 
 Import it with an alias to avoid colliding with the standard library package:
 
