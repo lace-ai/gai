@@ -168,16 +168,9 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 	if a.def.Prompt == nil {
 		return nil, loop.ErrPromptNotConfigured
 	}
-	if input.Execution.ToolChoice != nil {
-		if err := input.Execution.ToolChoice.Validate(); err != nil {
-			return nil, err
-		}
-	}
-	tools := cloneTools(a.def.Tools)
-	if input.Execution.Tools != nil {
-		tools = cloneTools(input.Execution.Tools)
-	}
-	if _, err := loop.ToolDefinitions(tools); err != nil {
+	nativeTools := usesNativeTools(a.def.Model)
+	execution, err := resolveExecution(a.def.Tools, input.Execution, nativeTools)
+	if err != nil {
 		return nil, err
 	}
 
@@ -195,27 +188,19 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 		}
 	}
 	promptBuilder.SetInput(input.Prompt)
-	nativeTools := usesNativeTools(a.def.Model)
-	textToolsDisabled := !nativeTools && input.Execution.ToolChoice != nil && input.Execution.ToolChoice.Mode == ai.ToolChoiceNone
-	if !nativeTools && input.Execution.ToolChoice != nil {
-		if err := validateTextToolChoice(*input.Execution.ToolChoice, tools); err != nil {
-			return nil, err
-		}
-		tools = selectedTextTools(*input.Execution.ToolChoice, tools)
-	}
 	if !nativeTools {
 		manager, hasContextSourceManager := promptBuilder.(contextSourceManager)
 		hasToolDefinitions := hasContextSourceManager && manager.HasContextSource("tool_definitions")
-		if (input.Execution.Tools != nil || textToolsDisabled) && hasToolDefinitions && len(tools) == 0 {
+		if (execution.toolsOverridden || execution.textToolsConfigured) && hasToolDefinitions && len(execution.tools) == 0 {
 			if err := manager.RemoveContextSource(ctx, "tool_definitions"); err != nil {
 				return nil, err
 			}
-		} else if len(tools) > 0 && (!hasToolDefinitions || input.Execution.Tools != nil || (input.Execution.ToolChoice != nil && input.Execution.ToolChoice.Mode == ai.ToolChoiceRequired)) {
+		} else if len(execution.tools) > 0 && (!hasToolDefinitions || execution.toolsOverridden || execution.textToolsConfigured) {
 			toolOptions := append([]tooldefinitions.Option(nil), a.def.ToolDefinitionOptions...)
-			if input.Execution.ToolChoice != nil {
-				toolOptions = append(toolOptions, tooldefinitions.WithToolChoice(*input.Execution.ToolChoice))
+			if execution.hasToolChoice {
+				toolOptions = append(toolOptions, tooldefinitions.WithToolChoice(execution.toolChoice))
 			}
-			toolSource, err := tooldefinitions.New(nil, tools, a.def.DebugSink, toolOptions...)
+			toolSource, err := tooldefinitions.New(nil, execution.tools, a.def.DebugSink, toolOptions...)
 			if err != nil {
 				return nil, err
 			}
@@ -238,7 +223,7 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 		}
 	}
 
-	l := loop.New(a.def.Model, tools, promptBuilder, a.def.ToolResponseProcessor)
+	l := loop.New(a.def.Model, execution.tools, promptBuilder, a.def.ToolResponseProcessor)
 	if !nativeTools {
 		l.ToolTransport = loop.ToolTransportText
 	}
@@ -252,8 +237,8 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 	}
 	l.ResponseFormat = cloneResponseFormat(input.ResponseFormat)
 	l.Reasoning = a.def.Reasoning
-	if input.Execution.ToolChoice != nil {
-		l.ToolChoice = cloneToolChoice(*input.Execution.ToolChoice)
+	if execution.hasToolChoice {
+		l.ToolChoice = execution.toolChoice
 	}
 	if input.Execution.Reasoning != nil {
 		l.Reasoning = *input.Execution.Reasoning
@@ -280,7 +265,63 @@ func cloneToolChoice(choice ai.ToolChoice) ai.ToolChoice {
 	return cloned
 }
 
-func validateTextToolChoice(choice ai.ToolChoice, tools []loop.Tool) error {
+type executionResolution struct {
+	tools               []loop.Tool
+	toolChoice          ai.ToolChoice
+	hasToolChoice       bool
+	toolsOverridden     bool
+	textToolsConfigured bool
+}
+
+// resolveExecution snapshots one run's tools and choice, then resolves the
+// effective text-transport tool set before prompt or loop construction.
+func resolveExecution(definitionTools []loop.Tool, config ExecutionConfig, nativeTools bool) (executionResolution, error) {
+	resolved := executionResolution{
+		tools:           cloneTools(definitionTools),
+		toolsOverridden: config.Tools != nil,
+	}
+	if config.Tools != nil {
+		resolved.tools = cloneTools(config.Tools)
+	}
+	if config.ToolChoice != nil {
+		if err := config.ToolChoice.Validate(); err != nil {
+			return executionResolution{}, err
+		}
+		resolved.toolChoice = cloneToolChoice(*config.ToolChoice)
+		resolved.hasToolChoice = true
+	}
+	if _, err := loop.ToolDefinitions(resolved.tools); err != nil {
+		return executionResolution{}, err
+	}
+	if nativeTools || !resolved.hasToolChoice {
+		return resolved, nil
+	}
+	resolved.textToolsConfigured = resolved.toolChoice.Mode == ai.ToolChoiceNone || resolved.toolChoice.Mode == ai.ToolChoiceRequired
+	if err := validateRequiredTextTools(resolved.toolChoice, resolved.tools); err != nil {
+		return executionResolution{}, err
+	}
+	if resolved.toolChoice.Mode == ai.ToolChoiceNone {
+		resolved.tools = []loop.Tool{}
+		return resolved, nil
+	}
+	if len(resolved.toolChoice.Names) == 0 {
+		return resolved, nil
+	}
+	selected := make(map[string]struct{}, len(resolved.toolChoice.Names))
+	for _, name := range resolved.toolChoice.Names {
+		selected[name] = struct{}{}
+	}
+	filtered := make([]loop.Tool, 0, len(resolved.toolChoice.Names))
+	for _, tool := range resolved.tools {
+		if _, ok := selected[tool.Name()]; ok {
+			filtered = append(filtered, tool)
+		}
+	}
+	resolved.tools = filtered
+	return resolved, nil
+}
+
+func validateRequiredTextTools(choice ai.ToolChoice, tools []loop.Tool) error {
 	if choice.Mode != ai.ToolChoiceRequired {
 		return nil
 	}
@@ -297,26 +338,6 @@ func validateTextToolChoice(choice ai.ToolChoice, tools []loop.Tool) error {
 		}
 	}
 	return nil
-}
-
-func selectedTextTools(choice ai.ToolChoice, tools []loop.Tool) []loop.Tool {
-	if choice.Mode == ai.ToolChoiceNone {
-		return []loop.Tool{}
-	}
-	if choice.Mode != ai.ToolChoiceRequired || len(choice.Names) == 0 {
-		return tools
-	}
-	selected := make(map[string]struct{}, len(choice.Names))
-	for _, name := range choice.Names {
-		selected[name] = struct{}{}
-	}
-	filtered := make([]loop.Tool, 0, len(choice.Names))
-	for _, tool := range tools {
-		if _, ok := selected[tool.Name()]; ok {
-			filtered = append(filtered, tool)
-		}
-	}
-	return filtered
 }
 
 func usesNativeTools(model ai.Model) bool {
