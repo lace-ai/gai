@@ -313,14 +313,6 @@ builder := gaictx.New(gaictx.Definition{
 
 `BuildContext` allocates budget to context sources. `BuildPrompt` then renders the current user input and accumulated conversation for each loop iteration.
 
-### OpenAI local tokenizer
-
-`ai/openai.NewTokenizer(model)` explicitly enables a local, no-network text tokenizer for known OpenAI model families. `Model.Tokenizer()` exposes the same tokenizer only for those known mappings, so existing agent prompt-builder fallback behavior remains unchanged for unknown models. The mapping is deliberately conservative: GPT-5, GPT-4.1, GPT-4o, and o1/o3/o4 use `o200k_base`; GPT-4 uses `cl100k_base`. Model revisions are accepted only under those documented family prefixes. Unknown names return `*openai.TokenizerUnavailableError` (which matches `ai.ErrTokenizerUnsupported`) from the explicit factory and return `nil` from the legacy model method.
-
-The returned ID is versioned, for example `openai.tiktoken-go/v0.8.1:o200k_base`. Counts are exact for the selected text encoding, not for provider request framing, chat messages, tool payload formatting, or billed request usage. This narrow `ai.Tokenizer` adapter is intended to migrate cleanly to the count-only local-counter abstraction planned in #144.
-
-This capability depends on MIT-licensed [`github.com/tiktoken-go/tokenizer` v0.8.1](https://github.com/tiktoken-go/tokenizer), whose embedded vocabularies add roughly 4 MiB upstream before Go linking (and its `regexp2` dependency). A stripped minimal GAI/OpenAI program that calls `Model.Tokenizer()` measured 6,365,449 bytes before this dependency and 18,149,641 bytes after it (+11,784,192 bytes); actual application impact depends on existing reachability and linker settings. The upstream tokenizer does not handle special tokens; do not use these text-only counts as an exact OpenAI request or billing preflight.
-
 ## History and summarization
 
 `context/history` provides a `ContextSource` backed by a `HistoryStore`. It loads persisted state, selects recent turns that fit the available budget, and reuses cached per-turn token counts.
