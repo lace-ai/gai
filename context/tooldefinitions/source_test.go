@@ -118,7 +118,7 @@ func TestSourceAllowsCustomUsageProtocol(t *testing.T) {
 	}
 }
 
-func TestToolChoiceInstruction(t *testing.T) {
+func TestSourceRendersRequiredToolChoice(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -143,8 +143,28 @@ func TestToolChoiceInstruction(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tooldefinitions.ToolChoiceInstruction(tt.choice); got != tt.want {
-				t.Fatalf("ToolChoiceInstruction() = %q, want %q", got, tt.want)
+			source, err := tooldefinitions.New(&gaictx.SimpleRenderer{}, []loop.Tool{
+				staticTool{name: "search", description: "Searches the web.", params: testParams("query")},
+			}, nil, tooldefinitions.WithToolChoice(tt.choice))
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			part, err := source.Function(context.Background(), 2048)
+			if err != nil {
+				t.Fatalf("Function: %v", err)
+			}
+			rendered, err := (gaictx.SimpleRenderer{}).Render(context.Background(), []gaictx.Part{part})
+			if err != nil {
+				t.Fatalf("Render: %v", err)
+			}
+			if tt.want == "" {
+				if strings.Contains(rendered, "You must make at least one tool call before producing a normal response.") {
+					t.Fatalf("unexpected required-tool instruction:\n%s", rendered)
+				}
+				return
+			}
+			if !strings.Contains(rendered, tt.want) {
+				t.Fatalf("required-tool instruction missing:\n%s", rendered)
 			}
 		})
 	}

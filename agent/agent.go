@@ -210,8 +210,12 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 			if err := manager.RemoveContextSource(ctx, "tool_definitions"); err != nil {
 				return nil, err
 			}
-		} else if len(tools) > 0 && (!hasToolDefinitions || input.Execution.Tools != nil || (input.Execution.ToolChoice != nil && input.Execution.ToolChoice.Mode == ai.ToolChoiceRequired && len(input.Execution.ToolChoice.Names) > 0)) {
-			toolSource, err := tooldefinitions.New(nil, tools, a.def.DebugSink, a.def.ToolDefinitionOptions...)
+		} else if len(tools) > 0 && (!hasToolDefinitions || input.Execution.Tools != nil || (input.Execution.ToolChoice != nil && input.Execution.ToolChoice.Mode == ai.ToolChoiceRequired)) {
+			toolOptions := append([]tooldefinitions.Option(nil), a.def.ToolDefinitionOptions...)
+			if input.Execution.ToolChoice != nil {
+				toolOptions = append(toolOptions, tooldefinitions.WithToolChoice(*input.Execution.ToolChoice))
+			}
+			toolSource, err := tooldefinitions.New(nil, tools, a.def.DebugSink, toolOptions...)
 			if err != nil {
 				return nil, err
 			}
@@ -221,13 +225,6 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 				}
 			} else if err := promptBuilder.PrependContextSource(ctx, toolSource); err != nil {
 				return nil, err
-			}
-		}
-		if input.Execution.ToolChoice != nil {
-			if instruction := tooldefinitions.ToolChoiceInstruction(*input.Execution.ToolChoice); instruction != "" {
-				if err := promptBuilder.AppendSystemInstructions(ctx, gaictx.NewTextPart(instruction)); err != nil {
-					return nil, err
-				}
 			}
 		}
 	}

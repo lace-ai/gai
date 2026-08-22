@@ -31,6 +31,7 @@ type Source struct {
 	renderer      gaictx.Renderer
 	debug         gai.DebugSink
 	usageProtocol string
+	toolChoice    ai.ToolChoice
 }
 
 var _ gaictx.ContextSource = (*Source)(nil)
@@ -50,9 +51,16 @@ func WithUsageProtocol(protocol string) Option {
 	}
 }
 
-// ToolChoiceInstruction returns the text-transport instruction for choice.
-// Native transports enforce the choice through their provider request instead.
-func ToolChoiceInstruction(choice ai.ToolChoice) string {
+// WithToolChoice configures text-transport tool-choice instructions.
+func WithToolChoice(choice ai.ToolChoice) Option {
+	return func(source *Source) error {
+		source.toolChoice = choice
+		source.toolChoice.Names = append([]string(nil), choice.Names...)
+		return nil
+	}
+}
+
+func toolChoiceInstruction(choice ai.ToolChoice) string {
 	if choice.Mode != ai.ToolChoiceRequired {
 		return ""
 	}
@@ -129,7 +137,11 @@ func (s *Source) Function(ctx context.Context, tokenBudget int) (part gaictx.Par
 		observer.Failed(ctx, "render_tool_signatures", err)
 		return nil, err
 	}
-	part = newPart(definitions, s.usageProtocol, s.usageProtocol+signatures)
+	usageProtocol := s.usageProtocol
+	if instruction := toolChoiceInstruction(s.toolChoice); instruction != "" {
+		usageProtocol += "\n\n" + instruction
+	}
+	part = newPart(definitions, usageProtocol, usageProtocol+signatures)
 	observer.Succeeded(ctx, definitionNames(definitions))
 	return part, nil
 }
