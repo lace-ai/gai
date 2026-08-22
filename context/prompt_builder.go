@@ -39,9 +39,9 @@ type PromptBuilder interface {
 	SetInput(input PromptInput)
 }
 
-// PromptBuilderCloner is optionally implemented by builders that can provide
-// an independent copy for a workflow. Agent uses it to isolate per-run prompt
-// configuration when a Prompt callback returns the same builder more than once.
+// PromptBuilderCloner provides an independent copy for a workflow. Builders
+// returned by an Agent Prompt callback must implement it so Agent can isolate
+// every run before applying run-specific prompt configuration.
 type PromptBuilderCloner interface {
 	ClonePromptBuilder() PromptBuilder
 }

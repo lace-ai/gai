@@ -23,6 +23,36 @@ type testPromptBuilder struct {
 	tokenizer ai.Tokenizer
 }
 
+// unclonablePromptBuilder models a third-party mutable builder that cannot
+// establish per-run isolation.
+type unclonablePromptBuilder struct{}
+
+func (*unclonablePromptBuilder) PrependContextSource(context.Context, gaictx.ContextSource) error {
+	return nil
+}
+
+func (*unclonablePromptBuilder) AppendContextSource(context.Context, gaictx.ContextSource) error {
+	return nil
+}
+
+func (*unclonablePromptBuilder) AppendContextSources(context.Context, ...gaictx.ContextSource) error {
+	return nil
+}
+
+func (*unclonablePromptBuilder) AppendSystemInstructions(context.Context, ...gaictx.Part) error {
+	return nil
+}
+
+func (*unclonablePromptBuilder) BuildContext(context.Context) ([]gaictx.Part, error) { return nil, nil }
+
+func (*unclonablePromptBuilder) BuildPrompt(context.Context, gaictx.Conversation) (string, error) {
+	return "", nil
+}
+
+func (*unclonablePromptBuilder) Input() gaictx.PromptInput { return gaictx.PromptInput{} }
+
+func (*unclonablePromptBuilder) SetInput(gaictx.PromptInput) {}
+
 type testContextSource struct{ name string }
 
 type nativeToolWorkflowModel struct {
@@ -110,6 +140,27 @@ func (b *testPromptBuilder) SetTokenizer(tokenizer ai.Tokenizer) {
 	b.tokenizer = tokenizer
 }
 
+func (b *testPromptBuilder) ClonePromptBuilder() gaictx.PromptBuilder {
+	cloned := *b
+	cloned.input = b.input.Clone()
+	return &cloned
+}
+
+func TestAgentNewRunRejectsUnclonablePromptBuilder(t *testing.T) {
+	t.Parallel()
+
+	assistant := agent.New(agent.Definition{
+		Model: &mocks.MockModel{},
+		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+			return &unclonablePromptBuilder{}, nil
+		},
+	})
+
+	if _, err := assistant.NewRun(context.Background(), agent.RunInput{}); !errors.Is(err, loop.ErrPromptNotConfigured) {
+		t.Fatalf("NewRun error = %v, want ErrPromptNotConfigured", err)
+	}
+}
+
 func TestAgentNewRunCreatesLoop(t *testing.T) {
 	t.Parallel()
 
@@ -156,7 +207,8 @@ func TestAgentNewRunCreatesLoop(t *testing.T) {
 	if run.Loop.Reasoning != (ai.ReasoningConfig{Enabled: true, IncludeThoughts: true, BudgetTokens: 128, Effort: ai.ReasoningEffortHigh}) {
 		t.Fatalf("expected configured reasoning, got %+v", run.Loop.Reasoning)
 	}
-	if builder == nil || builder.tokenizer == nil {
+	runBuilder, ok := run.Loop.PromptBuilder.(*testPromptBuilder)
+	if !ok || runBuilder.tokenizer == nil {
 		t.Fatal("expected model tokenizer to be set on prompt builder")
 	}
 }
@@ -1100,11 +1152,13 @@ func TestAgentNewRunUsesConfiguredTokenizerOverride(t *testing.T) {
 		},
 	})
 
-	if _, err := assistant.NewRun(context.Background(), agent.RunInput{}); err != nil {
+	run, err := assistant.NewRun(context.Background(), agent.RunInput{})
+	if err != nil {
 		t.Fatalf("NewRun failed: %v", err)
 	}
-	if builder.tokenizer != overrideTokenizer {
-		t.Fatalf("expected configured tokenizer override, got %v", builder.tokenizer)
+	runBuilder := run.Loop.PromptBuilder.(*testPromptBuilder)
+	if runBuilder.tokenizer != overrideTokenizer {
+		t.Fatalf("expected configured tokenizer override, got %v", runBuilder.tokenizer)
 	}
 }
 
@@ -1120,11 +1174,13 @@ func TestAgentNewRunFallsBackToModelTokenizer(t *testing.T) {
 		},
 	})
 
-	if _, err := assistant.NewRun(context.Background(), agent.RunInput{}); err != nil {
+	run, err := assistant.NewRun(context.Background(), agent.RunInput{})
+	if err != nil {
 		t.Fatalf("NewRun failed: %v", err)
 	}
-	if builder.tokenizer != modelTokenizer {
-		t.Fatalf("expected model tokenizer fallback, got %v", builder.tokenizer)
+	runBuilder := run.Loop.PromptBuilder.(*testPromptBuilder)
+	if runBuilder.tokenizer != modelTokenizer {
+		t.Fatalf("expected model tokenizer fallback, got %v", runBuilder.tokenizer)
 	}
 }
 

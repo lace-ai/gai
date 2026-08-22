@@ -189,11 +189,13 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 	if promptBuilder == nil {
 		return nil, loop.ErrPromptNotConfigured
 	}
-	if cloner, ok := promptBuilder.(gaictx.PromptBuilderCloner); ok {
-		promptBuilder = cloner.ClonePromptBuilder()
-		if promptBuilder == nil {
-			return nil, loop.ErrPromptNotConfigured
-		}
+	cloner, ok := promptBuilder.(gaictx.PromptBuilderCloner)
+	if !ok {
+		return nil, loop.ErrPromptNotConfigured
+	}
+	promptBuilder = cloner.ClonePromptBuilder()
+	if promptBuilder == nil {
+		return nil, loop.ErrPromptNotConfigured
 	}
 	promptBuilder.SetInput(input.Prompt)
 	nativeTools := usesNativeTools(a.def.Model)
