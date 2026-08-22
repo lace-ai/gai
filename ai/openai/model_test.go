@@ -927,17 +927,17 @@ func TestOpenAIDescriptorUsesReasoningFamilyOverlay(t *testing.T) {
 	}
 }
 
-func TestModelTokenizerIsNilWhenTokenizationIsUnavailable(t *testing.T) {
+func TestModelTokenizerUsesLocalTokenizerWhenEncodingIsKnown(t *testing.T) {
 	m := &Model{name: GPT41}
-	if tokenizer := m.Tokenizer(); tokenizer != nil {
-		t.Fatalf("Tokenizer() = %T, want nil when tokenization is unavailable", tokenizer)
+	if tokenizer := m.Tokenizer(); tokenizer == nil {
+		t.Fatal("Tokenizer() = nil, want local tokenizer for a known encoding")
 	}
 }
 
-func TestModelDescriptorDoesNotAdvertiseUnsupportedTokenizer(t *testing.T) {
+func TestModelDescriptorAdvertisesKnownLocalTokenizer(t *testing.T) {
 	d := openAIDescriptor(GPT41)
-	if d.Tokenizer.Available != ai.FeatureSupportUnsupported || d.Tokenizer.Fidelity != ai.TokenizerFidelityUnknown {
-		t.Fatalf("tokenizer descriptor = %#v, want unsupported/unknown", d.Tokenizer)
+	if d.Tokenizer.Available != ai.FeatureSupportSupported || d.Tokenizer.Fidelity != ai.TokenizerFidelityEstimated {
+		t.Fatalf("tokenizer descriptor = %#v, want supported/estimated", d.Tokenizer)
 	}
 	if d.NativeMessages != ai.FeatureSupportSupported || d.NativeTools != ai.FeatureSupportSupported || d.Multimodal != ai.FeatureSupportUnsupported || d.Usage != ai.FeatureSupportSupported || d.FinishReason != ai.FeatureSupportSupported || d.StreamingUsage != ai.FeatureSupportSupported {
 		t.Fatalf("capability descriptor = %#v", d)
