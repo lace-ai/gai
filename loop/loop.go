@@ -92,28 +92,8 @@ func (l *Loop) Validate() error {
 	if err := l.ResponseFormat.Validate(); err != nil {
 		return err
 	}
-	if err := l.ToolChoice.Validate(); err != nil {
+	if _, err := EffectiveTools(l.Tools, l.ToolChoice, l.ToolTransport); err != nil {
 		return err
-	}
-	if _, err := ToolDefinitions(l.Tools); err != nil {
-		return err
-	}
-	if l.ToolChoice.Mode == ai.ToolChoiceRequired {
-		if len(l.Tools) == 0 {
-			return ErrRequiredToolNotConfigured
-		}
-		for _, requiredName := range l.ToolChoice.Names {
-			configured := false
-			for _, tool := range l.Tools {
-				if tool != nil && tool.Name() == requiredName {
-					configured = true
-					break
-				}
-			}
-			if !configured {
-				return fmt.Errorf("%w: %q", ErrRequiredToolNotConfigured, requiredName)
-			}
-		}
 	}
 	return nil
 }
