@@ -207,6 +207,16 @@ func TestSourceErrorHandling(t *testing.T) {
 	}
 }
 
+func TestSourceRejectsTypedNilToolSignature(t *testing.T) {
+	t.Parallel()
+
+	var tool *staticTool
+	_, err := tooldefinitions.New(&gaictx.XMLRenderer{}, []*staticTool{tool}, nil)
+	if !errors.Is(err, tooldefinitions.ErrToolInvalid) {
+		t.Fatalf("New error = %v, want ErrToolInvalid", err)
+	}
+}
+
 func TestSourceTracing(t *testing.T) {
 	recorder := tracetest.NewSpanRecorder()
 	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))

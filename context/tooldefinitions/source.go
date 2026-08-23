@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -78,10 +79,11 @@ func New[T gaictx.ToolSignature](renderer gaictx.Renderer, tools []T, debug gai.
 	}
 	signatures := make([]gaictx.ToolSignature, len(tools))
 	for index, tool := range tools {
-		if any(tool) == nil {
+		signature := gaictx.ToolSignature(tool)
+		if isNilToolSignature(signature) {
 			return nil, fmt.Errorf("%w: tool at index %d is nil", ErrToolInvalid, index)
 		}
-		signatures[index] = tool
+		signatures[index] = signature
 	}
 	source := &Source{
 		tools:         signatures,
@@ -155,7 +157,7 @@ type definition struct {
 }
 
 func definitionFromTool(tool gaictx.ToolSignature, index int) (definition, error) {
-	if tool == nil {
+	if isNilToolSignature(tool) {
 		return definition{}, fmt.Errorf("%w: tool at index %d is nil", ErrToolInvalid, index)
 	}
 	result := definition{
@@ -174,6 +176,19 @@ func definitionFromTool(tool gaictx.ToolSignature, index int) (definition, error
 	}
 	result.parameters = string(params)
 	return result, nil
+}
+
+func isNilToolSignature(signature gaictx.ToolSignature) bool {
+	if signature == nil {
+		return true
+	}
+	value := reflect.ValueOf(signature)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }
 
 func definitionNames(definitions []definition) []string {
