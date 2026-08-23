@@ -29,14 +29,23 @@ func TestOperationPreservesSpanAndDebugEventSemantics(t *testing.T) {
 	})
 	ctx, operation := observe.Start(t.Context(), sink, "test-tracer", "test", "test.operation", "run", "test:observer", attribute.String("test.initial", "value"))
 	operation.Set(attribute.Int("test.count", 2))
-	operation.Emit(ctx, "completed", map[string]any{"result": "ok"}, nil)
+	emitErr := errors.New("emit failed")
+	operation.Emit(ctx, "completed", map[string]any{"result": "ok"}, emitErr)
 	operation.Finish(errors.New("failed"))
 
 	if len(events) != 1 {
 		t.Fatalf("events = %d, want 1", len(events))
 	}
-	if events[0].Name != "completed" || events[0].Source != "test:observer" || events[0].Fields["result"] != "ok" {
-		t.Fatalf("event = %#v", events[0])
+	event := events[0]
+	if event.Name != "completed" || event.Source != "test:observer" || event.Fields["result"] != "ok" || !errors.Is(event.Err, emitErr) {
+		t.Fatalf("event = %#v", event)
+	}
+	traceID, spanID, err := gai.SpanContextIDs(ctx)
+	if err != nil {
+		t.Fatalf("SpanContextIDs() error = %v", err)
+	}
+	if event.Fields["trace_id"] != traceID || event.Fields["span_id"] != spanID {
+		t.Fatalf("event correlation fields = trace_id:%#v span_id:%#v, want trace_id:%q span_id:%q", event.Fields["trace_id"], event.Fields["span_id"], traceID, spanID)
 	}
 
 	spans := recorder.Ended()
