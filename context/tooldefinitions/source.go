@@ -135,7 +135,7 @@ func (s *Source) Function(ctx context.Context, tokenBudget int) (part gaictx.Par
 	if renderer == nil {
 		renderer = &gaictx.XMLRenderer{}
 	}
-	signatures, err := renderer.RenderToolSignatures(s.tools)
+	signatures, err := renderer.RenderToolSignatures(append([]gaictx.ToolSignature(nil), s.tools...))
 	if err != nil {
 		observer.Failed(ctx, "render_tool_signatures", err)
 		return nil, err

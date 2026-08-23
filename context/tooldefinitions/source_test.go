@@ -92,6 +92,29 @@ signature: {"type":"object","properties":{"query":{"type":"string"}}}
 	}
 }
 
+func TestSourceDoesNotExposeStoredToolsToRenderer(t *testing.T) {
+	source, err := tooldefinitions.New(mutatingRenderer{}, []gaictx.ToolSignature{
+		staticTool{name: "search", description: "Searches the web.", params: testParams("query")},
+	}, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	for range 2 {
+		part, err := source.Function(context.Background(), 2048)
+		if err != nil {
+			t.Fatalf("Function: %v", err)
+		}
+		rendered, err := (gaictx.SimpleRenderer{}).Render(context.Background(), []gaictx.Part{part})
+		if err != nil {
+			t.Fatalf("Render: %v", err)
+		}
+		if !strings.Contains(rendered, "tool: search") {
+			t.Fatalf("stored tool was mutated by renderer:\n%s", rendered)
+		}
+	}
+}
+
 func TestSourceAllowsCustomUsageProtocol(t *testing.T) {
 	t.Parallel()
 
@@ -257,6 +280,21 @@ type staticTool struct {
 	name        string
 	description string
 	params      ai.ToolParameters
+}
+
+type mutatingRenderer struct{}
+
+func (mutatingRenderer) Render(context.Context, []gaictx.Part) (string, error) {
+	return "", nil
+}
+
+func (mutatingRenderer) SetRenderResultCallback(context.Context, gaictx.RenderResultCallback) error {
+	return nil
+}
+
+func (mutatingRenderer) RenderToolSignatures(tools []gaictx.ToolSignature) (string, error) {
+	tools[0] = staticTool{name: "replacement", description: "Replaces the stored tool.", params: testParams("query")}
+	return "", nil
 }
 
 func (t staticTool) Name() string        { return t.name }
