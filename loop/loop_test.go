@@ -468,6 +468,32 @@ func TestLoopValidateRejectsInvalidToolChoiceMode(t *testing.T) {
 	}
 }
 
+func TestEffectiveToolsAppliesTextTransportChoice(t *testing.T) {
+	t.Parallel()
+
+	search := namedTestTool{name: "search"}
+	weather := namedTestTool{name: "weather"}
+
+	got, err := loop.EffectiveTools([]loop.Tool{search, weather}, ai.ToolChoice{
+		Mode:  ai.ToolChoiceRequired,
+		Names: []string{"weather"},
+	}, loop.ToolTransportText)
+	if err != nil {
+		t.Fatalf("EffectiveTools() error = %v", err)
+	}
+	if len(got) != 1 || got[0].Name() != "weather" {
+		t.Fatalf("EffectiveTools() = %#v, want only weather", got)
+	}
+
+	got, err = loop.EffectiveTools([]loop.Tool{search}, ai.ToolChoice{Mode: ai.ToolChoiceNone}, loop.ToolTransportText)
+	if err != nil {
+		t.Fatalf("EffectiveTools() error = %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("EffectiveTools() = %#v, want no tools", got)
+	}
+}
+
 func TestLoopValidateTextTransportRejectsInvalidToolDefinitions(t *testing.T) {
 	t.Parallel()
 

@@ -200,7 +200,7 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 			if execution.hasToolChoice {
 				toolOptions = append(toolOptions, tooldefinitions.WithToolChoice(execution.toolChoice))
 			}
-			toolSource, err := tooldefinitions.New(nil, execution.tools, a.def.DebugSink, toolOptions...)
+			toolSource, err := tooldefinitions.New(nil, toolSignatures(execution.tools), a.def.DebugSink, toolOptions...)
 			if err != nil {
 				return nil, err
 			}
@@ -262,6 +262,14 @@ func cloneTools(tools []loop.Tool) []loop.Tool {
 	return cloned
 }
 
+func toolSignatures(tools []loop.Tool) []gaictx.ToolSignature {
+	signatures := make([]gaictx.ToolSignature, len(tools))
+	for index, tool := range tools {
+		signatures[index] = tool
+	}
+	return signatures
+}
+
 func cloneToolChoice(choice ai.ToolChoice) ai.ToolChoice {
 	cloned := choice
 	cloned.Names = append([]string(nil), choice.Names...)
@@ -293,54 +301,20 @@ func resolveExecution(definitionTools []loop.Tool, config ExecutionConfig, nativ
 		resolved.toolChoice = cloneToolChoice(*config.ToolChoice)
 		resolved.hasToolChoice = true
 	}
-	if _, err := loop.ToolDefinitions(resolved.tools); err != nil {
+	transport := loop.ToolTransportNative
+	if !nativeTools {
+		transport = loop.ToolTransportText
+	}
+	effectiveTools, err := loop.EffectiveTools(resolved.tools, resolved.toolChoice, transport)
+	if err != nil {
 		return executionResolution{}, err
 	}
+	resolved.tools = effectiveTools
 	if nativeTools || !resolved.hasToolChoice {
 		return resolved, nil
 	}
 	resolved.textToolsConfigured = resolved.toolChoice.Mode == ai.ToolChoiceNone || resolved.toolChoice.Mode == ai.ToolChoiceRequired
-	if err := validateRequiredTextTools(resolved.toolChoice, resolved.tools); err != nil {
-		return executionResolution{}, err
-	}
-	if resolved.toolChoice.Mode == ai.ToolChoiceNone {
-		resolved.tools = []loop.Tool{}
-		return resolved, nil
-	}
-	if len(resolved.toolChoice.Names) == 0 {
-		return resolved, nil
-	}
-	selected := make(map[string]struct{}, len(resolved.toolChoice.Names))
-	for _, name := range resolved.toolChoice.Names {
-		selected[name] = struct{}{}
-	}
-	filtered := make([]loop.Tool, 0, len(resolved.toolChoice.Names))
-	for _, tool := range resolved.tools {
-		if _, ok := selected[tool.Name()]; ok {
-			filtered = append(filtered, tool)
-		}
-	}
-	resolved.tools = filtered
 	return resolved, nil
-}
-
-func validateRequiredTextTools(choice ai.ToolChoice, tools []loop.Tool) error {
-	if choice.Mode != ai.ToolChoiceRequired {
-		return nil
-	}
-	if len(tools) == 0 {
-		return fmt.Errorf("required text tool choice requires at least one tool")
-	}
-	available := make(map[string]struct{}, len(tools))
-	for _, tool := range tools {
-		available[tool.Name()] = struct{}{}
-	}
-	for _, name := range choice.Names {
-		if _, ok := available[name]; !ok {
-			return fmt.Errorf("required text tool %q is not configured", name)
-		}
-	}
-	return nil
 }
 
 func usesNativeTools(model ai.Model) bool {

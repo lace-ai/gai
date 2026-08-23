@@ -118,6 +118,38 @@ func (l *Loop) Validate() error {
 	return nil
 }
 
+// EffectiveTools validates and resolves the run-scoped executable tool set for
+// a transport and tool choice. Text transport omits disabled tools and limits
+// named choices to the tools rendered in its prompt; native transport preserves
+// the configured set for provider-side choice handling.
+func EffectiveTools(tools []Tool, choice ai.ToolChoice, transport ToolTransportMode) ([]Tool, error) {
+	if err := choice.Validate(); err != nil {
+		return nil, err
+	}
+	if _, err := ToolDefinitions(tools); err != nil {
+		return nil, err
+	}
+	if choice.Mode == ai.ToolChoiceRequired {
+		if len(tools) == 0 {
+			return nil, ErrRequiredToolNotConfigured
+		}
+		for _, requiredName := range choice.Names {
+			if !slices.ContainsFunc(tools, func(tool Tool) bool {
+				return tool != nil && tool.Name() == requiredName
+			}) {
+				return nil, fmt.Errorf("%w: %q", ErrRequiredToolNotConfigured, requiredName)
+			}
+		}
+	}
+	if transport == ToolTransportText && choice.Mode == ai.ToolChoiceNone {
+		return []Tool{}, nil
+	}
+	if len(choice.Names) > 0 && (transport == ToolTransportText || choice.Mode == ai.ToolChoiceRequired) {
+		return toolsNamed(tools, choice.Names), nil
+	}
+	return tools, nil
+}
+
 // New constructs a Loop with the default iteration limit.
 func New(model ai.Model, tools []Tool, promptBuilder gaictx.PromptBuilder, toolResponseProcessor ToolResponseProcessor) *Loop {
 	l := &Loop{
@@ -227,16 +259,14 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 			return
 		}
 
-		executionTools := l.Tools
-		if l.ToolChoice.Mode == ai.ToolChoiceRequired && len(l.ToolChoice.Names) > 0 {
-			// Named tool selection is a run-scoped constraint. Keep advertised
-			// definitions and executable tools in the same effective snapshot.
-			executionTools = toolsNamed(l.Tools, l.ToolChoice.Names)
+		executionTools, err := EffectiveTools(l.Tools, l.ToolChoice, l.ToolTransport)
+		if err != nil {
+			sendLoopError(ctx, events, runState, err)
+			return
 		}
 
 		var (
 			toolDefinitions []ai.ToolDefinition
-			err             error
 		)
 		if l.ToolTransport == ToolTransportNative {
 			toolDefinitions, err = ToolDefinitions(executionTools)
