@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/lace-ai/gai"
+	"github.com/lace-ai/gai/internal/observe"
 )
 
 const defaultRendererDebugPreviewChars = 500
@@ -12,6 +13,7 @@ const defaultRendererDebugPreviewChars = 500
 type renderObserver struct {
 	renderer    string
 	debug       gai.DebugSink
+	operation   *observe.Operation
 	previewSize int
 	parts       []map[string]any
 }
@@ -20,7 +22,12 @@ func newRenderObserver(renderer string, debug gai.DebugSink, previewSize int) *r
 	if previewSize <= 0 {
 		previewSize = defaultRendererDebugPreviewChars
 	}
-	return &renderObserver{renderer: renderer, debug: debug, previewSize: previewSize}
+	return &renderObserver{
+		renderer:    renderer,
+		debug:       debug,
+		operation:   observe.New(debug, "context:"+rendererSourceName(renderer)),
+		previewSize: previewSize,
+	}
 }
 
 func (o *renderObserver) started(ctx context.Context, partCount int) {
@@ -83,19 +90,14 @@ func (o *renderObserver) finished(ctx context.Context, err error, prompt string)
 }
 
 func (o *renderObserver) enabled() bool {
-	return o != nil && o.debug != nil
+	return o != nil && o.operation != nil && o.debug != nil
 }
 
 func (o *renderObserver) emit(ctx context.Context, name string, fields map[string]any, err error) {
-	if o == nil || o.debug == nil {
+	if o == nil || o.operation == nil {
 		return
 	}
-	o.debug.Emit(ctx, gai.DebugEvent{
-		Name:   name,
-		Source: "context:" + rendererSourceName(o.renderer),
-		Fields: fields,
-		Err:    err,
-	})
+	o.operation.Emit(ctx, name, fields, err)
 }
 
 func rendererSourceName(renderer string) string {
