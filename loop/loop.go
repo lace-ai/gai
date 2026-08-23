@@ -233,8 +233,8 @@ func (l *Loop) Run(ctx context.Context) <-chan Event {
 			defer totalCancel()
 		}
 		ctx, runState := newLoopRunState(ctx, l)
-		defer runState.finish()
 		defer close(events)
+		defer runState.finish()
 		if err := ctx.Err(); err != nil {
 			sendLoopCanceled(ctx, events, runState, err)
 			return
