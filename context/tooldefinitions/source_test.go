@@ -20,7 +20,7 @@ import (
 
 func TestSourceBuildsToolDefinitionsPart(t *testing.T) {
 	sink := &captureSink{}
-	source, err := tooldefinitions.New(&gaictx.XMLRenderer{}, []loop.Tool{
+	source, err := tooldefinitions.New(&gaictx.XMLRenderer{}, []gaictx.ToolSignature{
 		staticTool{name: "weather", description: "Gets current weather.", params: testParams("city")},
 		staticTool{name: "search", description: "Searches documentation.", params: testParams("query")},
 	}, sink)
@@ -62,7 +62,7 @@ func TestSourceBuildsToolDefinitionsPart(t *testing.T) {
 func TestSourceRendersClearSimpleToolDefinitions(t *testing.T) {
 	t.Parallel()
 
-	source, err := tooldefinitions.New(&gaictx.SimpleRenderer{}, []loop.Tool{
+	source, err := tooldefinitions.New(&gaictx.SimpleRenderer{}, []gaictx.ToolSignature{
 		staticTool{name: "search", description: "Searches the web.", params: testParams("query")},
 	}, nil)
 	if err != nil {
@@ -95,7 +95,7 @@ signature: {"type":"object","properties":{"query":{"type":"string"}}}
 func TestSourceAllowsCustomUsageProtocol(t *testing.T) {
 	t.Parallel()
 
-	source, err := tooldefinitions.New(&gaictx.SimpleRenderer{}, []loop.Tool{
+	source, err := tooldefinitions.New(&gaictx.SimpleRenderer{}, []gaictx.ToolSignature{
 		staticTool{name: "search", description: "Searches the web.", params: testParams("query")},
 	}, nil, tooldefinitions.WithUsageProtocol("Call tools only when the user explicitly asks."))
 	if err != nil {
@@ -143,7 +143,7 @@ func TestSourceRendersRequiredToolChoice(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			source, err := tooldefinitions.New(&gaictx.SimpleRenderer{}, []loop.Tool{
+			source, err := tooldefinitions.New(&gaictx.SimpleRenderer{}, []gaictx.ToolSignature{
 				staticTool{name: "search", description: "Searches the web.", params: testParams("query")},
 			}, nil, tooldefinitions.WithToolChoice(tt.choice))
 			if err != nil {
@@ -173,13 +173,13 @@ func TestSourceRendersRequiredToolChoice(t *testing.T) {
 func TestSourceErrorHandling(t *testing.T) {
 	tests := []struct {
 		name    string
-		tools   []loop.Tool
+		tools   []gaictx.ToolSignature
 		options []tooldefinitions.Option
 		wantErr error
 	}{
 		{name: "empty", wantErr: tooldefinitions.ErrToolsEmpty},
-		{name: "nil tool", tools: []loop.Tool{nil}, wantErr: tooldefinitions.ErrToolInvalid},
-		{name: "nil option", tools: []loop.Tool{staticTool{name: "search", description: "Searches", params: testParams("query")}}, options: []tooldefinitions.Option{nil}, wantErr: tooldefinitions.ErrToolInvalid},
+		{name: "nil tool", tools: []gaictx.ToolSignature{nil}, wantErr: tooldefinitions.ErrToolInvalid},
+		{name: "nil option", tools: []gaictx.ToolSignature{staticTool{name: "search", description: "Searches", params: testParams("query")}}, options: []tooldefinitions.Option{nil}, wantErr: tooldefinitions.ErrToolInvalid},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -191,7 +191,7 @@ func TestSourceErrorHandling(t *testing.T) {
 	}
 
 	sink := &captureSink{}
-	source, err := tooldefinitions.New(&gaictx.XMLRenderer{}, []loop.Tool{
+	source, err := tooldefinitions.New(&gaictx.XMLRenderer{}, []gaictx.ToolSignature{
 		staticTool{name: "broken", description: "Broken definition.", params: invalidParams()},
 	}, sink)
 	if err != nil {
@@ -211,7 +211,7 @@ func TestSourceRejectsTypedNilToolSignature(t *testing.T) {
 	t.Parallel()
 
 	var tool *staticTool
-	_, err := tooldefinitions.New(&gaictx.XMLRenderer{}, []*staticTool{tool}, nil)
+	_, err := tooldefinitions.New(&gaictx.XMLRenderer{}, []gaictx.ToolSignature{tool}, nil)
 	if !errors.Is(err, tooldefinitions.ErrToolInvalid) {
 		t.Fatalf("New error = %v, want ErrToolInvalid", err)
 	}
@@ -227,7 +227,7 @@ func TestSourceTracing(t *testing.T) {
 		_ = provider.Shutdown(context.Background())
 	})
 
-	source, err := tooldefinitions.New(&gaictx.XMLRenderer{}, []loop.Tool{
+	source, err := tooldefinitions.New(&gaictx.XMLRenderer{}, []gaictx.ToolSignature{
 		staticTool{name: "broken", description: "Broken definition.", params: invalidParams()},
 	}, nil)
 	if err != nil {

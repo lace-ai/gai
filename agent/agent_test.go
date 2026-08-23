@@ -719,7 +719,7 @@ func TestAgentTextTransportSelectedToolsReplaceExistingPromptToolDefinitions(t *
 
 	search := namedTool{name: "search"}
 	weather := namedTool{name: "weather"}
-	staleSource, err := tooldefinitions.New(&gaictx.SimpleRenderer{}, []loop.Tool{search, weather}, nil)
+	staleSource, err := tooldefinitions.New(&gaictx.SimpleRenderer{}, toolSignatures([]loop.Tool{search, weather}), nil)
 	if err != nil {
 		t.Fatalf("new stale tool source: %v", err)
 	}
@@ -928,7 +928,7 @@ func TestAgentDoesNotDuplicateExistingToolDefinitions(t *testing.T) {
 	t.Parallel()
 
 	tool := loop.NewEchoTool()
-	source, err := tooldefinitions.New(&gaictx.SimpleRenderer{}, []loop.Tool{tool}, nil)
+	source, err := tooldefinitions.New(&gaictx.SimpleRenderer{}, toolSignatures([]loop.Tool{tool}), nil)
 	if err != nil {
 		t.Fatalf("new tool source: %v", err)
 	}
@@ -985,7 +985,7 @@ func TestAgentExecutionToolsReplaceExistingPromptToolDefinitions(t *testing.T) {
 
 	definitionTool := namedTool{name: "definition_tool"}
 	runTool := namedTool{name: "run_tool"}
-	staleSource, err := tooldefinitions.New(&gaictx.SimpleRenderer{}, []loop.Tool{definitionTool}, nil)
+	staleSource, err := tooldefinitions.New(&gaictx.SimpleRenderer{}, toolSignatures([]loop.Tool{definitionTool}), nil)
 	if err != nil {
 		t.Fatalf("new stale tool source: %v", err)
 	}
@@ -1031,7 +1031,7 @@ func TestAgentExecutionToolOverridesUseRunOwnedPromptBuilders(t *testing.T) {
 
 	definitionTool := namedTool{name: "definition_tool"}
 	runTool := namedTool{name: "run_tool"}
-	staleSource, err := tooldefinitions.New(&gaictx.SimpleRenderer{}, []loop.Tool{definitionTool}, nil)
+	staleSource, err := tooldefinitions.New(&gaictx.SimpleRenderer{}, toolSignatures([]loop.Tool{definitionTool}), nil)
 	if err != nil {
 		t.Fatalf("new stale tool source: %v", err)
 	}
@@ -1088,7 +1088,7 @@ func TestAgentExecutionEmptyToolsRemoveExistingPromptToolDefinitions(t *testing.
 	t.Parallel()
 
 	definitionTool := namedTool{name: "definition_tool"}
-	staleSource, err := tooldefinitions.New(&gaictx.SimpleRenderer{}, []loop.Tool{definitionTool}, nil)
+	staleSource, err := tooldefinitions.New(&gaictx.SimpleRenderer{}, toolSignatures([]loop.Tool{definitionTool}), nil)
 	if err != nil {
 		t.Fatalf("new stale tool source: %v", err)
 	}
