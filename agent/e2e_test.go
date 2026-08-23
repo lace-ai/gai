@@ -1,4 +1,4 @@
-package agent_test
+package agent
 
 import (
 	"context"
@@ -8,7 +8,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/lace-ai/gai/agent"
 	"github.com/lace-ai/gai/ai"
 	gaictx "github.com/lace-ai/gai/context"
 	"github.com/lace-ai/gai/loop"
@@ -89,16 +88,16 @@ func TestAgentWorkflowEndToEndWithToolCall(t *testing.T) {
 			{{Type: ai.TokenTypeText, Text: "final answer"}},
 		},
 	}
-	assistant := agent.New(agent.Definition{
+	assistant := New(Definition{
 		Name:  "e2e",
 		Model: model,
 		Tools: []loop.Tool{loop.NewEchoTool()},
-		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+		Prompt: func(context.Context, RunInput) (gaictx.PromptBuilder, error) {
 			return gaictx.New(gaictx.Definition{
 				Renderer: &gaictx.SimpleRenderer{},
 			}), nil
 		},
-		Limits: agent.Limits{
+		Limits: Limits{
 			MaxLoopIterations: 3,
 			MaxTokens:         64,
 		},
@@ -196,15 +195,15 @@ func TestAgentWorkflowMarksTerminalFailedAttemptDiscardable(t *testing.T) {
 			},
 		},
 	}
-	assistant := agent.New(agent.Definition{
+	assistant := New(Definition{
 		Name:  "terminal-failure",
 		Model: model,
-		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+		Prompt: func(context.Context, RunInput) (gaictx.PromptBuilder, error) {
 			return gaictx.New(gaictx.Definition{
 				Renderer: &gaictx.SimpleRenderer{},
 			}), nil
 		},
-		Limits: agent.Limits{
+		Limits: Limits{
 			MaxLoopIterations: 1,
 		},
 	})
@@ -254,20 +253,20 @@ func TestAgentWorkflowStreamsRetriedAttemptTokens(t *testing.T) {
 			},
 		},
 	}
-	assistant := agent.New(agent.Definition{
+	assistant := New(Definition{
 		Name:  "retry-discard",
 		Model: model,
-		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+		Prompt: func(context.Context, RunInput) (gaictx.PromptBuilder, error) {
 			return gaictx.New(gaictx.Definition{Renderer: &gaictx.SimpleRenderer{}}), nil
 		},
-		Limits: agent.Limits{MaxLoopIterations: 1},
+		Limits:      Limits{MaxLoopIterations: 1},
+		RetryPolicy: &loop.RetryPolicy{MaxRetries: 1},
 	})
 
 	workflow, err := assistant.NewRun(context.Background(), textRunInput("retry"))
 	if err != nil {
 		t.Fatalf("NewRun failed: %v", err)
 	}
-	workflow.Loop.RetryPolicy = &loop.RetryPolicy{MaxRetries: 1}
 	consumed := consumeWorkflow(t, workflow)
 	if len(consumed.errs) != 0 {
 		t.Fatalf("unexpected workflow errors: %v", consumed.errs)
@@ -316,14 +315,14 @@ func TestAgentWorkflowBillsRejectedRequiredToolAttemptWithoutExposingIt(t *testi
 			},
 		},
 	}
-	assistant := agent.New(agent.Definition{
+	assistant := New(Definition{
 		Name:  "required-tool-billing",
 		Model: model,
 		Tools: []loop.Tool{loop.NewEchoTool()},
-		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+		Prompt: func(context.Context, RunInput) (gaictx.PromptBuilder, error) {
 			return gaictx.New(gaictx.Definition{Renderer: &gaictx.SimpleRenderer{}}), nil
 		},
-		Limits: agent.Limits{MaxLoopIterations: 3},
+		Limits: Limits{MaxLoopIterations: 3},
 	})
 
 	input := textRunInput("use echo")
@@ -375,14 +374,14 @@ func TestAgentWorkflowRunEventsBillsRejectedRequiredToolAttempt(t *testing.T) {
 			},
 		},
 	}
-	assistant := agent.New(agent.Definition{
+	assistant := New(Definition{
 		Name:  "required-tool-events-billing",
 		Model: model,
 		Tools: []loop.Tool{loop.NewEchoTool()},
-		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+		Prompt: func(context.Context, RunInput) (gaictx.PromptBuilder, error) {
 			return gaictx.New(gaictx.Definition{Renderer: &gaictx.SimpleRenderer{}}), nil
 		},
-		Limits: agent.Limits{MaxLoopIterations: 3},
+		Limits: Limits{MaxLoopIterations: 3},
 	})
 
 	input := textRunInput("use echo")
@@ -418,10 +417,10 @@ func TestAgentWorkflowRunEventsBillsTerminalErrorAttempt(t *testing.T) {
 			{Err: errors.New("terminal stream error")},
 		}},
 	}
-	assistant := agent.New(agent.Definition{
+	assistant := New(Definition{
 		Name:  "terminal-error-events-billing",
 		Model: model,
-		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+		Prompt: func(context.Context, RunInput) (gaictx.PromptBuilder, error) {
 			return gaictx.New(gaictx.Definition{Renderer: &gaictx.SimpleRenderer{}}), nil
 		},
 	})
@@ -449,10 +448,10 @@ func TestAgentWorkflowRunEventsBillsTerminalErrorAttempt(t *testing.T) {
 func TestAgentWorkflowReportsCancellationWithoutError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	assistant := agent.New(agent.Definition{
+	assistant := New(Definition{
 		Name:  "canceled",
 		Model: &scriptedWorkflowModel{},
-		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+		Prompt: func(context.Context, RunInput) (gaictx.PromptBuilder, error) {
 			return gaictx.New(gaictx.Definition{Renderer: &gaictx.SimpleRenderer{}}), nil
 		},
 	})
@@ -487,22 +486,22 @@ func TestAgentWorkflowReportsCancellationWithoutError(t *testing.T) {
 }
 
 func TestAgentWorkflowEndToEndWithAppendMiddleware(t *testing.T) {
-	main := agent.New(agent.Definition{
+	main := New(Definition{
 		Name:  "main",
 		Model: &mocks.MockModel{Responses: []mocks.MockModelResponse{{Res: ai.AIResponse{Text: "answer"}}}},
-		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+		Prompt: func(context.Context, RunInput) (gaictx.PromptBuilder, error) {
 			return gaictx.New(gaictx.Definition{Renderer: &gaictx.SimpleRenderer{}}), nil
 		},
-		Middleware: []agent.Middleware{
-			agent.NewAgentMiddleware(agent.New(agent.Definition{
+		Middleware: []Middleware{
+			NewAgentMiddleware(New(Definition{
 				Name:  "audit",
 				Model: &mocks.MockModel{Responses: []mocks.MockModelResponse{{Res: ai.AIResponse{Text: " audited"}}}},
-				Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+				Prompt: func(context.Context, RunInput) (gaictx.PromptBuilder, error) {
 					return gaictx.New(gaictx.Definition{Renderer: &gaictx.SimpleRenderer{}}), nil
 				},
-			}), agent.AgentMiddlewareConfig{
+			}), AgentMiddlewareConfig{
 				Name:   "audit",
-				Output: agent.AppendOutput,
+				Output: AppendOutput,
 			}),
 		},
 	})
@@ -538,20 +537,20 @@ func TestAgentWorkflowRunEventsPreservesRetryOrdering(t *testing.T) {
 			{{Type: ai.TokenTypeText, Text: "final"}},
 		},
 	}
-	assistant := agent.New(agent.Definition{
+	assistant := New(Definition{
 		Name:  "retry-events",
 		Model: model,
-		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+		Prompt: func(context.Context, RunInput) (gaictx.PromptBuilder, error) {
 			return gaictx.New(gaictx.Definition{Renderer: &gaictx.SimpleRenderer{}}), nil
 		},
-		Limits: agent.Limits{MaxLoopIterations: 1},
+		Limits:      Limits{MaxLoopIterations: 1},
+		RetryPolicy: &loop.RetryPolicy{MaxRetries: 1},
 	})
 
 	workflow, err := assistant.NewRun(context.Background(), textRunInput("retry"))
 	if err != nil {
 		t.Fatalf("NewRun failed: %v", err)
 	}
-	workflow.Loop.RetryPolicy = &loop.RetryPolicy{MaxRetries: 1}
 
 	var events []loop.Event
 	for event := range workflow.RunEvents(context.Background()) {

@@ -1,4 +1,4 @@
-package agent_test
+package agent
 
 import (
 	"context"
@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/lace-ai/gai"
-	"github.com/lace-ai/gai/agent"
 	"github.com/lace-ai/gai/ai"
 	gaictx "github.com/lace-ai/gai/context"
 	"github.com/lace-ai/gai/loop"
@@ -30,26 +29,26 @@ func TestAgentWorkflowEmitsLifecycleEventsAndSpans(t *testing.T) {
 	}()
 
 	sink := &agentDebugSink{}
-	post := agent.New(agent.Definition{
+	post := New(Definition{
 		Name:  "post",
 		Model: &mocks.MockModel{Responses: []mocks.MockModelResponse{{Res: ai.AIResponse{Text: "post"}}}},
-		Prompt: func(_ context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
+		Prompt: func(_ context.Context, input RunInput) (gaictx.PromptBuilder, error) {
 			return &testPromptBuilder{}, nil
 		},
 	})
-	primary := agent.New(agent.Definition{
+	primary := New(Definition{
 		Name:      "primary",
 		Model:     &mocks.MockModel{Responses: []mocks.MockModelResponse{{Res: ai.AIResponse{Text: "primary"}}}},
 		DebugSink: sink,
-		Prompt: func(_ context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
+		Prompt: func(_ context.Context, input RunInput) (gaictx.PromptBuilder, error) {
 			return &testPromptBuilder{}, nil
 		},
-		Middleware: []agent.Middleware{agent.NewAgentMiddleware(post, agent.AgentMiddlewareConfig{
-			Output: agent.PreserveOutput,
+		Middleware: []Middleware{NewAgentMiddleware(post, AgentMiddlewareConfig{
+			Output: PreserveOutput,
 		})},
 	})
 
-	workflow, err := primary.NewRun(t.Context(), agent.RunInput{
+	workflow, err := primary.NewRun(t.Context(), RunInput{
 		ID:     "run-1",
 		Prompt: gaictx.PromptInput{User: gaictx.NewTextContent("question")},
 		Meta:   map[string]any{"session_id": "session-1"},
@@ -104,14 +103,14 @@ func TestAgentRunSpanIsParentOfWorkflow(t *testing.T) {
 		otel.SetTracerProvider(previousProvider)
 	})
 
-	a := agent.New(agent.Definition{
+	a := New(Definition{
 		Name:  "primary",
 		Model: &mocks.MockModel{Responses: []mocks.MockModelResponse{{Res: ai.AIResponse{Text: "done"}}}},
-		Prompt: func(_ context.Context, _ agent.RunInput) (gaictx.PromptBuilder, error) {
+		Prompt: func(_ context.Context, _ RunInput) (gaictx.PromptBuilder, error) {
 			return &testPromptBuilder{}, nil
 		},
 	})
-	workflow, err := a.NewRun(t.Context(), agent.RunInput{ID: "run-42", Prompt: gaictx.PromptInput{User: gaictx.NewTextContent("question")}, Meta: map[string]any{"session_id": "session-1"}})
+	workflow, err := a.NewRun(t.Context(), RunInput{ID: "run-42", Prompt: gaictx.PromptInput{User: gaictx.NewTextContent("question")}, Meta: map[string]any{"session_id": "session-1"}})
 	if err != nil {
 		t.Fatalf("NewRun failed: %v", err)
 	}
@@ -149,13 +148,13 @@ func TestAgentRunSpanIsParentOfWorkflow(t *testing.T) {
 
 func TestAgentContentCapturePolicySeparatesPromptCompletionAndReasoning(t *testing.T) {
 	sink := &agentDebugSink{}
-	a := agent.New(agent.Definition{
+	a := New(Definition{
 		Name:      "primary",
 		DebugSink: sink,
 		Model: &mocks.MockModel{Responses: []mocks.MockModelResponse{{Res: ai.AIResponse{
 			Text: "answer-secret", Reasoning: "reason-secret",
 		}}}},
-		Prompt: func(_ context.Context, _ agent.RunInput) (gaictx.PromptBuilder, error) {
+		Prompt: func(_ context.Context, _ RunInput) (gaictx.PromptBuilder, error) {
 			return &testPromptBuilder{}, nil
 		},
 	})
@@ -165,7 +164,7 @@ func TestAgentContentCapturePolicySeparatesPromptCompletionAndReasoning(t *testi
 			return []byte(strings.ReplaceAll(string(value), "secret", "[redacted]")), nil
 		},
 	})
-	workflow, err := a.NewRun(ctx, agent.RunInput{Prompt: gaictx.PromptInput{User: gaictx.NewTextContent("question-secret")}})
+	workflow, err := a.NewRun(ctx, RunInput{Prompt: gaictx.PromptInput{User: gaictx.NewTextContent("question-secret")}})
 	if err != nil {
 		t.Fatalf("NewRun failed: %v", err)
 	}
@@ -185,7 +184,7 @@ func TestAgentContentCapturePolicySeparatesPromptCompletionAndReasoning(t *testi
 
 func TestAgentObservabilityReportsCreationAndMiddlewareFailures(t *testing.T) {
 	sink := &agentDebugSink{}
-	_, err := agent.New(agent.Definition{Name: "broken", DebugSink: sink}).NewRun(t.Context(), textRunInput("question"))
+	_, err := New(Definition{Name: "broken", DebugSink: sink}).NewRun(t.Context(), textRunInput("question"))
 	if err == nil {
 		t.Fatal("expected run creation failure")
 	}
@@ -194,24 +193,24 @@ func TestAgentObservabilityReportsCreationAndMiddlewareFailures(t *testing.T) {
 	}
 
 	mapErr := errors.New("map input")
-	post := agent.New(agent.Definition{
+	post := New(Definition{
 		Name:  "post",
 		Model: &mocks.MockModel{},
-		Prompt: func(_ context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
+		Prompt: func(_ context.Context, input RunInput) (gaictx.PromptBuilder, error) {
 			return &testPromptBuilder{}, nil
 		},
 	})
-	primary := agent.New(agent.Definition{
+	primary := New(Definition{
 		Name:      "primary",
 		Model:     &mocks.MockModel{Responses: []mocks.MockModelResponse{{Res: ai.AIResponse{Text: "primary"}}}},
 		DebugSink: sink,
-		Prompt: func(_ context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
+		Prompt: func(_ context.Context, input RunInput) (gaictx.PromptBuilder, error) {
 			return &testPromptBuilder{}, nil
 		},
-		Middleware: []agent.Middleware{agent.NewAgentMiddleware(post, agent.AgentMiddlewareConfig{
-			ErrorPolicy: agent.RecordError,
-			MapInput: func(context.Context, agent.WorkflowResult) (agent.RunInput, error) {
-				return agent.RunInput{}, mapErr
+		Middleware: []Middleware{NewAgentMiddleware(post, AgentMiddlewareConfig{
+			ErrorPolicy: RecordError,
+			MapInput: func(context.Context, WorkflowResult) (RunInput, error) {
+				return RunInput{}, mapErr
 			},
 		})},
 	})
@@ -293,21 +292,22 @@ func TestTraceContextPropagatesAcrossRetriesToolsAndNestedMiddleware(t *testing.
 		{{Type: ai.TokenTypeText, Text: "primary"}},
 	}}
 	postModel := &traceTestModel{scripts: [][]ai.Token{{{Type: ai.TokenTypeText, Text: "post"}}}}
-	post := agent.New(agent.Definition{
+	post := New(Definition{
 		Name:  "post",
 		Model: postModel,
-		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+		Prompt: func(context.Context, RunInput) (gaictx.PromptBuilder, error) {
 			return &testPromptBuilder{}, nil
 		},
 	})
-	primary := agent.New(agent.Definition{
-		Name:  "primary",
-		Model: primaryModel,
-		Tools: []loop.Tool{traceTestTool{Tool: loop.NewEchoTool()}},
-		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+	primary := New(Definition{
+		Name:        "primary",
+		Model:       primaryModel,
+		Tools:       []loop.Tool{traceTestTool{Tool: loop.NewEchoTool()}},
+		RetryPolicy: &loop.RetryPolicy{MaxRetries: 1},
+		Prompt: func(context.Context, RunInput) (gaictx.PromptBuilder, error) {
 			return &testPromptBuilder{}, nil
 		},
-		Middleware: []agent.Middleware{agent.NewAgentMiddleware(post, agent.AgentMiddlewareConfig{Output: agent.PreserveOutput})},
+		Middleware: []Middleware{NewAgentMiddleware(post, AgentMiddlewareConfig{Output: PreserveOutput})},
 	})
 
 	traceContext := &gai.TraceContext{
@@ -319,7 +319,7 @@ func TestTraceContextPropagatesAcrossRetriesToolsAndNestedMiddleware(t *testing.
 		Environment: "staging",
 		Metadata:    map[string]string{"feature": "chat"},
 	}
-	workflow, err := primary.NewRun(t.Context(), agent.RunInput{
+	workflow, err := primary.NewRun(t.Context(), RunInput{
 		ID:           "run-1",
 		TraceContext: traceContext,
 		Prompt:       gaictx.PromptInput{User: gaictx.NewTextContent("question")},
@@ -328,7 +328,6 @@ func TestTraceContextPropagatesAcrossRetriesToolsAndNestedMiddleware(t *testing.
 	if err != nil {
 		t.Fatalf("NewRun failed: %v", err)
 	}
-	workflow.Loop.RetryPolicy = &loop.RetryPolicy{MaxRetries: 1}
 	traceContext.UserID = "mutated-user"
 	traceContext.Tags[0] = "mutated-tag"
 	traceContext.Metadata["feature"] = "mutated-feature"
@@ -370,10 +369,10 @@ func TestTraceContextPropagatesAcrossRetriesToolsAndNestedMiddleware(t *testing.
 }
 
 func TestRunInputTraceContextInheritsOrReplacesAtomically(t *testing.T) {
-	a := agent.New(agent.Definition{
+	a := New(Definition{
 		Name:  "trace-context",
 		Model: &mocks.MockModel{},
-		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+		Prompt: func(context.Context, RunInput) (gaictx.PromptBuilder, error) {
 			return &testPromptBuilder{}, nil
 		},
 	})
@@ -407,14 +406,14 @@ func TestTraceContextSurvivesCanceledRunEventsContext(t *testing.T) {
 		otel.SetTracerProvider(previousProvider)
 	})
 
-	a := agent.New(agent.Definition{
+	a := New(Definition{
 		Name:  "canceled",
 		Model: &mocks.MockModel{},
-		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
+		Prompt: func(context.Context, RunInput) (gaictx.PromptBuilder, error) {
 			return &testPromptBuilder{}, nil
 		},
 	})
-	workflow, err := a.NewRun(t.Context(), agent.RunInput{
+	workflow, err := a.NewRun(t.Context(), RunInput{
 		TraceContext: &gai.TraceContext{UserID: "canceled-user"},
 		Prompt:       gaictx.PromptInput{User: gaictx.NewTextContent("question")},
 	})
