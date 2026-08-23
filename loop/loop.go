@@ -120,8 +120,9 @@ func (l *Loop) Validate() error {
 
 // EffectiveTools validates and resolves the run-scoped executable tool set for
 // a transport and tool choice. Text transport omits disabled tools and limits
-// named choices to the tools rendered in its prompt; native transport preserves
-// the configured set for provider-side choice handling.
+// named choices to the tools rendered in its prompt. Native transport preserves
+// the configured set except that required named choices are similarly limited
+// for provider-side choice handling.
 func EffectiveTools(tools []Tool, choice ai.ToolChoice, transport ToolTransportMode) ([]Tool, error) {
 	if err := choice.Validate(); err != nil {
 		return nil, err
