@@ -49,7 +49,7 @@ func TestOperationPreservesSpanAndDebugEventSemantics(t *testing.T) {
 	}
 	attrs := map[string]string{}
 	for _, attr := range span.Attributes() {
-		attrs[string(attr.Key)] = attr.Value.Emit()
+		attrs[string(attr.Key)] = attr.Value.String()
 	}
 	if attrs["test.operation"] != "run" || attrs["test.initial"] != "value" || attrs["test.count"] != "2" {
 		t.Fatalf("attrs = %#v", attrs)
