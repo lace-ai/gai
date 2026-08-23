@@ -44,9 +44,15 @@ func (m *Model) NativeTools() bool { return true }
 
 func (m *Model) Close() error { return nil }
 
-// Tokenizer returns nil because OpenAI tokenization is not implemented by this provider.
-// This prevents callers from installing an unusable tokenizer into prompt or history flows.
-func (m *Model) Tokenizer() ai.Tokenizer { return nil }
+// Tokenizer returns a local tokenizer only when this model has a known encoding.
+// Unknown models remain nil so callers retain their configured fallback behavior.
+func (m *Model) Tokenizer() ai.Tokenizer {
+	tokenizer, err := NewTokenizer(m.name)
+	if err != nil {
+		return nil
+	}
+	return tokenizer
+}
 
 func (m *Model) Descriptor() ai.ModelDescriptor {
 	if facts, ok := m.provider.catalog.Lookup(m.name); ok {
@@ -360,6 +366,9 @@ func openAIDescriptor(model string) ai.ModelDescriptor {
 		ToolCalling: ai.FeatureSupportSupported,
 		JSONOutput:  ai.FeatureSupportSupported, JSONSchemaOutput: ai.FeatureSupportSupported,
 		Tokenizer: ai.TokenizerDescriptor{Available: ai.FeatureSupportUnsupported},
+	}
+	if isTokenizerAvailableForModel(model) {
+		d.Tokenizer = ai.TokenizerDescriptor{Available: ai.FeatureSupportSupported, Fidelity: ai.TokenizerFidelityEstimated}
 	}
 	if efforts := gpt5ReasoningEfforts(model); len(efforts) > 0 {
 		d.ReasoningEffort = ai.FeatureSupportSupported
