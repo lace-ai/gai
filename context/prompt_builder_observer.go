@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"github.com/lace-ai/gai"
+	"github.com/lace-ai/gai/internal/observe"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
 )
 
 type promptContextBuildStats struct {
@@ -36,76 +36,74 @@ type promptPartTokenStats struct {
 }
 
 type promptBuilderObserver struct {
-	debug gai.DebugSink
-	span  trace.Span
+	debug     gai.DebugSink
+	operation *observe.Operation
 }
 
 func newPromptBuilderDebugObserver(b *Builder) *promptBuilderObserver {
 	if b == nil {
 		return &promptBuilderObserver{}
 	}
-	return &promptBuilderObserver{debug: b.debugSink}
+	return &promptBuilderObserver{debug: b.debugSink, operation: observe.New(b.debugSink, "context:Builder")}
 }
 
 func newPromptBuilderContextObserver(ctx context.Context, b *Builder) (context.Context, *promptBuilderObserver) {
-	ctx, span := gai.StartOperationSpan(ctx, contextTracerName, "context.prompt_builder", "context.operation", "build_context",
+	ctx, operation := observe.Start(ctx, b.debugSink, contextTracerName, "context.prompt_builder", "context.operation", "build_context", "context:Builder",
 		attribute.Int("context.source_count", len(b.ContextSources)),
 		attribute.Int("context.system_instruction_count", len(b.SystemInstructions)),
 		attribute.Int("context.token_budget", b.TokenBudget),
 		attribute.Int("context.output_token_reserve", b.OutputTokenReserve),
 		attribute.Bool("context.tokenizer_present", b.tokenizer != nil),
 	)
-	return ctx, &promptBuilderObserver{
-		debug: b.debugSink,
-		span:  span,
-	}
+	return ctx, &promptBuilderObserver{debug: b.debugSink, operation: operation}
 }
 
 func newPromptBuilderRenderObserver(ctx context.Context, b *Builder) (context.Context, *promptBuilderObserver) {
-	ctx, span := gai.StartOperationSpan(ctx, contextTracerName, "context.prompt_builder", "context.operation", "render_prompt",
+	ctx, operation := observe.Start(ctx, b.debugSink, contextTracerName, "context.prompt_builder", "context.operation", "render_prompt", "context:Builder",
 		attribute.Int("context.system_parts", len(b.SystemInstructions)),
 		attribute.Int("context.context_parts", len(b.ContextParts)),
 		attribute.Bool("context.has_user_input", b.input.User != nil),
 		attribute.Int("context.input_context_parts", len(b.input.Context)),
 	)
-	return ctx, &promptBuilderObserver{
-		debug: b.debugSink,
-		span:  span,
-	}
+	return ctx, &promptBuilderObserver{debug: b.debugSink, operation: operation}
 }
 
 func (o *promptBuilderObserver) FinishContext(err error, stats promptContextBuildStats) {
-	if o == nil || o.span == nil {
+	if o == nil {
 		return
 	}
-	o.span.SetAttributes(
+	o.operation.Set(
 		attribute.Int("context.system_tokens", stats.SystemTokens),
 		attribute.Int("context.remaining_tokens", stats.RemainingTokens),
 		attribute.Int("context.context_parts", stats.ContextPartCount),
 		attribute.Int("context.included_source_count", stats.IncludedSourceCount),
 	)
-	gai.EndSpan(o.span, err)
+	o.operation.Finish(err)
 }
 
 func (o *promptBuilderObserver) FinishRender(err error, stats promptRenderStats) {
-	if o == nil || o.span == nil {
+	if o == nil {
 		return
 	}
-	o.span.SetAttributes(
+	o.operation.Set(
 		attribute.Int("context.conversation_messages", stats.ConversationMessageCount),
 		attribute.Int("context.part_count", stats.PartCount),
 		attribute.Int("context.prompt_chars", stats.PromptChars),
 	)
-	gai.EndSpan(o.span, err)
+	o.operation.Finish(err)
 }
 
 func (o *promptBuilderObserver) StartRendererRender(ctx context.Context, partCount int) (context.Context, func(error, int)) {
-	renderCtx, span := gai.StartOperationSpan(ctx, contextTracerName, "context.prompt_builder", "context.operation", "renderer_render",
+	var debug gai.DebugSink
+	if o != nil {
+		debug = o.debug
+	}
+	renderCtx, operation := observe.Start(ctx, debug, contextTracerName, "context.prompt_builder", "context.operation", "renderer_render", "context:Builder",
 		attribute.Int("context.part_count", partCount),
 	)
 	return renderCtx, func(err error, promptChars int) {
-		span.SetAttributes(attribute.Int("context.prompt_chars", promptChars))
-		gai.EndSpan(span, err)
+		operation.Set(attribute.Int("context.prompt_chars", promptChars))
+		operation.Finish(err)
 	}
 }
 
@@ -119,8 +117,8 @@ func (o *promptBuilderObserver) BuildStarted(ctx context.Context, stats promptCo
 	if o == nil {
 		return
 	}
-	if o.span != nil {
-		o.span.SetAttributes(
+	if o.operation != nil {
+		o.operation.Set(
 			attribute.Int("context.system_tokens", stats.SystemTokens),
 			attribute.Int("context.remaining_tokens", stats.RemainingTokens),
 		)
@@ -140,8 +138,8 @@ func (o *promptBuilderObserver) SourceFailed(ctx context.Context, source string,
 	if o == nil {
 		return
 	}
-	if o.span != nil {
-		o.span.SetAttributes(attribute.String("context.failed_source", source))
+	if o.operation != nil {
+		o.operation.Set(attribute.String("context.failed_source", source))
 	}
 	o.emit(ctx, "prompt_builder_source_failed", map[string]any{
 		"source":           source,
@@ -211,15 +209,10 @@ func (o *promptBuilderObserver) TokenCountFailed(ctx context.Context, fields map
 }
 
 func (o *promptBuilderObserver) emit(ctx context.Context, name string, fields map[string]any, err error) {
-	if o == nil || o.debug == nil {
+	if o == nil {
 		return
 	}
-	o.debug.Emit(ctx, gai.DebugEvent{
-		Name:   name,
-		Source: "context:Builder",
-		Fields: fields,
-		Err:    err,
-	})
+	o.operation.Emit(ctx, name, fields, err)
 }
 
 func promptDebugFields(ctx context.Context, parts []Part, prompt string) map[string]any {
