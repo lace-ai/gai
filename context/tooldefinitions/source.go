@@ -71,19 +71,16 @@ func toolChoiceInstruction(choice ai.ToolChoice) string {
 	return "You must make at least one tool call before producing a normal response. You may call only these selected tools: " + strings.Join(choice.Names, ", ") + "."
 }
 
-// New creates a context source from tool signatures and a renderer. The slice is
-// copied so callers can safely reuse or modify their input slice after construction.
-func New[T gaictx.ToolSignature](renderer gaictx.Renderer, tools []T, debug gai.DebugSink, options ...Option) (*Source, error) {
-	if len(tools) == 0 {
-		return nil, ErrToolsEmpty
-	}
-	signatures := make([]gaictx.ToolSignature, len(tools))
-	for index, tool := range tools {
-		signature := gaictx.ToolSignature(tool)
-		if isNilToolSignature(signature) {
-			return nil, fmt.Errorf("%w: tool at index %d is nil", ErrToolInvalid, index)
-		}
-		signatures[index] = signature
+// New creates a context source from tool signatures and a renderer. tools must
+// be a slice whose elements implement context.ToolSignature. The slice is copied
+// so callers can safely reuse or modify their input slice after construction.
+//
+// tools accepts untyped nil for compatibility with the pre-generic constructor,
+// and accepts slices of either executable loop tools or signature-only tools.
+func New(renderer gaictx.Renderer, tools any, debug gai.DebugSink, options ...Option) (*Source, error) {
+	signatures, err := toolSignatures(tools)
+	if err != nil {
+		return nil, err
 	}
 	source := &Source{
 		tools:         signatures,
@@ -100,6 +97,29 @@ func New[T gaictx.ToolSignature](renderer gaictx.Renderer, tools []T, debug gai.
 		}
 	}
 	return source, nil
+}
+
+func toolSignatures(tools any) ([]gaictx.ToolSignature, error) {
+	value := reflect.ValueOf(tools)
+	if !value.IsValid() {
+		return nil, ErrToolsEmpty
+	}
+	if value.Kind() != reflect.Slice {
+		return nil, fmt.Errorf("%w: tools must be a slice", ErrToolInvalid)
+	}
+	if value.Len() == 0 {
+		return nil, ErrToolsEmpty
+	}
+
+	signatures := make([]gaictx.ToolSignature, value.Len())
+	for index := range signatures {
+		signature, ok := value.Index(index).Interface().(gaictx.ToolSignature)
+		if !ok || isNilToolSignature(signature) {
+			return nil, fmt.Errorf("%w: tool at index %d is invalid", ErrToolInvalid, index)
+		}
+		signatures[index] = signature
+	}
+	return signatures, nil
 }
 
 func (s *Source) Name() string {
