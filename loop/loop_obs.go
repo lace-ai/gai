@@ -334,21 +334,23 @@ func startToolSpan(ctx context.Context, call ai.ToolCall, sinks ...gai.Observati
 	return ctx, &toolObservation{ctx: ctx, span: span, sink: sink, call: call}
 }
 
-func callObservedTool(ctx context.Context, call ai.ToolCall, tools []Tool, sinks ...gai.ObservationSink) (response *ToolResponse) {
+func callObservedTool(ctx context.Context, call ai.ToolCall, tools []Tool, sinks ...gai.ObservationSink) (response *ToolResponse, duration time.Duration) {
 	toolCtx, observation := startToolSpan(ctx, call, sinks...)
 	missingResponse := false
+	started := time.Now()
 	defer func() {
+		duration = time.Since(started)
 		if panicValue := recover(); panicValue != nil {
 			observation.finishPanic()
 			panic(panicValue)
 		}
-		observation.finish(response, missingResponse)
+		observation.finish(response, missingResponse, duration)
 	}()
 	response, missingResponse = callTool(toolCtx, &call, tools)
-	return response
+	return response, duration
 }
 
-func (o *toolObservation) finish(response *ToolResponse, missingResponse bool) {
+func (o *toolObservation) finish(response *ToolResponse, missingResponse bool, duration time.Duration) {
 	if o == nil {
 		return
 	}
@@ -363,7 +365,7 @@ func (o *toolObservation) finish(response *ToolResponse, missingResponse bool) {
 				setCapturedToolContent(o.span, "tool.output", captured, aliases...)
 			}
 		}
-		o.setOutcome(outcome, spanErr)
+		o.setOutcome(outcome, spanErr, duration)
 	})
 }
 
@@ -372,11 +374,11 @@ func (o *toolObservation) finishPanic() {
 		return
 	}
 	o.finishOnce.Do(func() {
-		o.setOutcome(toolOutcomePanic, errObservedToolPanic)
+		o.setOutcome(toolOutcomePanic, errObservedToolPanic, 0)
 	})
 }
 
-func (o *toolObservation) setOutcome(outcome string, spanErr error) {
+func (o *toolObservation) setOutcome(outcome string, spanErr error, duration time.Duration) {
 	status := "success"
 	attrs := []attribute.KeyValue{attribute.String("gai.tool.outcome", outcome)}
 	if spanErr != nil {
@@ -394,6 +396,7 @@ func (o *toolObservation) setOutcome(outcome string, spanErr error) {
 			"tool_type":    o.call.Type,
 			"outcome":      outcome,
 			"status":       status,
+			"duration_ms":  duration.Milliseconds(),
 		},
 		Err: spanErr,
 	})

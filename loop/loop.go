@@ -701,9 +701,7 @@ func (l *Loop) executeToolCalls(ctx context.Context, iteration *Iteration, toolC
 		go func(tc pendingToolCall) {
 			defer wg.Done()
 
-			started := time.Now()
-			toolRes := callObservedTool(ctx, tc.call, tools, l.ObservationSink)
-			duration := time.Since(started)
+			toolRes, duration := callObservedTool(ctx, tc.call, tools, l.ObservationSink)
 			iteration.Parts[tc.partIndex].ToolResp = toolRes
 			if l.ToolResponseProcessor != nil {
 				if err := l.ToolResponseProcessor.Process(tc.call, toolRes); err != nil {

@@ -69,6 +69,50 @@ func TestToolObservationEmitsOutcomeToSink(t *testing.T) {
 	}
 }
 
+func TestExecuteToolCallsDurationExcludesSinkEmissionLatency(t *testing.T) {
+	sinkEntered := make(chan struct{})
+	releaseSink := make(chan struct{})
+	var observed gai.Observation
+	sink := gai.ObservationSinkFunc(func(_ context.Context, observation gai.Observation) {
+		observed = observation
+		close(sinkEntered)
+		<-releaseSink
+	})
+	tool := observedTestTool{name: "fast", call: func(context.Context, *ai.ToolCall) *ToolResponse {
+		return NewToolSuccess("ok")
+	}}
+	l := &Loop{Tools: []Tool{tool}, ObservationSink: sink}
+	iteration := &Iteration{Parts: make([]IterationPart, 1)}
+	calls := []pendingToolCall{{partIndex: 0, call: ai.ToolCall{ID: "call-fast", Type: "function", Name: "fast", Args: json.RawMessage(`{}`)}}}
+	events := make(chan Event, 2)
+	done := make(chan error, 1)
+
+	go func() { done <- l.executeToolCalls(t.Context(), iteration, calls, l.Tools, events, 1, 1, 0) }()
+	<-sinkEntered
+	time.Sleep(50 * time.Millisecond)
+	close(releaseSink)
+	if err := <-done; err != nil {
+		t.Fatalf("executeToolCalls error = %v", err)
+	}
+	close(events)
+
+	var result Event
+	for event := range events {
+		if event.Type == EventToolResult {
+			result = event
+		}
+	}
+	if result.Type != EventToolResult {
+		t.Fatal("tool result event was not emitted")
+	}
+	if result.Duration >= 25*time.Millisecond {
+		t.Fatalf("tool duration = %s, includes sink emission latency", result.Duration)
+	}
+	if got, ok := observed.Fields["duration_ms"].(int64); !ok || got != result.Duration.Milliseconds() {
+		t.Fatalf("observation duration_ms = %#v, want %d", observed.Fields["duration_ms"], result.Duration.Milliseconds())
+	}
+}
+
 func (t observedTestTool) Name() string              { return t.name }
 func (t observedTestTool) Description() string       { return "Test tool." }
 func (t observedTestTool) Params() ai.ToolParameters { return NewEchoTool().Params() }
@@ -116,7 +160,7 @@ func TestToolObservationOutcomes(t *testing.T) {
 				ctx = tt.ctx(t)
 			}
 			call := ai.ToolCall{ID: "call-1", Type: "function", Name: "test", Args: json.RawMessage(`{}`)}
-			response := callObservedTool(ctx, call, []Tool{observedTestTool{name: "test", call: tt.call}})
+			response, _ := callObservedTool(ctx, call, []Tool{observedTestTool{name: "test", call: tt.call}})
 			if response == nil {
 				t.Fatal("observed tool returned nil response")
 			}
@@ -284,8 +328,8 @@ func TestToolObservationOmitsContentByDefault(t *testing.T) {
 func TestToolObservationFinishesOnce(t *testing.T) {
 	recorder := obstest.Install(t)
 	_, observation := startToolSpan(t.Context(), ai.ToolCall{ID: "call-once", Name: "once"})
-	observation.finish(NewToolSuccess("ok"), false)
-	observation.finish(NewToolError(errors.New("late error")), false)
+	observation.finish(NewToolSuccess("ok"), false, 0)
+	observation.finish(NewToolError(errors.New("late error")), false, 0)
 	observation.finishPanic()
 
 	span := requireToolSpans(t, recorder, 1)[0]
