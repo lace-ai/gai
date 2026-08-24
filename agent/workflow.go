@@ -117,7 +117,7 @@ type middlewareValidator interface {
 // Workflow runs a configured agent loop and its stream middleware. A Workflow
 // is single-use; create another with Agent.NewRun for a subsequent invocation.
 type Workflow struct {
-	Loop       *loop.Loop
+	loop       *loop.Loop
 	middleware []Middleware
 	name       string
 	debug      gai.DebugSink
@@ -130,7 +130,7 @@ type Workflow struct {
 func newWorkflow(input RunInput, l *loop.Loop, name string, debug gai.DebugSink, middleware []Middleware) *Workflow {
 	input = cloneRunInput(input)
 	return &Workflow{
-		Loop:       l,
+		loop:       l,
 		middleware: append([]Middleware(nil), middleware...),
 		name:       name,
 		debug:      debug,
@@ -179,7 +179,7 @@ func (w *Workflow) RunEvents(ctx context.Context) <-chan loop.Event {
 	ctx, runObs := newAgentRunObserver(ctx, w)
 	ctx, obs := newWorkflowObserver(ctx, w)
 	obs.Started(ctx)
-	return w.captureEvents(ctx, w.Loop.Run(ctx), obs, runObs)
+	return w.captureEvents(ctx, w.loop.Run(ctx), obs, runObs)
 }
 
 // Run starts the workflow and returns the final transformed stream. Deprecated:
@@ -192,7 +192,7 @@ func (w *Workflow) Run(ctx context.Context) (<-chan ai.Token, <-chan loop.Iterat
 	ctx = applyWorkflowTraceContext(ctx, w)
 	ctx, runObs := newAgentRunObserver(ctx, w)
 	ctx, obs := newWorkflowObserver(ctx, w)
-	events := w.Loop.Run(ctx)
+	events := w.loop.Run(ctx)
 
 	obs.Started(ctx)
 	stream := w.capturePrimary(ctx, loopEventsToStream(ctx, events), obs)
@@ -313,16 +313,16 @@ func (w *Workflow) Result() WorkflowResult {
 func (w *Workflow) capturePrimary(ctx context.Context, upstream Stream, obs *workflowObserver) Stream {
 	return captureStream(ctx, upstream, func(captured capturedStream) {
 		canceled, cancellationErr := captured.cancellation()
-		tokens := iterationTokens(w.Loop.Iterations)
+		tokens := iterationTokens(w.loop.Iterations)
 		result := AgentResult{
 			Tokens:          tokens,
 			Text:            tokenText(tokens),
 			Reasoning:       tokenReasoning(tokens),
 			AttemptedTokens: cloneTokens(captured.Tokens),
 			AttemptedText:   tokenText(captured.Tokens),
-			Messages:        cloneMessages(w.Loop.Messages()),
-			Iterations:      cloneIterations(w.Loop.Iterations),
-			Usage:           iterationUsage(w.Loop.Iterations),
+			Messages:        cloneMessages(w.loop.Messages()),
+			Iterations:      cloneIterations(w.loop.Iterations),
+			Usage:           iterationUsage(w.loop.Iterations),
 			BilledUsage:     statusUsage(captured.Statuses),
 			Errors:          append([]error(nil), captured.Errors...),
 			Canceled:        canceled,
@@ -405,9 +405,9 @@ func (w *Workflow) captureEvents(ctx context.Context, upstream <-chan loop.Event
 			Tokens:          cloneTokens(tokens),
 			Text:            tokenText(tokens),
 			Reasoning:       tokenReasoning(tokens),
-			Messages:        cloneMessages(w.Loop.Messages()),
-			Iterations:      cloneIterations(w.Loop.Iterations),
-			Usage:           iterationUsage(w.Loop.Iterations),
+			Messages:        cloneMessages(w.loop.Messages()),
+			Iterations:      cloneIterations(w.loop.Iterations),
+			Usage:           iterationUsage(w.loop.Iterations),
 			BilledUsage:     billedUsage,
 			Errors:          append([]error(nil), errs...),
 			Canceled:        canceled,
@@ -527,7 +527,7 @@ func captureStream(ctx context.Context, upstream Stream, completed func(captured
 }
 
 func (w *Workflow) begin() error {
-	if w == nil || w.Loop == nil {
+	if w == nil || w.loop == nil {
 		return ErrWorkflowNotConfigured
 	}
 

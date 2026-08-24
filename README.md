@@ -179,6 +179,12 @@ Built-in providers discover compatible models dynamically and use a bundled fall
 
 ## Tools and agent loops
 
+### Package boundary
+
+`agent` is the high-level API: it owns reusable definitions, per-run configuration, workflow lifecycle, middleware, and aggregate results. `loop` is the canonical low-level execution API and owns tools, tool responses and helpers, selection and transport, ordered events, and iterations. `ai` owns provider-neutral request, definition, and call types. Use `agent` for application workflows; use `loop` directly only when an application deliberately needs mutable execution control.
+
+`Workflow.RunEvents` exposes the canonical `loop.Event` stream, while workflow results contain copied `loop.Iteration` snapshots. Prompt-only tool rendering accepts `context.ToolSignature`, so context packages do not require executable tools.
+
 A tool has a typed schema and a Go function:
 
 ```go

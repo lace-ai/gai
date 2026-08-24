@@ -260,14 +260,14 @@ func TestAgentWorkflowStreamsRetriedAttemptTokens(t *testing.T) {
 		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
 			return gaictx.New(gaictx.Definition{Renderer: &gaictx.SimpleRenderer{}}), nil
 		},
-		Limits: agent.Limits{MaxLoopIterations: 1},
+		Limits:      agent.Limits{MaxLoopIterations: 1},
+		RetryPolicy: &loop.RetryPolicy{MaxRetries: 1},
 	})
 
 	workflow, err := assistant.NewRun(context.Background(), textRunInput("retry"))
 	if err != nil {
 		t.Fatalf("NewRun failed: %v", err)
 	}
-	workflow.Loop.RetryPolicy = &loop.RetryPolicy{MaxRetries: 1}
 	consumed := consumeWorkflow(t, workflow)
 	if len(consumed.errs) != 0 {
 		t.Fatalf("unexpected workflow errors: %v", consumed.errs)
@@ -544,14 +544,14 @@ func TestAgentWorkflowRunEventsPreservesRetryOrdering(t *testing.T) {
 		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
 			return gaictx.New(gaictx.Definition{Renderer: &gaictx.SimpleRenderer{}}), nil
 		},
-		Limits: agent.Limits{MaxLoopIterations: 1},
+		Limits:      agent.Limits{MaxLoopIterations: 1},
+		RetryPolicy: &loop.RetryPolicy{MaxRetries: 1},
 	})
 
 	workflow, err := assistant.NewRun(context.Background(), textRunInput("retry"))
 	if err != nil {
 		t.Fatalf("NewRun failed: %v", err)
 	}
-	workflow.Loop.RetryPolicy = &loop.RetryPolicy{MaxRetries: 1}
 
 	var events []loop.Event
 	for event := range workflow.RunEvents(context.Background()) {

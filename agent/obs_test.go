@@ -301,9 +301,10 @@ func TestTraceContextPropagatesAcrossRetriesToolsAndNestedMiddleware(t *testing.
 		},
 	})
 	primary := agent.New(agent.Definition{
-		Name:  "primary",
-		Model: primaryModel,
-		Tools: []loop.Tool{traceTestTool{Tool: loop.NewEchoTool()}},
+		Name:        "primary",
+		Model:       primaryModel,
+		Tools:       []loop.Tool{traceTestTool{Tool: loop.NewEchoTool()}},
+		RetryPolicy: &loop.RetryPolicy{MaxRetries: 1},
 		Prompt: func(context.Context, agent.RunInput) (gaictx.PromptBuilder, error) {
 			return &testPromptBuilder{}, nil
 		},
@@ -328,7 +329,6 @@ func TestTraceContextPropagatesAcrossRetriesToolsAndNestedMiddleware(t *testing.
 	if err != nil {
 		t.Fatalf("NewRun failed: %v", err)
 	}
-	workflow.Loop.RetryPolicy = &loop.RetryPolicy{MaxRetries: 1}
 	traceContext.UserID = "mutated-user"
 	traceContext.Tags[0] = "mutated-tag"
 	traceContext.Metadata["feature"] = "mutated-feature"

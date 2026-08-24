@@ -5,13 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 
 	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
 	gaictx "github.com/lace-ai/gai/context"
-	"github.com/lace-ai/gai/loop"
 )
 
 var (
@@ -24,10 +24,11 @@ const toolUseProtocol = `When a tool is required, output each tool call as a sta
 
 The name must match a listed tool, type must be exactly "function" and arguments must match its signature. Do not include an id, do not wrap the JSON in Markdown, and separate multiple calls with a blank line. If no tool is needed, respond normally. Do not repeat a completed tool call when its result is already present.`
 
-// Source renders loop tools and their text-based invocation protocol as prompt
-// context.
+// Source renders tool signatures and their text-based invocation protocol as
+// prompt context. Executable loop tools satisfy context.ToolSignature but are
+// not required by this package.
 type Source struct {
-	tools         []loop.Tool
+	tools         []gaictx.ToolSignature
 	renderer      gaictx.Renderer
 	debug         gai.DebugSink
 	usageProtocol string
@@ -70,19 +71,21 @@ func toolChoiceInstruction(choice ai.ToolChoice) string {
 	return "You must make at least one tool call before producing a normal response. You may call only these selected tools: " + strings.Join(choice.Names, ", ") + "."
 }
 
-// New creates a context source from tools and a renderer. The slice is copied
-// so callers can safely reuse or modify their input slice after construction.
-func New(renderer gaictx.Renderer, tools []loop.Tool, debug gai.DebugSink, options ...Option) (*Source, error) {
+// New creates a context source from tool signatures and a renderer. The slice is
+// copied so callers can safely reuse or modify their input slice after construction.
+func New(renderer gaictx.Renderer, tools []gaictx.ToolSignature, debug gai.DebugSink, options ...Option) (*Source, error) {
 	if len(tools) == 0 {
 		return nil, ErrToolsEmpty
 	}
-	for index, tool := range tools {
-		if tool == nil {
+	signatures := make([]gaictx.ToolSignature, len(tools))
+	for index, signature := range tools {
+		if isNilToolSignature(signature) {
 			return nil, fmt.Errorf("%w: tool at index %d is nil", ErrToolInvalid, index)
 		}
+		signatures[index] = signature
 	}
 	source := &Source{
-		tools:         append([]loop.Tool(nil), tools...),
+		tools:         signatures,
 		renderer:      renderer,
 		debug:         debug,
 		usageProtocol: toolUseProtocol,
@@ -132,7 +135,7 @@ func (s *Source) Function(ctx context.Context, tokenBudget int) (part gaictx.Par
 	if renderer == nil {
 		renderer = &gaictx.XMLRenderer{}
 	}
-	signatures, err := renderer.RenderToolSignatures(toToolSignatures(s.tools))
+	signatures, err := renderer.RenderToolSignatures(append([]gaictx.ToolSignature(nil), s.tools...))
 	if err != nil {
 		observer.Failed(ctx, "render_tool_signatures", err)
 		return nil, err
@@ -146,22 +149,14 @@ func (s *Source) Function(ctx context.Context, tokenBudget int) (part gaictx.Par
 	return part, nil
 }
 
-func toToolSignatures(tools []loop.Tool) []gaictx.ToolSignature {
-	signatures := make([]gaictx.ToolSignature, 0, len(tools))
-	for _, tool := range tools {
-		signatures = append(signatures, tool)
-	}
-	return signatures
-}
-
 type definition struct {
 	name        string
 	description string
 	parameters  string
 }
 
-func definitionFromTool(tool loop.Tool, index int) (definition, error) {
-	if tool == nil {
+func definitionFromTool(tool gaictx.ToolSignature, index int) (definition, error) {
+	if isNilToolSignature(tool) {
 		return definition{}, fmt.Errorf("%w: tool at index %d is nil", ErrToolInvalid, index)
 	}
 	result := definition{
@@ -180,6 +175,19 @@ func definitionFromTool(tool loop.Tool, index int) (definition, error) {
 	}
 	result.parameters = string(params)
 	return result, nil
+}
+
+func isNilToolSignature(signature gaictx.ToolSignature) bool {
+	if signature == nil {
+		return true
+	}
+	value := reflect.ValueOf(signature)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }
 
 func definitionNames(definitions []definition) []string {
