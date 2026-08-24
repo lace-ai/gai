@@ -101,15 +101,6 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 		completion := ai.Completion{Provider: "gemini"}
 		hasCompletion := false
 		defer close(out)
-		if m.debug != nil {
-			fields := map[string]any{"max_tokens": req.MaxTokens}
-			gai.AddObservationContent(ctx, m.debug, fields, "prompt", gai.ContentKindPrompt, req.Prompt)
-			gai.EmitObservation(ctx, m.debug, gai.Observation{
-				Name:   "gemini_stream_request",
-				Source: "ai:gemini.Model.GenerateStream",
-				Fields: fields,
-			})
-		}
 		defer func() {
 			if hasCompletion {
 				generationResult.ResponseModel = completion.Model
@@ -174,6 +165,15 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 		generationCtx, startedObservation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "gemini", Model: m.name, Streaming: true, Sink: m.debug})
 		observation = startedObservation
 		ctx = generationCtx
+		if m.debug != nil {
+			fields := map[string]any{"max_tokens": req.MaxTokens}
+			gai.AddObservationContent(ctx, m.debug, fields, "prompt", gai.ContentKindPrompt, req.Prompt)
+			gai.EmitObservation(ctx, m.debug, gai.Observation{
+				Name:   "gemini_stream_request",
+				Source: "ai:gemini.Model.GenerateStream",
+				Fields: fields,
+			})
+		}
 		for resp, err := range client.Models.GenerateContentStream(generationCtx, m.name, contents, config) {
 			if err != nil {
 				streamErr = classifyProviderError(fmt.Errorf("error generating content stream: %w", err))
@@ -326,16 +326,6 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 	if err := ai.ValidateModelRequest(m, req); err != nil {
 		return nil, err
 	}
-	if m.debug != nil {
-		fields := map[string]any{"max_tokens": req.MaxTokens}
-		gai.AddObservationContent(ctx, m.debug, fields, "prompt", gai.ContentKindPrompt, req.Prompt)
-		gai.EmitObservation(ctx, m.debug, gai.Observation{
-			Name:   "gemini_generate_request",
-			Source: "ai:gemini.Model.Generate",
-			Fields: fields,
-		})
-	}
-
 	client, err := m.getClient(ctx)
 	if err != nil {
 		if m.debug != nil {
@@ -361,6 +351,15 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 		return nil, err
 	}
 	ctx, observation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "gemini", Model: m.name, Sink: m.debug})
+	if m.debug != nil {
+		fields := map[string]any{"max_tokens": req.MaxTokens}
+		gai.AddObservationContent(ctx, m.debug, fields, "prompt", gai.ContentKindPrompt, req.Prompt)
+		gai.EmitObservation(ctx, m.debug, gai.Observation{
+			Name:   "gemini_generate_request",
+			Source: "ai:gemini.Model.Generate",
+			Fields: fields,
+		})
+	}
 	generationResult := ai.GenerationResult{}
 	defer func() {
 		generationResult.HTTPStatus = geminiHTTPStatus(err)

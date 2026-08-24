@@ -508,15 +508,6 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 		var observation *ai.GenerationObservation
 		generationResult := ai.GenerationResult{}
 		defer close(raw)
-		if m.debug != nil {
-			fields := map[string]any{"max_tokens": req.MaxTokens}
-			gai.AddObservationContent(ctx, m.debug, fields, "prompt", gai.ContentKindPrompt, req.Prompt)
-			gai.EmitObservation(ctx, m.debug, gai.Observation{
-				Name:   "mistral_stream_request",
-				Source: "ai:mistral.Model.GenerateStream",
-				Fields: fields,
-			})
-		}
 		defer func() {
 			generationResult.Err = streamErr
 			observation.Finish(generationResult)
@@ -596,6 +587,15 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 		generationCtx, startedObservation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "mistral", Model: m.name, Streaming: true, Sink: m.debug})
 		observation = startedObservation
 		ctx = generationCtx
+		if m.debug != nil {
+			fields := map[string]any{"max_tokens": req.MaxTokens}
+			gai.AddObservationContent(ctx, m.debug, fields, "prompt", gai.ContentKindPrompt, req.Prompt)
+			gai.EmitObservation(ctx, m.debug, gai.Observation{
+				Name:   "mistral_stream_request",
+				Source: "ai:mistral.Model.GenerateStream",
+				Fields: fields,
+			})
+		}
 		httpReq = httpReq.WithContext(generationCtx)
 
 		res, err := m.client.httpClient.Do(httpReq)
@@ -925,16 +925,6 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 	if err := ai.ValidateModelRequest(m, req); err != nil {
 		return nil, err
 	}
-	if m.debug != nil {
-		fields := map[string]any{"max_tokens": req.MaxTokens}
-		gai.AddObservationContent(ctx, m.debug, fields, "prompt", gai.ContentKindPrompt, req.Prompt)
-		gai.EmitObservation(ctx, m.debug, gai.Observation{
-			Name:   "mistral_generate_request",
-			Source: "ai:mistral.Model.Generate",
-			Fields: fields,
-		})
-	}
-
 	payload, err := buildChatCompletionRequest(req, m.name, false)
 	if err != nil {
 		return nil, err
@@ -957,6 +947,15 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 	httpReq.Header.Set("Authorization", "Bearer "+m.client.apiKey)
 	httpReq.Header.Set("Content-Type", "application/json")
 	ctx, observation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "mistral", Model: m.name, Sink: m.debug})
+	if m.debug != nil {
+		fields := map[string]any{"max_tokens": req.MaxTokens}
+		gai.AddObservationContent(ctx, m.debug, fields, "prompt", gai.ContentKindPrompt, req.Prompt)
+		gai.EmitObservation(ctx, m.debug, gai.Observation{
+			Name:   "mistral_generate_request",
+			Source: "ai:mistral.Model.Generate",
+			Fields: fields,
+		})
+	}
 	httpReq = httpReq.WithContext(ctx)
 	generationResult := ai.GenerationResult{}
 	defer func() {

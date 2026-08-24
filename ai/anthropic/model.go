@@ -291,14 +291,14 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 	if err != nil {
 		return nil, err
 	}
+	client := m.client.sdkClient()
+	ctx, observation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "anthropic", Model: m.name, Sink: m.debug})
 	if m.debug != nil {
 		fields := map[string]any{}
 		gai.AddObservationContent(ctx, m.debug, fields, "payload", gai.ContentKindPrompt, payload)
 		gai.AddObservationContent(ctx, m.debug, fields, "prompt", gai.ContentKindPrompt, req.Prompt)
 		gai.EmitObservation(ctx, m.debug, gai.Observation{Name: "anthropic_generate_request", Source: "ai:anthropic.Model.Generate", Fields: fields})
 	}
-	client := m.client.sdkClient()
-	ctx, observation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "anthropic", Model: m.name, Sink: m.debug})
 	generationResult := ai.GenerationResult{}
 	defer func() {
 		generationResult.Err = err
