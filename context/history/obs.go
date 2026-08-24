@@ -5,8 +5,8 @@ import (
 
 	"github.com/lace-ai/gai"
 	gaictx "github.com/lace-ai/gai/context"
+	"github.com/lace-ai/gai/internal/observe"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
 )
 
 const contextTracerName = "github.com/lace-ai/gai/context"
@@ -14,8 +14,8 @@ const contextTracerName = "github.com/lace-ai/gai/context"
 type historyObserver struct {
 	op string
 
-	debug gai.DebugSink
-	span  trace.Span
+	debug     gai.DebugSink
+	operation *observe.Operation
 
 	sessionID     string
 	tokenizerID   string
@@ -45,7 +45,7 @@ type historyObserver struct {
 }
 
 func newHistoryBuildObserver(ctx context.Context, debug gai.DebugSink, sessionID string, tokenBudget int, summaryConfigured bool) (context.Context, *historyObserver) {
-	ctx, span := gai.StartOperationSpan(ctx, contextTracerName, "context.history", "context.operation", "build",
+	ctx, operation := observe.Start(ctx, debug, contextTracerName, "context.history", "context.operation", "build", "context:HistorySource",
 		attribute.String("context.source", "history"),
 		attribute.String("context.session_id", sessionID),
 		attribute.Int("context.token_budget", tokenBudget),
@@ -53,7 +53,7 @@ func newHistoryBuildObserver(ctx context.Context, debug gai.DebugSink, sessionID
 	return ctx, &historyObserver{
 		op:                "build",
 		debug:             debug,
-		span:              span,
+		operation:         operation,
 		sessionID:         sessionID,
 		tokenBudget:       tokenBudget,
 		summaryConfigured: summaryConfigured,
@@ -61,7 +61,7 @@ func newHistoryBuildObserver(ctx context.Context, debug gai.DebugSink, sessionID
 }
 
 func newHistorySummaryObserver(ctx context.Context, debug gai.DebugSink, sessionID string, tokenBudget int, summaryAmount float32) (context.Context, *historyObserver) {
-	ctx, span := gai.StartOperationSpan(ctx, contextTracerName, "context.history", "context.operation", "summarize",
+	ctx, operation := observe.Start(ctx, debug, contextTracerName, "context.history", "context.operation", "summarize", "context:HistorySource",
 		attribute.String("context.session_id", sessionID),
 		attribute.Int("context.token_budget", tokenBudget),
 		attribute.Float64("context.history.summary_amount", float64(summaryAmount)),
@@ -69,7 +69,7 @@ func newHistorySummaryObserver(ctx context.Context, debug gai.DebugSink, session
 	return ctx, &historyObserver{
 		op:            "summarize",
 		debug:         debug,
-		span:          span,
+		operation:     operation,
 		sessionID:     sessionID,
 		tokenBudget:   tokenBudget,
 		summaryAmount: summaryAmount,
@@ -77,13 +77,13 @@ func newHistorySummaryObserver(ctx context.Context, debug gai.DebugSink, session
 }
 
 func (o *historyObserver) Finish(err error) {
-	if o == nil || o.span == nil {
+	if o == nil || o.operation == nil {
 		return
 	}
 
 	switch o.op {
 	case "build":
-		o.span.SetAttributes(
+		o.operation.Set(
 			attribute.Bool("context.history.state_present", o.statePresent),
 			attribute.Bool("context.history.summary_included", o.summaryIncluded),
 			attribute.Bool("context.history.summary_configured", o.summaryConfigured),
@@ -113,18 +113,18 @@ func (o *historyObserver) Finish(err error) {
 		if o.summaryTokens > 0 {
 			attrs = append(attrs, attribute.Int("context.history.summary_tokens", o.summaryTokens))
 		}
-		o.span.SetAttributes(attrs...)
+		o.operation.Set(attrs...)
 	}
 
-	gai.EndSpan(o.span, err)
+	o.operation.Finish(err)
 }
 
 func (o *historyObserver) SetTokenizerID(tokenizerID string) {
-	if o == nil {
+	if o == nil || o.operation == nil {
 		return
 	}
 	o.tokenizerID = tokenizerID
-	o.span.SetAttributes(attribute.String("context.tokenizer_id", tokenizerID))
+	o.operation.Set(attribute.String("context.tokenizer_id", tokenizerID))
 }
 
 func (o *historyObserver) MarkStatePresent() {
@@ -372,13 +372,8 @@ func (o *historyObserver) SummarySkippedAmountZero(ctx context.Context) {
 }
 
 func (o *historyObserver) emit(ctx context.Context, name string, fields map[string]any, err error) {
-	if o == nil || o.debug == nil {
+	if o == nil || o.operation == nil {
 		return
 	}
-	o.debug.Emit(ctx, gai.DebugEvent{
-		Name:   name,
-		Source: "context:HistorySource",
-		Fields: fields,
-		Err:    err,
-	})
+	o.operation.Emit(ctx, name, fields, err)
 }

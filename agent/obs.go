@@ -7,14 +7,14 @@ import (
 
 	"github.com/lace-ai/gai"
 	gaictx "github.com/lace-ai/gai/context"
+	"github.com/lace-ai/gai/internal/observe"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
 )
 
 const agentTracerName = "github.com/lace-ai/gai/agent"
 
 type agentRunObserver struct {
-	span trace.Span
+	operation *observe.Operation
 }
 
 func newAgentRunObserver(ctx context.Context, workflow *Workflow) (context.Context, *agentRunObserver) {
@@ -31,25 +31,25 @@ func newAgentRunObserver(ctx context.Context, workflow *Workflow) (context.Conte
 	if input.ID != "" {
 		attrs = append(attrs, attribute.String("agent.run_id", input.ID))
 	}
-	ctx, span := gai.StartOperationSpan(ctx, agentTracerName, "agent", "agent.operation", "run", attrs...)
-	return ctx, &agentRunObserver{span: span}
+	ctx, operation := observe.Start(ctx, nil, agentTracerName, "agent", "agent.operation", "run", "agent:Workflow.Run", attrs...)
+	return ctx, &agentRunObserver{operation: operation}
 }
 
 func (o *agentRunObserver) Finished(result WorkflowResult) {
-	if o == nil || o.span == nil {
+	if o == nil {
 		return
 	}
-	o.span.SetAttributes(
+	o.operation.Set(
 		attribute.Int("agent.token_count", len(result.Tokens)),
 		attribute.Int("agent.error_count", len(result.Errors)),
 		attribute.Bool("agent.complete", result.Complete),
 	)
-	gai.EndSpan(o.span, errors.Join(result.Errors...))
+	o.operation.Finish(errors.Join(result.Errors...))
 }
 
 type runCreationObserver struct {
 	debug           gai.DebugSink
-	span            trace.Span
+	operation       *observe.Operation
 	agentName       string
 	modelName       string
 	toolCount       int
@@ -72,7 +72,7 @@ func newRunCreationObserver(ctx context.Context, agent *Agent, input RunInput) (
 			modelName = agent.def.Model.Name()
 		}
 	}
-	ctx, span := gai.StartOperationSpan(ctx, agentTracerName, "agent.run", "agent.operation", "create",
+	ctx, operation := observe.Start(ctx, debug, agentTracerName, "agent.run", "agent.operation", "create", "agent:Agent.NewRun",
 		attribute.String("agent.name", name),
 		attribute.String("agent.model", modelName),
 		attribute.Int("agent.tool_count", toolCount),
@@ -83,7 +83,7 @@ func newRunCreationObserver(ctx context.Context, agent *Agent, input RunInput) (
 	)
 	return ctx, &runCreationObserver{
 		debug:           debug,
-		span:            span,
+		operation:       operation,
 		agentName:       name,
 		modelName:       modelName,
 		toolCount:       toolCount,
@@ -103,10 +103,10 @@ func (o *runCreationObserver) Failed(ctx context.Context, stage string, err erro
 }
 
 func (o *runCreationObserver) Finish(err error) {
-	if o == nil || o.span == nil {
+	if o == nil {
 		return
 	}
-	gai.EndSpan(o.span, err)
+	o.operation.Finish(err)
 }
 
 func (o *runCreationObserver) fields(ctx context.Context) map[string]any {
@@ -139,15 +139,15 @@ func promptUserChars(input gaictx.PromptInput) int {
 }
 
 func (o *runCreationObserver) emit(ctx context.Context, name string, fields map[string]any, err error) {
-	if o == nil || o.debug == nil {
+	if o == nil {
 		return
 	}
-	o.debug.Emit(ctx, gai.DebugEvent{Name: name, Source: "agent:Agent.NewRun", Fields: fields, Err: err})
+	o.operation.Emit(ctx, name, fields, err)
 }
 
 type workflowObserver struct {
 	debug           gai.DebugSink
-	span            trace.Span
+	operation       *observe.Operation
 	agentName       string
 	middlewareCount int
 }
@@ -161,11 +161,11 @@ func newWorkflowObserver(ctx context.Context, workflow *Workflow) (context.Conte
 		middlewareCount = len(workflow.middleware)
 		debug = workflow.debug
 	}
-	ctx, span := gai.StartOperationSpan(ctx, agentTracerName, "agent.workflow", "agent.operation", "run",
+	ctx, operation := observe.Start(ctx, debug, agentTracerName, "agent.workflow", "agent.operation", "run", "agent:Workflow.Run",
 		attribute.String("agent.name", name),
 		attribute.Int("agent.middleware_count", middlewareCount),
 	)
-	return ctx, &workflowObserver{debug: debug, span: span, agentName: name, middlewareCount: middlewareCount}
+	return ctx, &workflowObserver{debug: debug, operation: operation, agentName: name, middlewareCount: middlewareCount}
 }
 
 func (o *workflowObserver) Started(ctx context.Context) {
@@ -196,33 +196,29 @@ func (o *workflowObserver) Finished(ctx context.Context, result WorkflowResult) 
 		"error_count":      len(result.Errors),
 		"complete":         result.Complete,
 	}
-	if o.span != nil {
-		o.span.SetAttributes(
-			attribute.Int("agent.stage_count", len(result.Stages)),
-			attribute.Int("agent.token_count", len(result.Tokens)),
-			attribute.Int("agent.text_chars", len(result.Text)),
-			attribute.Int("agent.error_count", len(result.Errors)),
-		)
-	}
+	o.operation.Set(
+		attribute.Int("agent.stage_count", len(result.Stages)),
+		attribute.Int("agent.token_count", len(result.Tokens)),
+		attribute.Int("agent.text_chars", len(result.Text)),
+		attribute.Int("agent.error_count", len(result.Errors)),
+	)
 	gai.AddDebugContent(ctx, o.debug, fields, "output_text", gai.ContentKindCompletion, result.Text)
 	gai.AddDebugContent(ctx, o.debug, fields, "reasoning", gai.ContentKindReasoning, result.Reasoning)
 	err := errors.Join(result.Errors...)
 	o.emit(ctx, "agent_workflow_finished", fields, err)
-	if o.span != nil {
-		gai.EndSpan(o.span, err)
-	}
+	o.operation.Finish(err)
 }
 
 func (o *workflowObserver) emit(ctx context.Context, name string, fields map[string]any, err error) {
-	if o == nil || o.debug == nil {
+	if o == nil {
 		return
 	}
-	o.debug.Emit(ctx, gai.DebugEvent{Name: name, Source: "agent:Workflow.Run", Fields: fields, Err: err})
+	o.operation.Emit(ctx, name, fields, err)
 }
 
 type middlewareObserver struct {
 	debug       gai.DebugSink
-	span        trace.Span
+	operation   *observe.Operation
 	agentName   string
 	stageName   string
 	output      OutputPolicy
@@ -237,7 +233,7 @@ func newMiddlewareObserver(ctx context.Context, run *MiddlewareContext, middlewa
 		debug = run.workflow.debug
 	}
 	stageName := middleware.name()
-	ctx, span := gai.StartOperationSpan(ctx, agentTracerName, "agent.middleware", "agent.operation", "run",
+	ctx, operation := observe.Start(ctx, debug, agentTracerName, "agent.middleware", "agent.operation", "run", "agent:AgentMiddleware.Process",
 		attribute.String("agent.name", agentName),
 		attribute.String("agent.middleware.name", stageName),
 		attribute.String("agent.output_policy", outputPolicyName(middleware.config.Output)),
@@ -247,7 +243,7 @@ func newMiddlewareObserver(ctx context.Context, run *MiddlewareContext, middlewa
 	)
 	return ctx, &middlewareObserver{
 		debug:       debug,
-		span:        span,
+		operation:   operation,
 		agentName:   agentName,
 		stageName:   stageName,
 		output:      middleware.config.Output,
@@ -263,9 +259,9 @@ func (o *middlewareObserver) Skipped(ctx context.Context, reason string) {
 	fields := o.fields()
 	fields["reason"] = reason
 	o.emit(ctx, "agent_middleware_skipped", fields, nil)
-	if o != nil && o.span != nil {
-		o.span.SetAttributes(attribute.Bool("agent.middleware.skipped", true), attribute.String("agent.middleware.skip_reason", reason))
-		gai.EndSpan(o.span, nil)
+	if o != nil {
+		o.operation.Set(attribute.Bool("agent.middleware.skipped", true), attribute.String("agent.middleware.skip_reason", reason))
+		o.operation.Finish(nil)
 	}
 }
 
@@ -278,13 +274,11 @@ func (o *middlewareObserver) Finished(ctx context.Context, result AgentResult, a
 		fields[key] = value
 	}
 	fields["output_applied"] = applied
-	if o.span != nil {
-		o.span.SetAttributes(
-			attribute.Int("agent.middleware.token_count", len(result.Tokens)),
-			attribute.Int("agent.middleware.error_count", len(result.Errors)),
-			attribute.Bool("agent.middleware.output_applied", applied),
-		)
-	}
+	o.operation.Set(
+		attribute.Int("agent.middleware.token_count", len(result.Tokens)),
+		attribute.Int("agent.middleware.error_count", len(result.Errors)),
+		attribute.Bool("agent.middleware.output_applied", applied),
+	)
 	gai.AddDebugContent(ctx, o.debug, fields, "output_text", gai.ContentKindCompletion, result.Text)
 	gai.AddDebugContent(ctx, o.debug, fields, "reasoning", gai.ContentKindReasoning, result.Reasoning)
 	err := errors.Join(result.Errors...)
@@ -293,9 +287,7 @@ func (o *middlewareObserver) Finished(ctx context.Context, result AgentResult, a
 		name = "agent_middleware_failed"
 	}
 	o.emit(ctx, name, fields, err)
-	if o.span != nil {
-		gai.EndSpan(o.span, err)
-	}
+	o.operation.Finish(err)
 }
 
 func (o *middlewareObserver) fields() map[string]any {
@@ -311,10 +303,10 @@ func (o *middlewareObserver) fields() map[string]any {
 }
 
 func (o *middlewareObserver) emit(ctx context.Context, name string, fields map[string]any, err error) {
-	if o == nil || o.debug == nil {
+	if o == nil {
 		return
 	}
-	o.debug.Emit(ctx, gai.DebugEvent{Name: name, Source: "agent:AgentMiddleware.Process", Fields: fields, Err: err})
+	o.operation.Emit(ctx, name, fields, err)
 }
 
 func agentResultFields(result AgentResult) map[string]any {
