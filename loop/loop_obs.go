@@ -343,7 +343,7 @@ func callObservedTool(ctx context.Context, call ai.ToolCall, tools []Tool, sinks
 	defer func() {
 		duration = time.Since(started)
 		if panicValue := recover(); panicValue != nil {
-			observation.finishPanic()
+			observation.finishPanic(duration)
 			panic(panicValue)
 		}
 		observation.finish(response, missingResponse, duration)
@@ -371,12 +371,12 @@ func (o *toolObservation) finish(response *ToolResponse, missingResponse bool, d
 	})
 }
 
-func (o *toolObservation) finishPanic() {
+func (o *toolObservation) finishPanic(duration time.Duration) {
 	if o == nil {
 		return
 	}
 	o.finishOnce.Do(func() {
-		o.setOutcome(toolOutcomePanic, errObservedToolPanic, 0)
+		o.setOutcome(toolOutcomePanic, errObservedToolPanic, duration)
 	})
 }
 

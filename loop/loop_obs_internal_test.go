@@ -187,15 +187,20 @@ func TestToolObservationOutcomes(t *testing.T) {
 func TestObservedToolPanicFinalizesAndRepanics(t *testing.T) {
 	recorder := obstest.Install(t)
 	panicValue := errors.New("panic-sentinel-secret")
+	var emitted gai.Observation
+	sink := gai.ObservationSinkFunc(func(_ context.Context, observation gai.Observation) {
+		emitted = observation
+	})
 	call := ai.ToolCall{ID: "call-panic", Type: "function", Name: "panic", Args: json.RawMessage(`{}`)}
 	tool := observedTestTool{name: "panic", call: func(context.Context, *ai.ToolCall) *ToolResponse {
+		time.Sleep(10 * time.Millisecond)
 		panic(panicValue)
 	}}
 
 	var recovered any
 	func() {
 		defer func() { recovered = recover() }()
-		callObservedTool(t.Context(), call, []Tool{tool})
+		callObservedTool(t.Context(), call, []Tool{tool}, sink)
 	}()
 	if recovered != panicValue {
 		t.Fatalf("recovered panic = %#v, want original value", recovered)
@@ -208,6 +213,9 @@ func TestObservedToolPanicFinalizesAndRepanics(t *testing.T) {
 	}
 	if strings.Contains(toolSpanText(span), "panic-sentinel-secret") {
 		t.Fatalf("panic value reached span: %s", toolSpanText(span))
+	}
+	if got, ok := emitted.Fields["duration_ms"].(int64); !ok || got <= 0 {
+		t.Fatalf("panic observation duration_ms = %#v, want a positive measured duration", emitted.Fields["duration_ms"])
 	}
 }
 
@@ -330,7 +338,7 @@ func TestToolObservationFinishesOnce(t *testing.T) {
 	_, observation := startToolSpan(t.Context(), ai.ToolCall{ID: "call-once", Name: "once"})
 	observation.finish(NewToolSuccess("ok"), false, 0)
 	observation.finish(NewToolError(errors.New("late error")), false, 0)
-	observation.finishPanic()
+	observation.finishPanic(0)
 
 	span := requireToolSpans(t, recorder, 1)[0]
 	if got := obstest.Attributes(span)["gai.tool.outcome"].AsString(); got != toolOutcomeSuccess {
