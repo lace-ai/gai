@@ -13,6 +13,8 @@ import (
 	"github.com/lace-ai/gai/loop"
 )
 
+var readRunID = rand.Read
+
 // RunInput contains the application input for one agent run.
 type RunInput struct {
 	ID string
@@ -111,7 +113,11 @@ func New(def Definition) *Agent {
 // middleware processing begin when Workflow.Run is called.
 func (a *Agent) NewRun(ctx context.Context, input RunInput) (*Workflow, error) {
 	if input.ID == "" {
-		input.ID = newRunID()
+		var err error
+		input.ID, err = newRunID()
+		if err != nil {
+			return nil, err
+		}
 	}
 	ctx, input = resolveRunTraceContext(ctx, input)
 	ctx = gai.WithObservationRunID(ctx, input.ID)
@@ -135,12 +141,12 @@ func (a *Agent) NewRun(ctx context.Context, input RunInput) (*Workflow, error) {
 	return workflow, nil
 }
 
-func newRunID() string {
+func newRunID() (string, error) {
 	var bytes [16]byte
-	if _, err := rand.Read(bytes[:]); err != nil {
-		return "run"
+	if _, err := readRunID(bytes[:]); err != nil {
+		return "", err
 	}
-	return "run_" + hex.EncodeToString(bytes[:])
+	return "run_" + hex.EncodeToString(bytes[:]), nil
 }
 
 func resolveRunTraceContext(ctx context.Context, input RunInput) (context.Context, RunInput) {
