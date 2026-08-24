@@ -49,7 +49,7 @@ The current `DebugSink` surface has spread across agent, context, providers, mod
 
 1. **Run correlation:** create a generated, opaque run ID when `Agent.NewRun` constructs a workflow and include it on every event. This keeps sinks useful without an external OTel exporter and avoids overloading the optional trace context as a run identity. The ID is correlation metadata only, not a durable execution/replay protocol.
 2. **Public migration:** because GAI is pre-v1, remove the legacy debug types rather than retain aliases with divergent content-capture behavior. This produces one sink contract and makes `ContentCapturePolicy` authoritative.
-3. **Emission semantics:** call a configured sink synchronously as the current sink does, but treat its work as best-effort: implementations must avoid blocking and own their batching/retries. GAI neither waits for persistence nor turns this into a second execution stream.
+3. **Emission semantics:** hand finalized events to a bounded, library-managed dispatcher with a non-blocking enqueue. The dispatcher invokes the configured sink outside workflow and observation goroutines; a full queue drops the event and increments a dropped-event metric, and a recovered sink panic drops only that event. Sink implementations own persistence, batching, and retries, while GAI owns neither backend delivery nor a second execution stream.
 
 ## Initial implementation sequence
 
