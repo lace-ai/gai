@@ -19,7 +19,7 @@ type Provider struct {
 	apiKey     string
 	baseURL    string
 	httpClient *http.Client
-	debug      gai.DebugSink
+	debug      gai.ObservationSink
 	catalog    ai.ModelCatalogCache
 	catalogMu  ai.ContextMutex
 	transport  Transport
@@ -45,7 +45,7 @@ func WithResponsesTransport() Option {
 var _ ai.Provider = (*Provider)(nil)
 var _ ai.ModelCatalogProvider = (*Provider)(nil)
 
-func New(apiKey string, debug gai.DebugSink, options ...Option) *Provider {
+func New(apiKey string, debug gai.ObservationSink, options ...Option) *Provider {
 	p := &Provider{
 		apiKey:     apiKey,
 		baseURL:    "https://api.openai.com/v1",

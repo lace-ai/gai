@@ -16,17 +16,12 @@ type renderTestPart struct {
 	node gaictx.RenderNode
 }
 
-type rendererDebugSink struct {
-	sensitive bool
-	events    []gai.DebugEvent
+type rendererObservationSink struct {
+	events []gai.Observation
 }
 
-func (s *rendererDebugSink) Emit(_ context.Context, event gai.DebugEvent) {
+func (s *rendererObservationSink) Emit(_ context.Context, event gai.Observation) {
 	s.events = append(s.events, event)
-}
-
-func (s *rendererDebugSink) IncludeSensitiveData() bool {
-	return s.sensitive
 }
 
 func (p renderTestPart) Name() string {
@@ -207,26 +202,26 @@ persisted
 	}
 }
 
-func TestRenderersEmitDetailedTruncatedDebugEvents(t *testing.T) {
+func TestRenderersEmitDetailedTruncatedObservations(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name     string
 		source   string
-		renderer func(*rendererDebugSink) gaictx.Renderer
+		renderer func(*rendererObservationSink) gaictx.Renderer
 	}{
 		{
 			name:   "xml",
 			source: "context:XMLRenderer",
-			renderer: func(sink *rendererDebugSink) gaictx.Renderer {
-				return &gaictx.XMLRenderer{DebugSink: sink, DebugPreviewChars: 5}
+			renderer: func(sink *rendererObservationSink) gaictx.Renderer {
+				return &gaictx.XMLRenderer{ObservationSink: sink, DebugPreviewChars: 5}
 			},
 		},
 		{
 			name:   "simple",
 			source: "context:SimpleRenderer",
-			renderer: func(sink *rendererDebugSink) gaictx.Renderer {
-				return &gaictx.SimpleRenderer{DebugSink: sink, DebugPreviewChars: 5}
+			renderer: func(sink *rendererObservationSink) gaictx.Renderer {
+				return &gaictx.SimpleRenderer{ObservationSink: sink, DebugPreviewChars: 5}
 			},
 		},
 	}
@@ -235,8 +230,9 @@ func TestRenderersEmitDetailedTruncatedDebugEvents(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			sink := &rendererDebugSink{sensitive: true}
-			_, err := tt.renderer(sink).Render(context.Background(), []gaictx.Part{
+			sink := &rendererObservationSink{}
+			ctx := gai.WithContentCapturePolicy(context.Background(), gai.ContentCapturePolicy{Prompt: gai.CaptureEnabled, Completion: gai.CaptureEnabled})
+			_, err := tt.renderer(sink).Render(ctx, []gaictx.Part{
 				gaictx.NewMessagePart(gaictx.RoleUser, gaictx.NewTextContent("first long message")),
 				gaictx.NewMessagePart(gaictx.RoleAssistant, gaictx.NewTextContent("second long response")),
 			})
@@ -266,20 +262,17 @@ func TestRenderersEmitDetailedTruncatedDebugEvents(t *testing.T) {
 			if got := partEvent.Fields["part_index"]; got != 0 {
 				t.Fatalf("unexpected part index: %v", got)
 			}
-			if got := partEvent.Fields["rendered_mode"]; got != "truncated" {
-				t.Fatalf("expected truncated part preview, got %v", got)
-			}
-			if _, ok := partEvent.Fields["rendered_head"]; !ok {
-				t.Fatal("expected rendered_head")
+			if got := partEvent.Fields["rendered_content_kind"]; got != "prompt" {
+				t.Fatalf("expected policy-captured rendered content, got %v", got)
 			}
 			node, ok := partEvent.Fields["node"].(map[string]any)
-			if !ok || node["type"] != "user" || node["value_mode"] != "truncated" {
+			if !ok || node["type"] != "user" || node["value_content_kind"] != "prompt" {
 				t.Fatalf("unexpected node structure: %#v", partEvent.Fields["node"])
 			}
 
 			finalEvent := sink.events[3]
-			if got := finalEvent.Fields["prompt_mode"]; got != "truncated" {
-				t.Fatalf("expected truncated prompt preview, got %v", got)
+			if got := finalEvent.Fields["prompt_content_kind"]; got != "prompt" {
+				t.Fatalf("expected policy-captured prompt, got %v", got)
 			}
 			structure, ok := finalEvent.Fields["structure"].([]map[string]any)
 			if !ok || len(structure) != 2 {
@@ -292,8 +285,8 @@ func TestRenderersEmitDetailedTruncatedDebugEvents(t *testing.T) {
 func TestRendererDebugStructureOmitsContentForNonSensitiveSink(t *testing.T) {
 	t.Parallel()
 
-	sink := &rendererDebugSink{}
-	_, err := (gaictx.SimpleRenderer{DebugSink: sink}).Render(context.Background(), []gaictx.Part{
+	sink := &rendererObservationSink{}
+	_, err := (gaictx.SimpleRenderer{ObservationSink: sink}).Render(context.Background(), []gaictx.Part{
 		gaictx.NewMessagePart(gaictx.RoleUser, gaictx.NewTextContent("secret prompt content")),
 	})
 	if err != nil {
@@ -321,10 +314,12 @@ func TestRendererDebugStructureOmitsContentForNonSensitiveSink(t *testing.T) {
 func TestRenderersClassifyStructuredContentIndependently(t *testing.T) {
 	tests := []struct {
 		name     string
-		renderer func(*rendererDebugSink) gaictx.Renderer
+		renderer func(*rendererObservationSink) gaictx.Renderer
 	}{
-		{name: "xml", renderer: func(sink *rendererDebugSink) gaictx.Renderer { return &gaictx.XMLRenderer{DebugSink: sink} }},
-		{name: "simple", renderer: func(sink *rendererDebugSink) gaictx.Renderer { return &gaictx.SimpleRenderer{DebugSink: sink} }},
+		{name: "xml", renderer: func(sink *rendererObservationSink) gaictx.Renderer { return &gaictx.XMLRenderer{ObservationSink: sink} }},
+		{name: "simple", renderer: func(sink *rendererObservationSink) gaictx.Renderer {
+			return &gaictx.SimpleRenderer{ObservationSink: sink}
+		}},
 	}
 	mixedHistory := renderTestPart{name: "history", node: gaictx.RenderNode{
 		Type: "history",
@@ -364,7 +359,7 @@ func TestRenderersClassifyStructuredContentIndependently(t *testing.T) {
 			}
 			for _, policyTest := range policyTests {
 				t.Run(policyTest.name, func(t *testing.T) {
-					sink := &rendererDebugSink{}
+					sink := &rendererObservationSink{}
 					ctx := gai.WithContentCapturePolicy(t.Context(), policyTest.policy)
 					if _, err := tt.renderer(sink).Render(ctx, []gaictx.Part{mixedHistory}); err != nil {
 						t.Fatalf("Render failed: %v", err)
@@ -392,7 +387,7 @@ func TestRenderersClassifyStructuredContentIndependently(t *testing.T) {
 				})
 			}
 
-			sink := &rendererDebugSink{}
+			sink := &rendererObservationSink{}
 			ctx := gai.WithContentCapturePolicy(t.Context(), gai.ContentCapturePolicy{ToolOutput: gai.CaptureEnabled})
 			toolMessage := renderTestPart{name: "message", node: gaictx.RenderNode{Type: string(gaictx.RoleTool), Value: "direct-tool-output"}}
 			if _, err := tt.renderer(sink).Render(ctx, []gaictx.Part{toolMessage}); err != nil {
@@ -410,7 +405,7 @@ func TestRenderersClassifyStructuredContentIndependently(t *testing.T) {
 				t.Run("generic "+nodeType+" remains prompt", func(t *testing.T) {
 					part := renderTestPart{name: nodeType, node: gaictx.RenderNode{Type: nodeType, Value: "generic-prompt-value"}}
 
-					promptSink := &rendererDebugSink{}
+					promptSink := &rendererObservationSink{}
 					promptCtx := gai.WithContentCapturePolicy(t.Context(), gai.ContentCapturePolicy{Prompt: gai.CaptureEnabled})
 					if _, err := tt.renderer(promptSink).Render(promptCtx, []gaictx.Part{part}); err != nil {
 						t.Fatalf("Render generic prompt node: %v", err)
@@ -423,7 +418,7 @@ func TestRenderersClassifyStructuredContentIndependently(t *testing.T) {
 						t.Fatalf("generic prompt node was not captured: %#v", values)
 					}
 
-					toolSink := &rendererDebugSink{}
+					toolSink := &rendererObservationSink{}
 					toolCtx := gai.WithContentCapturePolicy(t.Context(), gai.ContentCapturePolicy{ToolOutput: gai.CaptureEnabled})
 					if _, err := tt.renderer(toolSink).Render(toolCtx, []gaictx.Part{part}); err != nil {
 						t.Fatalf("Render generic node with tool policy: %v", err)

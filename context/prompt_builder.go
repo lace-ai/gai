@@ -78,8 +78,8 @@ type Definition struct {
 	OutputTokenReserve int
 	// Tokenizer counts parts and is propagated to compatible context sources.
 	Tokenizer ai.Tokenizer
-	// DebugSink receives prompt-building diagnostics.
-	DebugSink gai.DebugSink
+	// ObservationSink receives prompt-building diagnostics.
+	ObservationSink gai.ObservationSink
 }
 
 // Builder assembles system instructions, dynamic context, user input, and loop
@@ -91,7 +91,7 @@ type Builder struct {
 	Iteration          []Part
 	TokenBudget        int
 	Renderer           Renderer
-	debugSink          gai.DebugSink
+	debugSink          gai.ObservationSink
 	input              PromptInput
 	tokenizer          ai.Tokenizer
 	OutputTokenReserve int
@@ -102,7 +102,7 @@ func New(def Definition) *Builder {
 	renderer := def.Renderer
 	if renderer == nil {
 		renderer = &XMLRenderer{
-			DebugSink:         def.DebugSink,
+			ObservationSink:   def.ObservationSink,
 			DebugPreviewChars: 100,
 		}
 	}
@@ -114,7 +114,7 @@ func New(def Definition) *Builder {
 		TokenBudget:        def.TokenBudget,
 		OutputTokenReserve: def.OutputTokenReserve,
 		Renderer:           renderer,
-		debugSink:          def.DebugSink,
+		debugSink:          def.ObservationSink,
 		input:              def.PromptInput.Clone(),
 		tokenizer:          def.Tokenizer,
 	}
@@ -128,7 +128,7 @@ func NewBuilder(renderer Renderer, tokenBudget int) *Builder {
 	})
 }
 
-func (b *Builder) SetDebugSink(debugSink gai.DebugSink) {
+func (b *Builder) SetObservationSink(debugSink gai.ObservationSink) {
 	b.debugSink = debugSink
 }
 

@@ -29,7 +29,7 @@ func TestAgentWorkflowEmitsLifecycleEventsAndSpans(t *testing.T) {
 		otel.SetTracerProvider(previousProvider)
 	}()
 
-	sink := &agentDebugSink{}
+	sink := &agentObservationSink{}
 	post := agent.New(agent.Definition{
 		Name:  "post",
 		Model: &mocks.MockModel{Responses: []mocks.MockModelResponse{{Res: ai.AIResponse{Text: "post"}}}},
@@ -38,9 +38,9 @@ func TestAgentWorkflowEmitsLifecycleEventsAndSpans(t *testing.T) {
 		},
 	})
 	primary := agent.New(agent.Definition{
-		Name:      "primary",
-		Model:     &mocks.MockModel{Responses: []mocks.MockModelResponse{{Res: ai.AIResponse{Text: "primary"}}}},
-		DebugSink: sink,
+		Name:            "primary",
+		Model:           &mocks.MockModel{Responses: []mocks.MockModelResponse{{Res: ai.AIResponse{Text: "primary"}}}},
+		ObservationSink: sink,
 		Prompt: func(_ context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
 			return &testPromptBuilder{}, nil
 		},
@@ -73,6 +73,11 @@ func TestAgentWorkflowEmitsLifecycleEventsAndSpans(t *testing.T) {
 	for _, name := range wantEvents {
 		if !sink.hasEvent(name) {
 			t.Errorf("missing debug event %q; got %v", name, sink.names())
+		}
+	}
+	for _, event := range sink.events {
+		if event.RunID != "run-1" {
+			t.Errorf("observation %q run ID = %q, want run-1", event.Name, event.RunID)
 		}
 	}
 	created, ok := sink.event("agent_run_created")
@@ -148,10 +153,10 @@ func TestAgentRunSpanIsParentOfWorkflow(t *testing.T) {
 }
 
 func TestAgentContentCapturePolicySeparatesPromptCompletionAndReasoning(t *testing.T) {
-	sink := &agentDebugSink{}
+	sink := &agentObservationSink{}
 	a := agent.New(agent.Definition{
-		Name:      "primary",
-		DebugSink: sink,
+		Name:            "primary",
+		ObservationSink: sink,
 		Model: &mocks.MockModel{Responses: []mocks.MockModelResponse{{Res: ai.AIResponse{
 			Text: "answer-secret", Reasoning: "reason-secret",
 		}}}},
@@ -184,8 +189,8 @@ func TestAgentContentCapturePolicySeparatesPromptCompletionAndReasoning(t *testi
 }
 
 func TestAgentObservabilityReportsCreationAndMiddlewareFailures(t *testing.T) {
-	sink := &agentDebugSink{}
-	_, err := agent.New(agent.Definition{Name: "broken", DebugSink: sink}).NewRun(t.Context(), textRunInput("question"))
+	sink := &agentObservationSink{}
+	_, err := agent.New(agent.Definition{Name: "broken", ObservationSink: sink}).NewRun(t.Context(), textRunInput("question"))
 	if err == nil {
 		t.Fatal("expected run creation failure")
 	}
@@ -202,9 +207,9 @@ func TestAgentObservabilityReportsCreationAndMiddlewareFailures(t *testing.T) {
 		},
 	})
 	primary := agent.New(agent.Definition{
-		Name:      "primary",
-		Model:     &mocks.MockModel{Responses: []mocks.MockModelResponse{{Res: ai.AIResponse{Text: "primary"}}}},
-		DebugSink: sink,
+		Name:            "primary",
+		Model:           &mocks.MockModel{Responses: []mocks.MockModelResponse{{Res: ai.AIResponse{Text: "primary"}}}},
+		ObservationSink: sink,
 		Prompt: func(_ context.Context, input agent.RunInput) (gaictx.PromptBuilder, error) {
 			return &testPromptBuilder{}, nil
 		},
@@ -451,20 +456,18 @@ func spanAttributeMap(span sdktrace.ReadOnlySpan) map[string]any {
 	return attributes
 }
 
-type agentDebugSink struct {
+type agentObservationSink struct {
 	mu     sync.Mutex
-	events []gai.DebugEvent
+	events []gai.Observation
 }
 
-func (s *agentDebugSink) Emit(_ context.Context, event gai.DebugEvent) {
+func (s *agentObservationSink) Emit(_ context.Context, event gai.Observation) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.events = append(s.events, event)
 }
 
-func (*agentDebugSink) IncludeSensitiveData() bool { return false }
-
-func (s *agentDebugSink) hasEvent(name string) bool {
+func (s *agentObservationSink) hasEvent(name string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, event := range s.events {
@@ -475,7 +478,7 @@ func (s *agentDebugSink) hasEvent(name string) bool {
 	return false
 }
 
-func (s *agentDebugSink) event(name string) (gai.DebugEvent, bool) {
+func (s *agentObservationSink) event(name string) (gai.Observation, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, event := range s.events {
@@ -483,10 +486,10 @@ func (s *agentDebugSink) event(name string) (gai.DebugEvent, bool) {
 			return event, true
 		}
 	}
-	return gai.DebugEvent{}, false
+	return gai.Observation{}, false
 }
 
-func (s *agentDebugSink) names() []string {
+func (s *agentObservationSink) names() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	names := make([]string, len(s.events))

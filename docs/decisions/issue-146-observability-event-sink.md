@@ -1,11 +1,11 @@
-# Issue 146: observability event sink draft
+# Issue 146: observation sink migration
 
-This draft records the implementation boundary and decisions to resolve before the repository-wide migration from `DebugSink`.
+This document records the implementation boundary for the repository-wide migration from `DebugSink`.
 
 ## Proposed public contract
 
 ```go
-type ObservabilityEvent struct {
+type Observation struct {
     Name       string
     Source     string
     OccurredAt time.Time
@@ -16,14 +16,14 @@ type ObservabilityEvent struct {
     Err        error
 }
 
-type EventSink interface {
-    Emit(context.Context, ObservabilityEvent)
+type ObservationSink interface {
+    Emit(context.Context, Observation)
 }
 
-type EventSinkFunc func(context.Context, ObservabilityEvent)
+type ObservationSinkFunc func(context.Context, Observation)
 ```
 
-`ObservabilityEvent` is a best-effort projection for tracing, logging, and analytics. It is deliberately distinct from `loop.Event`, which remains the ordered workflow execution stream exposed by `agent.Workflow.RunEvents`.
+`Observation` is a best-effort projection for tracing, logging, and analytics. It is deliberately distinct from the ordered workflow execution stream exposed by `agent.Workflow.RunEvents`.
 
 ## Shared plumbing
 
@@ -31,15 +31,15 @@ The repository-private `internal/observe.Operation` helper should own final even
 
 1. domain observers construct a name, source, domain fields, and error;
 2. the helper stamps `OccurredAt`, copies fields, derives active OTel trace/span IDs, and supplies run correlation;
-3. the helper emits the completed `ObservabilityEvent` to `EventSink` and records the corresponding OTel span/event/status.
+3. the helper emits the completed `Observation` to `ObservationSink` and records the corresponding OTel span/event/status.
 
-Sink implementations only receive finalized events. They own persistence, batching, and retries; GAI must not add a backend dependency or block/retry workflow execution for a sink.
+Sink implementations only receive finalized observations. `ObservationSink.Emit` is called synchronously, so implementations must return promptly and should enqueue internally if persistence is slow. GAI does not retry or wait for external persistence.
 
 ## Migration scope
 
 The current `DebugSink` surface has spread across agent, context, providers, model repositories, tools, and the private observer helper. The migration should be repository-wide rather than exposing both public contracts long-term:
 
-- replace `DebugEvent`/`DebugSink`/`DebugSinkFunc` with `ObservabilityEvent`/`EventSink`/`EventSinkFunc`;
+- replace `DebugEvent`/`DebugSink`/`DebugSinkFunc` with `Observation`/`ObservationSink`/`ObservationSinkFunc`;
 - remove `SensitiveDebugSinkFunc` and `IncludeSensitiveData`;
 - make `ContentCapturePolicy` the sole authority for prompt, completion, reasoning, tool input/output, memory, truncation, and redaction capture;
 - snapshot the configured sink into every workflow/run as the existing debug sink is today;
@@ -47,9 +47,9 @@ The current `DebugSink` surface has spread across agent, context, providers, mod
 
 ## Decisions for review
 
-1. **Run correlation:** create a generated, opaque run ID when `Agent.NewRun` constructs a workflow and include it on every event. This keeps sinks useful without an external OTel exporter and avoids overloading the optional trace context as a run identity. The ID is correlation metadata only, not a durable execution/replay protocol.
+1. **Run correlation:** use `RunInput.ID` when provided; otherwise `Agent.NewRun` generates an opaque run ID and includes it on every observation. This keeps sinks useful without an external OTel exporter and avoids overloading the optional trace context as a run identity. The ID is correlation metadata only, not a durable execution/replay protocol.
 2. **Public migration:** because GAI is pre-v1, remove the legacy debug types rather than retain aliases with divergent content-capture behavior. This produces one sink contract and makes `ContentCapturePolicy` authoritative.
-3. **Emission semantics:** hand finalized events to a bounded, library-managed dispatcher with a non-blocking enqueue. The dispatcher invokes the configured sink outside workflow and observation goroutines; a full queue drops the event and increments a dropped-event metric, and a recovered sink panic drops only that event. Sink implementations own persistence, batching, and retries, while GAI owns neither backend delivery nor a second execution stream.
+3. **Emission semantics:** invoke `ObservationSink.Emit` synchronously with a finalized observation. Implementations own queuing, persistence, retries, and panic boundaries; GAI owns neither backend delivery nor a second execution stream.
 
 ## Initial implementation sequence
 

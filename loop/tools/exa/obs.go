@@ -15,7 +15,7 @@ const exaTracerName = "github.com/lace-ai/gai/loop/tools/exa"
 var errObservedExaSearch = errors.New("exa search failed")
 
 type searchObserver struct {
-	debug      gai.DebugSink
+	debug      gai.ObservationSink
 	span       trace.Span
 	searchType string
 	numResults int
@@ -23,7 +23,7 @@ type searchObserver struct {
 	requestID  string
 }
 
-func newSearchObserver(ctx context.Context, debug gai.DebugSink, searchType string, numResults int) (context.Context, *searchObserver) {
+func newSearchObserver(ctx context.Context, debug gai.ObservationSink, searchType string, numResults int) (context.Context, *searchObserver) {
 	ctx, span := gai.StartOperationSpan(ctx, exaTracerName, "tool.exa", "tool.operation", "search",
 		attribute.String("tool.name", "web_search"),
 		attribute.String("exa.search_type", searchType),
@@ -60,7 +60,7 @@ func (o *searchObserver) Finish(err error) {
 
 func (o *searchObserver) Started(ctx context.Context, query string) {
 	fields := o.baseFields()
-	gai.AddDebugContent(ctx, o.debug, fields, "query", gai.ContentKindToolInput, query)
+	gai.AddObservationContent(ctx, o.debug, fields, "query", gai.ContentKindToolInput, query)
 	o.emit(ctx, "exa_search_started", fields, nil)
 }
 
@@ -116,12 +116,9 @@ func (o *searchObserver) Failure(ctx context.Context, stage string, err error) *
 		fields["request_id"] = o.requestID
 	}
 	if err != nil {
-		gai.AddDebugContent(ctx, o.debug, fields, "error_output", gai.ContentKindToolOutput, err.Error())
+		gai.AddObservationContent(ctx, o.debug, fields, "error_output", gai.ContentKindToolOutput, err.Error())
 	}
 	observedErr := error(errObservedExaSearch)
-	if _, hasPolicy := gai.ContentCapturePolicyFromContext(ctx); !hasPolicy && o != nil && o.debug != nil && o.debug.IncludeSensitiveData() {
-		observedErr = err
-	}
 	o.emit(ctx, "exa_search_failed", fields, observedErr)
 	return loop.NewToolError(err)
 }
@@ -140,7 +137,7 @@ func (o *searchObserver) emit(ctx context.Context, name string, fields map[strin
 	if o == nil || o.debug == nil {
 		return
 	}
-	o.debug.Emit(ctx, gai.DebugEvent{
+	gai.EmitObservation(ctx, o.debug, gai.Observation{
 		Name:   name,
 		Source: "loop/tools/exa:SearchTool.Function",
 		Fields: fields,

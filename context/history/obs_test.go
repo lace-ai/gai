@@ -32,8 +32,8 @@ func TestHistoryBuildObserverPreservesTelemetryContract(t *testing.T) {
 		otel.SetTracerProvider(previousProvider)
 	})
 
-	var events []gai.DebugEvent
-	sink := gai.DebugSinkFunc(func(_ context.Context, event gai.DebugEvent) {
+	var events []gai.Observation
+	sink := gai.ObservationSinkFunc(func(_ context.Context, event gai.Observation) {
 		events = append(events, event)
 	})
 	ctx, observer := newHistoryBuildObserver(t.Context(), sink, "session", 100, false)
@@ -60,8 +60,8 @@ func TestHistoryBuildObserverPreservesTelemetryContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SpanContextIDs() error = %v", err)
 	}
-	if event.Fields["trace_id"] != traceID || event.Fields["span_id"] != spanID {
-		t.Fatalf("event correlation = trace_id:%#v span_id:%#v, want trace_id:%q span_id:%q", event.Fields["trace_id"], event.Fields["span_id"], traceID, spanID)
+	if event.TraceID != traceID || event.SpanID != spanID {
+		t.Fatalf("event correlation = trace_id:%q span_id:%q, want trace_id:%q span_id:%q", event.TraceID, event.SpanID, traceID, spanID)
 	}
 
 	spans := recorder.Ended()

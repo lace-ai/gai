@@ -29,7 +29,7 @@ type Turn struct {
 	UserMessage *Message
 	Messages    []Message
 	TokenCount  map[string]int
-	debugSink   gai.DebugSink
+	debugSink   gai.ObservationSink
 }
 
 // Message is one role-labelled conversation entry.
@@ -76,7 +76,7 @@ func (t *Turn) Tokenize(ctx context.Context, tokenizer ai.Tokenizer, store TurnT
 	_, err = t.saveTokens(ctx, store, tokenizerID, count)
 	if err != nil {
 		if t.debugSink != nil {
-			t.debugSink.Emit(ctx, gai.DebugEvent{
+			gai.EmitObservation(ctx, t.debugSink, gai.Observation{
 				Name:   "turn_token_save_failed",
 				Source: "context:Turn.Tokenize",
 				Fields: map[string]any{
@@ -92,8 +92,8 @@ func (t *Turn) Tokenize(ctx context.Context, tokenizer ai.Tokenizer, store TurnT
 	return count, nil
 }
 
-// SetDebugSink configures diagnostics for non-fatal turn operations.
-func (t *Turn) SetDebugSink(sink gai.DebugSink) {
+// SetObservationSink configures diagnostics for non-fatal turn operations.
+func (t *Turn) SetObservationSink(sink gai.ObservationSink) {
 	t.debugSink = sink
 }
 

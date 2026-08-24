@@ -48,7 +48,7 @@ func (o *agentRunObserver) Finished(result WorkflowResult) {
 }
 
 type runCreationObserver struct {
-	debug           gai.DebugSink
+	debug           gai.ObservationSink
 	operation       *observe.Operation
 	agentName       string
 	modelName       string
@@ -59,7 +59,7 @@ type runCreationObserver struct {
 
 func newRunCreationObserver(ctx context.Context, agent *Agent, input RunInput) (context.Context, *runCreationObserver) {
 	name := ""
-	var debug gai.DebugSink
+	var debug gai.ObservationSink
 	modelName := ""
 	toolCount := 0
 	middlewareCount := 0
@@ -126,7 +126,7 @@ func (o *runCreationObserver) fields(ctx context.Context) map[string]any {
 		fields["run_id"] = o.input.ID
 	}
 	if o.input.Prompt.User != nil {
-		gai.AddDebugContent(ctx, o.debug, fields, "user_input", gai.ContentKindPrompt, o.input.Prompt.User.String())
+		gai.AddObservationContent(ctx, o.debug, fields, "user_input", gai.ContentKindPrompt, o.input.Prompt.User.String())
 	}
 	return fields
 }
@@ -146,7 +146,7 @@ func (o *runCreationObserver) emit(ctx context.Context, name string, fields map[
 }
 
 type workflowObserver struct {
-	debug           gai.DebugSink
+	debug           gai.ObservationSink
 	operation       *observe.Operation
 	agentName       string
 	middlewareCount int
@@ -155,7 +155,7 @@ type workflowObserver struct {
 func newWorkflowObserver(ctx context.Context, workflow *Workflow) (context.Context, *workflowObserver) {
 	name := ""
 	middlewareCount := 0
-	var debug gai.DebugSink
+	var debug gai.ObservationSink
 	if workflow != nil {
 		name = workflow.name
 		middlewareCount = len(workflow.middleware)
@@ -178,8 +178,8 @@ func (o *workflowObserver) Started(ctx context.Context) {
 func (o *workflowObserver) PrimaryFinished(ctx context.Context, result AgentResult) {
 	fields := agentResultFields(result)
 	fields["agent_name"] = o.agentName
-	gai.AddDebugContent(ctx, o.debug, fields, "output_text", gai.ContentKindCompletion, result.Text)
-	gai.AddDebugContent(ctx, o.debug, fields, "reasoning", gai.ContentKindReasoning, result.Reasoning)
+	gai.AddObservationContent(ctx, o.debug, fields, "output_text", gai.ContentKindCompletion, result.Text)
+	gai.AddObservationContent(ctx, o.debug, fields, "reasoning", gai.ContentKindReasoning, result.Reasoning)
 	o.emit(ctx, "agent_primary_finished", fields, errors.Join(result.Errors...))
 }
 
@@ -202,8 +202,8 @@ func (o *workflowObserver) Finished(ctx context.Context, result WorkflowResult) 
 		attribute.Int("agent.text_chars", len(result.Text)),
 		attribute.Int("agent.error_count", len(result.Errors)),
 	)
-	gai.AddDebugContent(ctx, o.debug, fields, "output_text", gai.ContentKindCompletion, result.Text)
-	gai.AddDebugContent(ctx, o.debug, fields, "reasoning", gai.ContentKindReasoning, result.Reasoning)
+	gai.AddObservationContent(ctx, o.debug, fields, "output_text", gai.ContentKindCompletion, result.Text)
+	gai.AddObservationContent(ctx, o.debug, fields, "reasoning", gai.ContentKindReasoning, result.Reasoning)
 	err := errors.Join(result.Errors...)
 	o.emit(ctx, "agent_workflow_finished", fields, err)
 	o.operation.Finish(err)
@@ -217,7 +217,7 @@ func (o *workflowObserver) emit(ctx context.Context, name string, fields map[str
 }
 
 type middlewareObserver struct {
-	debug       gai.DebugSink
+	debug       gai.ObservationSink
 	operation   *observe.Operation
 	agentName   string
 	stageName   string
@@ -227,7 +227,7 @@ type middlewareObserver struct {
 
 func newMiddlewareObserver(ctx context.Context, run *MiddlewareContext, middleware *AgentMiddleware, upstream capturedStream) (context.Context, *middlewareObserver) {
 	agentName := ""
-	var debug gai.DebugSink
+	var debug gai.ObservationSink
 	if run != nil && run.workflow != nil {
 		agentName = run.workflow.name
 		debug = run.workflow.debug
@@ -279,8 +279,8 @@ func (o *middlewareObserver) Finished(ctx context.Context, result AgentResult, a
 		attribute.Int("agent.middleware.error_count", len(result.Errors)),
 		attribute.Bool("agent.middleware.output_applied", applied),
 	)
-	gai.AddDebugContent(ctx, o.debug, fields, "output_text", gai.ContentKindCompletion, result.Text)
-	gai.AddDebugContent(ctx, o.debug, fields, "reasoning", gai.ContentKindReasoning, result.Reasoning)
+	gai.AddObservationContent(ctx, o.debug, fields, "output_text", gai.ContentKindCompletion, result.Text)
+	gai.AddObservationContent(ctx, o.debug, fields, "reasoning", gai.ContentKindReasoning, result.Reasoning)
 	err := errors.Join(result.Errors...)
 	name := "agent_middleware_finished"
 	if err != nil {

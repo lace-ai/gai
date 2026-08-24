@@ -157,7 +157,7 @@ func TestCaptureContentKeepsOversizedJSONValidAndDeterministic(t *testing.T) {
 
 type capturePolicyTestSink struct {
 	sensitive bool
-	event     DebugEvent
+	event     Observation
 }
 
 type panickingJSONMarshaler struct{}
@@ -171,53 +171,43 @@ func (m countingJSONMarshaler) MarshalJSON() ([]byte, error) {
 	return []byte(`{"value":"serialized"}`), nil
 }
 
-func TestAddDebugContentSerializationPanicFailsClosed(t *testing.T) {
+func TestAddObservationContentSerializationPanicFailsClosed(t *testing.T) {
 	ctx := WithContentCapturePolicy(t.Context(), ContentCapturePolicy{Prompt: CaptureEnabled})
 	fields := map[string]any{}
-	AddDebugContent(ctx, &capturePolicyTestSink{}, fields, "prompt", ContentKindPrompt, panickingJSONMarshaler{})
+	AddObservationContent(ctx, &capturePolicyTestSink{}, fields, "prompt", ContentKindPrompt, panickingJSONMarshaler{})
 	if len(fields) != 0 {
 		t.Fatalf("panicking serializer emitted fields: %#v", fields)
 	}
 }
 
-func TestAddDebugContentDisabledCategorySkipsSerialization(t *testing.T) {
+func TestAddObservationContentDisabledCategorySkipsSerialization(t *testing.T) {
 	calls := 0
 	ctx := WithContentCapturePolicy(t.Context(), ContentCapturePolicy{Completion: CaptureEnabled})
 	fields := map[string]any{}
-	AddDebugContent(ctx, &capturePolicyTestSink{}, fields, "prompt", ContentKindPrompt, countingJSONMarshaler{calls: &calls})
+	AddObservationContent(ctx, &capturePolicyTestSink{}, fields, "prompt", ContentKindPrompt, countingJSONMarshaler{calls: &calls})
 	if calls != 0 || len(fields) != 0 {
 		t.Fatalf("disabled category serialized content: calls=%d fields=%#v", calls, fields)
 	}
 }
 
-func (s *capturePolicyTestSink) Emit(_ context.Context, event DebugEvent) { s.event = event }
-func (s *capturePolicyTestSink) IncludeSensitiveData() bool               { return s.sensitive }
+func (s *capturePolicyTestSink) Emit(_ context.Context, event Observation) { s.event = event }
 
-func TestAddDebugContentPreservesLegacyAndPolicyOverridesSink(t *testing.T) {
-	legacy := &capturePolicyTestSink{sensitive: true}
-	legacyFields := map[string]any{}
-	legacyValue := map[string]string{"secret": "raw"}
-	AddDebugContent(t.Context(), legacy, legacyFields, "payload", ContentKindPrompt, legacyValue)
-	if got, ok := legacyFields["payload"].(map[string]string); !ok || got["secret"] != "raw" {
-		t.Fatalf("legacy field shape changed: %#v", legacyFields["payload"])
-	}
-
-	strictCtx := WithContentCapturePolicy(t.Context(), ContentCapturePolicy{Completion: CaptureEnabled, MaxBytes: 64})
-	strictFields := map[string]any{}
-	AddDebugContent(strictCtx, legacy, strictFields, "prompt", ContentKindPrompt, "must-not-leak")
-	AddDebugContent(strictCtx, legacy, strictFields, "completion", ContentKindCompletion, "allowed")
-	if _, ok := strictFields["prompt"]; ok {
-		t.Fatal("explicit policy did not override sensitive legacy sink")
-	}
-	if strictFields["completion"] != "allowed" || strictFields["completion_content_kind"] != "completion" {
-		t.Fatalf("enabled policy content missing: %#v", strictFields)
-	}
-
-	nonSensitive := &capturePolicyTestSink{}
+func TestAddObservationContentRequiresAnInstalledPolicy(t *testing.T) {
+	sink := &capturePolicyTestSink{}
 	fields := map[string]any{}
-	AddDebugContent(strictCtx, nonSensitive, fields, "completion", ContentKindCompletion, "policy-enabled")
-	if fields["completion"] != "policy-enabled" {
-		t.Fatalf("policy should enable a field independently of the legacy sink boolean: %#v", fields)
+	AddObservationContent(t.Context(), sink, fields, "payload", ContentKindPrompt, "must-not-leak")
+	if len(fields) != 0 {
+		t.Fatalf("content captured without a policy: %#v", fields)
+	}
+
+	policyCtx := WithContentCapturePolicy(t.Context(), ContentCapturePolicy{Completion: CaptureEnabled, MaxBytes: 64})
+	AddObservationContent(policyCtx, sink, fields, "prompt", ContentKindPrompt, "must-not-leak")
+	AddObservationContent(policyCtx, sink, fields, "completion", ContentKindCompletion, "allowed")
+	if _, ok := fields["prompt"]; ok {
+		t.Fatal("disabled policy category captured content")
+	}
+	if fields["completion"] != "allowed" || fields["completion_content_kind"] != "completion" {
+		t.Fatalf("enabled policy content missing: %#v", fields)
 	}
 }
 
@@ -233,11 +223,11 @@ func TestRedactedOrDisabledContentNeverReachesOTelEvent(t *testing.T) {
 		},
 	})
 	ctx, span := provider.Tracer("content-capture-test").Start(ctx, "capture")
-	sink := DebugSinkFunc(func(context.Context, DebugEvent) {})
+	sink := ObservationSinkFunc(func(context.Context, Observation) {})
 	fields := map[string]any{}
-	AddDebugContent(ctx, sink, fields, "prompt", ContentKindPrompt, "disabled-sentinel-secret")
-	AddDebugContent(ctx, sink, fields, "completion", ContentKindCompletion, "enabled-sentinel-secret")
-	sink.Emit(ctx, DebugEvent{Name: "capture", Source: "test", Fields: fields})
+	AddObservationContent(ctx, sink, fields, "prompt", ContentKindPrompt, "disabled-sentinel-secret")
+	AddObservationContent(ctx, sink, fields, "completion", ContentKindCompletion, "enabled-sentinel-secret")
+	EmitObservation(ctx, sink, Observation{Name: "capture", Source: "test", Fields: fields})
 	span.End()
 
 	var exported strings.Builder

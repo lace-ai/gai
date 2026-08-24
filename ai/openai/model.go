@@ -166,7 +166,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 		stream := m.client(true).Chat.Completions.NewStreaming(ctx, params)
 		defer func() {
 			if err := stream.Close(); err != nil && m.provider.debug != nil {
-				m.provider.debug.Emit(ctx, gai.DebugEvent{
+				gai.EmitObservation(ctx, m.provider.debug, gai.Observation{
 					Name:   "stream_close_failed",
 					Source: "ai:openai.Model.GenerateStream",
 					Err:    err,

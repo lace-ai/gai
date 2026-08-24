@@ -36,7 +36,7 @@ type promptPartTokenStats struct {
 }
 
 type promptBuilderObserver struct {
-	debug     gai.DebugSink
+	debug     gai.ObservationSink
 	operation *observe.Operation
 }
 
@@ -94,7 +94,7 @@ func (o *promptBuilderObserver) FinishRender(err error, stats promptRenderStats)
 }
 
 func (o *promptBuilderObserver) StartRendererRender(ctx context.Context, partCount int) (context.Context, func(error, int)) {
-	var debug gai.DebugSink
+	var debug gai.ObservationSink
 	if o != nil {
 		debug = o.debug
 	}
@@ -181,7 +181,7 @@ func (o *promptBuilderObserver) RenderFailed(ctx context.Context, stats promptRe
 	}, err)
 }
 
-func (o *promptBuilderObserver) RenderFinished(ctx context.Context, stats promptRenderStats, prompt string, legacySensitiveFields map[string]any) {
+func (o *promptBuilderObserver) RenderFinished(ctx context.Context, stats promptRenderStats, prompt string, _ map[string]any) {
 	fields := map[string]any{
 		"part_count":            stats.PartCount,
 		"system_parts":          stats.SystemPartCount,
@@ -190,13 +190,7 @@ func (o *promptBuilderObserver) RenderFinished(ctx context.Context, stats prompt
 		"conversation_messages": stats.ConversationMessageCount,
 		"prompt_chars":          stats.PromptChars,
 	}
-	if _, hasPolicy := gai.ContentCapturePolicyFromContext(ctx); hasPolicy {
-		gai.AddDebugContent(ctx, o.debug, fields, "prompt", gai.ContentKindPrompt, prompt)
-	} else {
-		for key, value := range legacySensitiveFields {
-			gai.AddDebugContent(ctx, o.debug, fields, key, gai.ContentKindPrompt, value)
-		}
-	}
+	gai.AddObservationContent(ctx, o.debug, fields, "prompt", gai.ContentKindPrompt, prompt)
 	o.emit(ctx, "prompt_builder_render_finished", fields, nil)
 }
 

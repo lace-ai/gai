@@ -252,7 +252,7 @@ func TestTurnTokenizeIgnoresNegativeCachedMessageCounts(t *testing.T) {
 	}
 }
 
-func TestTurnTokenizeEmitsDebugEventWhenSavingTokensFails(t *testing.T) {
+func TestTurnTokenizeEmitsObservationWhenSavingTokensFails(t *testing.T) {
 	t.Parallel()
 
 	saveErr := errors.New("save tokens")
@@ -264,8 +264,8 @@ func TestTurnTokenizeEmitsDebugEventWhenSavingTokensFails(t *testing.T) {
 			{Content: gaictx.NewTextContent("three token message")},
 		},
 	}
-	var event gai.DebugEvent
-	turn.SetDebugSink(gai.DebugSinkFunc(func(_ context.Context, emitted gai.DebugEvent) {
+	var event gai.Observation
+	turn.SetObservationSink(gai.ObservationSinkFunc(func(_ context.Context, emitted gai.Observation) {
 		event = emitted
 	}))
 

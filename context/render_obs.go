@@ -12,13 +12,13 @@ const defaultRendererDebugPreviewChars = 500
 
 type renderObserver struct {
 	renderer    string
-	debug       gai.DebugSink
+	debug       gai.ObservationSink
 	operation   *observe.Operation
 	previewSize int
 	parts       []map[string]any
 }
 
-func newRenderObserver(renderer string, debug gai.DebugSink, previewSize int) *renderObserver {
+func newRenderObserver(renderer string, debug gai.ObservationSink, previewSize int) *renderObserver {
 	if previewSize <= 0 {
 		previewSize = defaultRendererDebugPreviewChars
 	}
@@ -114,7 +114,7 @@ func renderPartName(part Part) string {
 	return part.Name()
 }
 
-func rendererNodeStructure(ctx context.Context, debug gai.DebugSink, node RenderNode, previewSize int, inheritedKind gai.ContentKind) (map[string]any, map[gai.ContentKind]struct{}) {
+func rendererNodeStructure(ctx context.Context, debug gai.ObservationSink, node RenderNode, previewSize int, inheritedKind gai.ContentKind) (map[string]any, map[gai.ContentKind]struct{}) {
 	structure := map[string]any{
 		"type":        node.Type,
 		"value_chars": len(node.Value),
@@ -173,14 +173,8 @@ func singleRendererContentKind(kinds map[gai.ContentKind]struct{}) (gai.ContentK
 	return "", false
 }
 
-func addRendererCapturedContent(ctx context.Context, debug gai.DebugSink, fields map[string]any, key, content string, previewSize int, kind gai.ContentKind) {
-	if _, hasPolicy := gai.ContentCapturePolicyFromContext(ctx); hasPolicy {
-		gai.AddDebugContent(ctx, debug, fields, key, kind, content)
-		return
-	}
-	if debug != nil && debug.IncludeSensitiveData() {
-		addRendererPreview(fields, key, content, previewSize)
-	}
+func addRendererCapturedContent(ctx context.Context, debug gai.ObservationSink, fields map[string]any, key, content string, previewSize int, kind gai.ContentKind) {
+	gai.AddObservationContent(ctx, debug, fields, key, kind, content)
 }
 
 func addRendererPreview(fields map[string]any, key, content string, previewSize int) {

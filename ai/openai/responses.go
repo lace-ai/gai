@@ -84,7 +84,7 @@ func (m *Model) generateResponsesStream(ctx context.Context, out chan<- ai.Token
 	stream := m.client(true).Responses.NewStreaming(ctx, params)
 	defer func() {
 		if err := stream.Close(); err != nil && m.provider.debug != nil {
-			m.provider.debug.Emit(ctx, gai.DebugEvent{
+			gai.EmitObservation(ctx, m.provider.debug, gai.Observation{
 				Name:   "stream_close_failed",
 				Source: "ai:openai.Model.generateResponsesStream",
 				Err:    err,

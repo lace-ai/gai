@@ -21,7 +21,7 @@ const mistralTracerName = "github.com/lace-ai/gai/ai/mistral"
 type Model struct {
 	name   string
 	client *Provider
-	debug  gai.DebugSink
+	debug  gai.ObservationSink
 }
 
 var _ ai.Model = (*Model)(nil)
@@ -265,7 +265,7 @@ func mapChatResponseFormat(format ai.ResponseFormat) (*chatResponseFormat, error
 type Tokenizer struct {
 	modelName string
 	client    *Provider
-	debug     gai.DebugSink
+	debug     gai.ObservationSink
 }
 
 func (t *Tokenizer) ID() string {
@@ -328,7 +328,7 @@ func (t *Tokenizer) CountTokens(ctx context.Context, text string) (tokens int, e
 	res, err := t.client.httpClient.Do(httpReq)
 	if err != nil {
 		if t.debug != nil {
-			t.debug.Emit(ctx, gai.DebugEvent{
+			gai.EmitObservation(ctx, t.debug, gai.Observation{
 				Name:   "mistral_token_count_request_failed",
 				Source: "ai:mistral.Tokenizer.CountTokens",
 				Fields: map[string]any{
@@ -353,10 +353,8 @@ func (t *Tokenizer) CountTokens(ctx context.Context, text string) (tokens int, e
 			fields := map[string]any{
 				"status_code": res.StatusCode,
 			}
-			if _, hasPolicy := gai.ContentCapturePolicyFromContext(ctx); !hasPolicy && t.debug.IncludeSensitiveData() {
-				fields["response"] = string(resBody)
-			}
-			t.debug.Emit(ctx, gai.DebugEvent{
+
+			gai.EmitObservation(ctx, t.debug, gai.Observation{
 				Name:   "mistral_token_count_request_failed",
 				Source: "ai:mistral.Tokenizer.CountTokens",
 				Fields: fields,
@@ -510,10 +508,10 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 		var observation *ai.GenerationObservation
 		generationResult := ai.GenerationResult{}
 		defer close(raw)
-		if gai.DebugContentEnabled(ctx, m.debug, gai.ContentKindPrompt) {
+		if gai.ObservationContentEnabled(ctx, m.debug, gai.ContentKindPrompt) {
 			fields := map[string]any{"max_tokens": req.MaxTokens}
-			gai.AddDebugContent(ctx, m.debug, fields, "prompt", gai.ContentKindPrompt, req.Prompt)
-			m.debug.Emit(ctx, gai.DebugEvent{
+			gai.AddObservationContent(ctx, m.debug, fields, "prompt", gai.ContentKindPrompt, req.Prompt)
+			gai.EmitObservation(ctx, m.debug, gai.Observation{
 				Name:   "mistral_stream_request",
 				Source: "ai:mistral.Model.GenerateStream",
 				Fields: fields,
@@ -555,10 +553,8 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 				fields := map[string]any{
 					"error": err.Error(),
 				}
-				if _, hasPolicy := gai.ContentCapturePolicyFromContext(ctx); !hasPolicy && m.debug.IncludeSensitiveData() {
-					fields["payload"] = payload
-				}
-				m.debug.Emit(ctx, gai.DebugEvent{
+
+				gai.EmitObservation(ctx, m.debug, gai.Observation{
 					Name:   "mistral_stream_request_payload",
 					Source: "ai:mistral.Model.GenerateStream",
 					Fields: fields,
@@ -580,7 +576,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 		if err != nil {
 			streamErr = err
 			if m.debug != nil {
-				m.debug.Emit(ctx, gai.DebugEvent{
+				gai.EmitObservation(ctx, m.debug, gai.Observation{
 					Name:   "mistral_stream_request_creation_failed",
 					Source: "ai:mistral.Model.GenerateStream",
 					Fields: map[string]any{
@@ -606,7 +602,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 		if err != nil {
 			streamErr = err
 			if m.debug != nil {
-				m.debug.Emit(ctx, gai.DebugEvent{
+				gai.EmitObservation(ctx, m.debug, gai.Observation{
 					Name:   "mistral_stream_request_failed",
 					Source: "ai:mistral.Model.GenerateStream",
 					Fields: map[string]any{
@@ -628,7 +624,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			resBody, readErr := io.ReadAll(io.LimitReader(res.Body, maxResponseBody))
 			if readErr != nil {
 				if m.debug != nil {
-					m.debug.Emit(ctx, gai.DebugEvent{
+					gai.EmitObservation(ctx, m.debug, gai.Observation{
 						Name:   "mistral_stream_request_failed_with_unreadable_body",
 						Source: "ai:mistral.Model.GenerateStream",
 						Fields: map[string]any{
@@ -651,10 +647,8 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 				fields := map[string]any{
 					"status_code": res.StatusCode,
 				}
-				if _, hasPolicy := gai.ContentCapturePolicyFromContext(ctx); !hasPolicy && m.debug.IncludeSensitiveData() {
-					fields["response"] = string(resBody)
-				}
-				m.debug.Emit(ctx, gai.DebugEvent{
+
+				gai.EmitObservation(ctx, m.debug, gai.Observation{
 					Name:   "mistral_stream_request_failed",
 					Source: "ai:mistral.Model.GenerateStream",
 					Fields: fields,
@@ -770,8 +764,8 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 						fields := map[string]any{
 							"error": mapErr.Error(),
 						}
-						gai.AddDebugContent(ctx, m.debug, fields, "tool_calls", gai.ContentKindToolInput, chunk.Choices[0].Delta.ToolCalls)
-						m.debug.Emit(ctx, gai.DebugEvent{
+						gai.AddObservationContent(ctx, m.debug, fields, "tool_calls", gai.ContentKindToolInput, chunk.Choices[0].Delta.ToolCalls)
+						gai.EmitObservation(ctx, m.debug, gai.Observation{
 							Name:   "mistral_stream_tool_calls_mapping_failed",
 							Source: "ai:mistral.Model.GenerateStream",
 							Fields: fields,
@@ -783,8 +777,8 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 				}
 				if m.debug != nil {
 					fields := map[string]any{}
-					gai.AddDebugContent(ctx, m.debug, fields, "tool_calls", gai.ContentKindToolInput, calls)
-					m.debug.Emit(ctx, gai.DebugEvent{
+					gai.AddObservationContent(ctx, m.debug, fields, "tool_calls", gai.ContentKindToolInput, calls)
+					gai.EmitObservation(ctx, m.debug, gai.Observation{
 						Name:   "mistral_stream_tool_calls_mapped",
 						Source: "ai:mistral.Model.GenerateStream",
 						Fields: fields,
@@ -809,7 +803,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			line, err := reader.ReadString('\n')
 			if err != nil && !errors.Is(err, io.EOF) {
 				if m.debug != nil {
-					m.debug.Emit(ctx, gai.DebugEvent{
+					gai.EmitObservation(ctx, m.debug, gai.Observation{
 						Name:   "mistral_stream_read_failed",
 						Source: "ai:mistral.Model.GenerateStream",
 						Fields: map[string]any{
@@ -830,7 +824,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 				if flushErr := flushEvent(); flushErr != nil {
 					if errors.Is(flushErr, io.EOF) {
 						if m.debug != nil {
-							m.debug.Emit(ctx, gai.DebugEvent{
+							gai.EmitObservation(ctx, m.debug, gai.Observation{
 								Name:   "mistral_stream_read_eof",
 								Source: "ai:mistral.Model.GenerateStream",
 								Fields: map[string]any{},
@@ -839,7 +833,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 						return
 					}
 					if m.debug != nil {
-						m.debug.Emit(ctx, gai.DebugEvent{
+						gai.EmitObservation(ctx, m.debug, gai.Observation{
 							Name:   "mistral_stream_chunk_processing_failed",
 							Source: "ai:mistral.Model.GenerateStream",
 							Fields: map[string]any{
@@ -863,7 +857,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 
 			if errors.Is(err, io.EOF) {
 				if m.debug != nil {
-					m.debug.Emit(ctx, gai.DebugEvent{
+					gai.EmitObservation(ctx, m.debug, gai.Observation{
 						Name:   "mistral_stream_read_eof",
 						Source: "ai:mistral.Model.GenerateStream",
 						Fields: map[string]any{},
@@ -871,7 +865,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 				}
 				if flushErr := flushEvent(); flushErr != nil && !errors.Is(flushErr, io.EOF) {
 					if m.debug != nil {
-						m.debug.Emit(ctx, gai.DebugEvent{
+						gai.EmitObservation(ctx, m.debug, gai.Observation{
 							Name:   "mistral_stream_final_flush_failed",
 							Source: "ai:mistral.Model.GenerateStream",
 							Fields: map[string]any{
@@ -931,10 +925,10 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 	if err := ai.ValidateModelRequest(m, req); err != nil {
 		return nil, err
 	}
-	if gai.DebugContentEnabled(ctx, m.debug, gai.ContentKindPrompt) {
+	if gai.ObservationContentEnabled(ctx, m.debug, gai.ContentKindPrompt) {
 		fields := map[string]any{"max_tokens": req.MaxTokens}
-		gai.AddDebugContent(ctx, m.debug, fields, "prompt", gai.ContentKindPrompt, req.Prompt)
-		m.debug.Emit(ctx, gai.DebugEvent{
+		gai.AddObservationContent(ctx, m.debug, fields, "prompt", gai.ContentKindPrompt, req.Prompt)
+		gai.EmitObservation(ctx, m.debug, gai.Observation{
 			Name:   "mistral_generate_request",
 			Source: "ai:mistral.Model.Generate",
 			Fields: fields,
@@ -1012,11 +1006,9 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 			"input_tokens":  usage.InputTokens,
 			"output_tokens": usage.OutputTokens,
 		}
-		if _, hasPolicy := gai.ContentCapturePolicyFromContext(ctx); !hasPolicy && m.debug.IncludeSensitiveData() {
-			fields["response"] = parsed
-		}
-		gai.AddDebugContent(ctx, m.debug, fields, "response_text", gai.ContentKindCompletion, parsed.Choices[0].Message.Content)
-		m.debug.Emit(ctx, gai.DebugEvent{
+
+		gai.AddObservationContent(ctx, m.debug, fields, "response_text", gai.ContentKindCompletion, parsed.Choices[0].Message.Content)
+		gai.EmitObservation(ctx, m.debug, gai.Observation{
 			Name:   "mistral_generate_response",
 			Source: "ai:mistral.Model.Generate",
 			Fields: fields,

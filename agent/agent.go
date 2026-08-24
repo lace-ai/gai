@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 
 	"github.com/lace-ai/gai"
@@ -87,8 +89,8 @@ type Definition struct {
 	Tokenizer ai.Tokenizer
 	// ToolResponseProcessor can transform tool responses before they enter the transcript.
 	ToolResponseProcessor loop.ToolResponseProcessor
-	// DebugSink receives agent and workflow lifecycle events.
-	DebugSink gai.DebugSink
+	// ObservationSink receives agent and workflow lifecycle events.
+	ObservationSink gai.ObservationSink
 	// Middleware transforms the run stream in declaration order.
 	Middleware []Middleware
 }
@@ -108,7 +110,11 @@ func New(def Definition) *Agent {
 // Prompt construction happens before NewRun returns. Model execution and
 // middleware processing begin when Workflow.Run is called.
 func (a *Agent) NewRun(ctx context.Context, input RunInput) (*Workflow, error) {
+	if input.ID == "" {
+		input.ID = newRunID()
+	}
 	ctx, input = resolveRunTraceContext(ctx, input)
+	ctx = gai.WithObservationRunID(ctx, input.ID)
 	ctx, obs := newRunCreationObserver(ctx, a, input)
 	if a != nil {
 		if err := validateMiddleware(a.def.Middleware); err != nil {
@@ -129,6 +135,14 @@ func (a *Agent) NewRun(ctx context.Context, input RunInput) (*Workflow, error) {
 	return workflow, nil
 }
 
+func newRunID() string {
+	var bytes [16]byte
+	if _, err := rand.Read(bytes[:]); err != nil {
+		return "run"
+	}
+	return "run_" + hex.EncodeToString(bytes[:])
+}
+
 func resolveRunTraceContext(ctx context.Context, input RunInput) (context.Context, RunInput) {
 	if input.TraceContext != nil {
 		ctx = gai.WithTraceContext(ctx, *input.TraceContext)
@@ -146,11 +160,11 @@ func (a *Agent) name() string {
 	return a.def.Name
 }
 
-func (a *Agent) debugSink() gai.DebugSink {
+func (a *Agent) debugSink() gai.ObservationSink {
 	if a == nil {
 		return nil
 	}
-	return a.def.DebugSink
+	return a.def.ObservationSink
 }
 
 func (a *Agent) middleware() []Middleware {
@@ -200,7 +214,7 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 			if execution.hasToolChoice {
 				toolOptions = append(toolOptions, tooldefinitions.WithToolChoice(execution.toolChoice))
 			}
-			toolSource, err := tooldefinitions.New(nil, toolSignatures(execution.tools), a.def.DebugSink, toolOptions...)
+			toolSource, err := tooldefinitions.New(nil, toolSignatures(execution.tools), a.def.ObservationSink, toolOptions...)
 			if err != nil {
 				return nil, err
 			}

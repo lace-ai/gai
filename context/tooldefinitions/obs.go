@@ -16,7 +16,7 @@ type observer struct {
 	tokenBudget int
 }
 
-func newObserver(ctx context.Context, debug gai.DebugSink, toolCount int, tokenBudget int) (context.Context, *observer) {
+func newObserver(ctx context.Context, debug gai.ObservationSink, toolCount int, tokenBudget int) (context.Context, *observer) {
 	ctx, operation := observe.Start(ctx, debug, tracerName, "context.tool_definitions", "context.operation", "build", "context/tooldefinitions:Source.Function",
 		attribute.String("context.source", "tool_definitions"),
 		attribute.Int("context.tool_count", toolCount),

@@ -65,7 +65,7 @@ func SpanContextIDs(ctx context.Context) (traceID string, spanID string, err err
 	return sc.TraceID().String(), sc.SpanID().String(), nil
 }
 
-func RecordDebugEvent(ctx context.Context, e DebugEvent) {
+func RecordObservation(ctx context.Context, e Observation) {
 	span := trace.SpanFromContext(ctx)
 	if !span.SpanContext().IsValid() {
 		return
@@ -76,7 +76,7 @@ func RecordDebugEvent(ctx context.Context, e DebugEvent) {
 	span.AddEvent("debug."+e.Name, trace.WithAttributes(debugEventAttributes(e)...))
 }
 
-func debugEventAttributes(e DebugEvent) []attribute.KeyValue {
+func debugEventAttributes(e Observation) []attribute.KeyValue {
 	attrs := []attribute.KeyValue{
 		attribute.String("debug.name", e.Name),
 		attribute.String("debug.source", e.Source),

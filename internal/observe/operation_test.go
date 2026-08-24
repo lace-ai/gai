@@ -13,7 +13,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
-func TestOperationPreservesSpanAndDebugEventSemantics(t *testing.T) {
+func TestOperationPreservesSpanAndObservationSemantics(t *testing.T) {
 	previousProvider := otel.GetTracerProvider()
 	recorder := tracetest.NewSpanRecorder()
 	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
@@ -23,8 +23,8 @@ func TestOperationPreservesSpanAndDebugEventSemantics(t *testing.T) {
 		otel.SetTracerProvider(previousProvider)
 	})
 
-	var events []gai.DebugEvent
-	sink := gai.DebugSinkFunc(func(_ context.Context, event gai.DebugEvent) {
+	var events []gai.Observation
+	sink := gai.ObservationSinkFunc(func(_ context.Context, event gai.Observation) {
 		events = append(events, event)
 	})
 	ctx, operation := observe.Start(t.Context(), sink, "test-tracer", "test", "test.operation", "run", "test:observer", attribute.String("test.initial", "value"))
@@ -44,8 +44,8 @@ func TestOperationPreservesSpanAndDebugEventSemantics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SpanContextIDs() error = %v", err)
 	}
-	if event.Fields["trace_id"] != traceID || event.Fields["span_id"] != spanID {
-		t.Fatalf("event correlation fields = trace_id:%#v span_id:%#v, want trace_id:%q span_id:%q", event.Fields["trace_id"], event.Fields["span_id"], traceID, spanID)
+	if event.TraceID != traceID || event.SpanID != spanID {
+		t.Fatalf("event correlation = trace_id:%q span_id:%q, want trace_id:%q span_id:%q", event.TraceID, event.SpanID, traceID, spanID)
 	}
 
 	spans := recorder.Ended()

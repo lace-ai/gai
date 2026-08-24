@@ -126,7 +126,7 @@ func parseToolCall(payload []byte) (*ToolCall, bool) {
 // DetectToolCallsInStream scans a token stream for text-encoded tool calls.
 // When it detects a valid tool-call JSON object, it emits a ToolCall token.
 // Otherwise, buffered tokens are replayed unchanged.
-func DetectToolCallsInStream(ctx context.Context, in <-chan Token, debug gai.DebugSink) <-chan Token {
+func DetectToolCallsInStream(ctx context.Context, in <-chan Token, debug gai.ObservationSink) <-chan Token {
 	out := make(chan Token, 8)
 
 	go func() {
@@ -203,8 +203,8 @@ func DetectToolCallsInStream(ctx context.Context, in <-chan Token, debug gai.Deb
 					fields := map[string]any{
 						"reason": fmt.Sprintf("inString=%v objDepth=%d arrDepth=%d", inString, objDepth, arrDepth),
 					}
-					gai.AddDebugContent(ctx, debug, fields, "data", gai.ContentKindCompletion, joinTokenData(pending))
-					debug.Emit(ctx, gai.DebugEvent{
+					gai.AddObservationContent(ctx, debug, fields, "data", gai.ContentKindCompletion, joinTokenData(pending))
+					gai.EmitObservation(ctx, debug, gai.Observation{
 						Name:   "tool_call_stream_non_tool_call",
 						Source: "ai:DetectToolCallsInStream.maybeToolCall",
 						Fields: fields,
@@ -224,8 +224,8 @@ func DetectToolCallsInStream(ctx context.Context, in <-chan Token, debug gai.Deb
 						"type": tc.Type,
 						"name": tc.Name,
 					}
-					gai.AddDebugContent(ctx, debug, fields, "args", gai.ContentKindToolInput, tc.Args)
-					debug.Emit(ctx, gai.DebugEvent{
+					gai.AddObservationContent(ctx, debug, fields, "args", gai.ContentKindToolInput, tc.Args)
+					gai.EmitObservation(ctx, debug, gai.Observation{
 						Name:   "tool_call_stream_tool_call_detected",
 						Source: "ai:DetectToolCallsInStream.maybeToolCall",
 						Fields: fields,
@@ -246,8 +246,8 @@ func DetectToolCallsInStream(ctx context.Context, in <-chan Token, debug gai.Deb
 					fields := map[string]any{
 						"reason": "parse failed",
 					}
-					gai.AddDebugContent(ctx, debug, fields, "data", gai.ContentKindCompletion, payload)
-					debug.Emit(ctx, gai.DebugEvent{
+					gai.AddObservationContent(ctx, debug, fields, "data", gai.ContentKindCompletion, payload)
+					gai.EmitObservation(ctx, debug, gai.Observation{
 						Name:   "tool_call_stream_tool_call_parse_failed",
 						Source: "ai:DetectToolCallsInStream.maybeToolCall",
 						Fields: fields,
@@ -296,8 +296,8 @@ func DetectToolCallsInStream(ctx context.Context, in <-chan Token, debug gai.Deb
 						if b == '{' {
 							if debug != nil {
 								fields := map[string]any{}
-								gai.AddDebugContent(ctx, debug, fields, "data", gai.ContentKindCompletion, tokenStr.String())
-								debug.Emit(ctx, gai.DebugEvent{
+								gai.AddObservationContent(ctx, debug, fields, "data", gai.ContentKindCompletion, tokenStr.String())
+								gai.EmitObservation(ctx, debug, gai.Observation{
 									Name:   "tool_call_stream_json_candidate",
 									Source: "ai:DetectToolCallsInStream",
 									Fields: fields,
@@ -320,8 +320,8 @@ func DetectToolCallsInStream(ctx context.Context, in <-chan Token, debug gai.Deb
 							tokenStr.WriteByte(b)
 							if debug != nil {
 								fields := map[string]any{}
-								gai.AddDebugContent(ctx, debug, fields, "data", gai.ContentKindCompletion, tokenStr.String())
-								debug.Emit(ctx, gai.DebugEvent{
+								gai.AddObservationContent(ctx, debug, fields, "data", gai.ContentKindCompletion, tokenStr.String())
+								gai.EmitObservation(ctx, debug, gai.Observation{
 									Name:   "tool_call_stream_json_candidate_after_newlines",
 									Source: "ai:DetectToolCallsInStream",
 									Fields: fields,
@@ -388,8 +388,8 @@ func DetectToolCallsInStream(ctx context.Context, in <-chan Token, debug gai.Deb
 
 		if debug != nil {
 			fields := map[string]any{}
-			gai.AddDebugContent(ctx, debug, fields, "pending_data", gai.ContentKindCompletion, joinTokenData(pending))
-			debug.Emit(ctx, gai.DebugEvent{
+			gai.AddObservationContent(ctx, debug, fields, "pending_data", gai.ContentKindCompletion, joinTokenData(pending))
+			gai.EmitObservation(ctx, debug, gai.Observation{
 				Name:   "tool_call_stream_end_of_stream",
 				Source: "ai:DetectToolCallsInStream",
 				Fields: fields,

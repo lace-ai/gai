@@ -324,19 +324,17 @@ func invalidParams() ai.ToolParameters {
 
 type captureSink struct {
 	mu     sync.Mutex
-	events []gai.DebugEvent
+	events []gai.Observation
 }
 
-func (s *captureSink) Emit(_ context.Context, event gai.DebugEvent) {
+func (s *captureSink) Emit(_ context.Context, event gai.Observation) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.events = append(s.events, event)
 }
 
-func (s *captureSink) IncludeSensitiveData() bool { return false }
-
-func (s *captureSink) Events() []gai.DebugEvent {
+func (s *captureSink) Events() []gai.Observation {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]gai.DebugEvent(nil), s.events...)
+	return append([]gai.Observation(nil), s.events...)
 }

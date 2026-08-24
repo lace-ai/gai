@@ -227,16 +227,11 @@ func TestBuildPromptOrdersInputContextBeforeUserAndConversation(t *testing.T) {
 }
 
 type debugEventSink struct {
-	sensitive bool
-	events    []gai.DebugEvent
+	events []gai.Observation
 }
 
-func (s *debugEventSink) Emit(ctx context.Context, e gai.DebugEvent) {
+func (s *debugEventSink) Emit(ctx context.Context, e gai.Observation) {
 	s.events = append(s.events, e)
-}
-
-func (s *debugEventSink) IncludeSensitiveData() bool {
-	return s.sensitive
 }
 
 type failingPart struct{}
@@ -263,7 +258,7 @@ func TestPromptBuilderEmitsExistingEventsWithoutSensitiveFieldsByDefault(t *test
 		ContextSources:     []ContextSource{source},
 		PromptInput:        PromptInput{User: NewTextContent("find docs")},
 		TokenBudget:        10,
-		DebugSink:          sink,
+		ObservationSink:    sink,
 	})
 	builder.SetTokenizer(debugTestTokenizer{})
 
@@ -305,14 +300,15 @@ func TestPromptBuilderEmitsExistingEventsWithoutSensitiveFieldsByDefault(t *test
 func TestPromptBuilderEmitsSensitiveRenderFieldsWhenEnabled(t *testing.T) {
 	t.Parallel()
 
-	sink := &debugEventSink{sensitive: true}
+	sink := &debugEventSink{}
 	builder := New(Definition{
 		SystemInstructions: []Part{NewTextPart(strings.Repeat("system ", 900))},
 		PromptInput:        PromptInput{User: NewTextContent("find docs")},
-		DebugSink:          sink,
+		ObservationSink:    sink,
 	})
 
-	if _, err := builder.BuildPrompt(context.Background(), messageConversation{
+	ctx := gai.WithContentCapturePolicy(context.Background(), gai.ContentCapturePolicy{Prompt: gai.CaptureEnabled, Completion: gai.CaptureEnabled, Memory: gai.CaptureEnabled})
+	if _, err := builder.BuildPrompt(ctx, messageConversation{
 		messages: []Message{{Role: RoleAssistant, Content: NewTextContent("assistant reply")}},
 	}); err != nil {
 		t.Fatalf("BuildPrompt failed: %v", err)
@@ -322,27 +318,21 @@ func TestPromptBuilderEmitsSensitiveRenderFieldsWhenEnabled(t *testing.T) {
 	if got := renderEvent.Name; got != "prompt_builder_render_finished" {
 		t.Fatalf("expected final render event, got %q", got)
 	}
-	if got := renderEvent.Fields["prompt_render_mode"]; got != "structured" {
-		t.Fatalf("expected structured prompt render mode, got %v", got)
+	if _, ok := renderEvent.Fields["prompt"].(string); !ok {
+		t.Fatalf("expected policy-captured prompt, got %#v", renderEvent.Fields["prompt"])
 	}
-	if _, ok := renderEvent.Fields["prompt_head"]; !ok {
-		t.Fatal("expected prompt_head field")
-	}
-	if _, ok := renderEvent.Fields["prompt_tail"]; !ok {
-		t.Fatal("expected prompt_tail field")
-	}
-	if _, ok := renderEvent.Fields["prompt_structure"]; !ok {
-		t.Fatal("expected prompt_structure field")
+	if renderEvent.Fields["prompt_content_kind"] != "prompt" {
+		t.Fatalf("expected prompt capture metadata, got %#v", renderEvent.Fields)
 	}
 }
 
 func TestPromptBuilderKeepsTokenErrorEvents(t *testing.T) {
 	t.Parallel()
 
-	sink := &debugEventSink{sensitive: true}
+	sink := &debugEventSink{}
 	builder := New(Definition{
 		SystemInstructions: []Part{failingPart{}},
-		DebugSink:          sink,
+		ObservationSink:    sink,
 	})
 	builder.SetTokenizer(debugTestTokenizer{})
 

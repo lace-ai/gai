@@ -20,7 +20,7 @@ const geminiTracerName = "github.com/lace-ai/gai/ai/gemini"
 type Model struct {
 	name   string
 	client *Provider
-	debug  gai.DebugSink
+	debug  gai.ObservationSink
 	mu     sync.Mutex
 	api    *genai.Client
 }
@@ -101,10 +101,10 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 		completion := ai.Completion{Provider: "gemini"}
 		hasCompletion := false
 		defer close(out)
-		if gai.DebugContentEnabled(ctx, m.debug, gai.ContentKindPrompt) {
+		if gai.ObservationContentEnabled(ctx, m.debug, gai.ContentKindPrompt) {
 			fields := map[string]any{"max_tokens": req.MaxTokens}
-			gai.AddDebugContent(ctx, m.debug, fields, "prompt", gai.ContentKindPrompt, req.Prompt)
-			m.debug.Emit(ctx, gai.DebugEvent{
+			gai.AddObservationContent(ctx, m.debug, fields, "prompt", gai.ContentKindPrompt, req.Prompt)
+			gai.EmitObservation(ctx, m.debug, gai.Observation{
 				Name:   "gemini_stream_request",
 				Source: "ai:gemini.Model.GenerateStream",
 				Fields: fields,
@@ -144,7 +144,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 		if err != nil {
 			streamErr = err
 			if m.debug != nil {
-				m.debug.Emit(ctx, gai.DebugEvent{
+				gai.EmitObservation(ctx, m.debug, gai.Observation{
 					Name:   "gemini_get_client_failed",
 					Source: "ai:gemini.Model.GenerateStream",
 					Fields: map[string]any{
@@ -178,7 +178,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			if err != nil {
 				streamErr = classifyProviderError(fmt.Errorf("error generating content stream: %w", err))
 				if m.debug != nil {
-					m.debug.Emit(ctx, gai.DebugEvent{
+					gai.EmitObservation(ctx, m.debug, gai.Observation{
 						Name:   "gemini_stream_generation_failed",
 						Source: "ai:gemini.Model.GenerateStream",
 						Fields: map[string]any{
@@ -256,10 +256,8 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 							fields := map[string]any{
 								"error": err.Error(),
 							}
-							if _, hasPolicy := gai.ContentCapturePolicyFromContext(ctx); !hasPolicy && m.debug.IncludeSensitiveData() {
-								fields["part"] = string(rawPart)
-							}
-							m.debug.Emit(ctx, gai.DebugEvent{
+							gai.AddObservationContent(ctx, m.debug, fields, "part", gai.ContentKindToolInput, rawPart)
+							gai.EmitObservation(ctx, m.debug, gai.Observation{
 								Name:   "gemini_stream_part_encoding_failed",
 								Source: "ai:gemini.Model.GenerateStream",
 								Fields: fields,
@@ -277,11 +275,11 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 							fields := map[string]any{
 								"error": err.Error(),
 							}
-							if gai.DebugContentEnabled(ctx, m.debug, gai.ContentKindToolInput) {
+							if gai.ObservationContentEnabled(ctx, m.debug, gai.ContentKindToolInput) {
 								fields["function_call_name"] = part.FunctionCall.Name
-								gai.AddDebugContent(ctx, m.debug, fields, "function_call_args", gai.ContentKindToolInput, part.FunctionCall.Args)
+								gai.AddObservationContent(ctx, m.debug, fields, "function_call_args", gai.ContentKindToolInput, part.FunctionCall.Args)
 							}
-							m.debug.Emit(ctx, gai.DebugEvent{
+							gai.EmitObservation(ctx, m.debug, gai.Observation{
 								Name:   "gemini_stream_function_call_mapping_failed",
 								Source: "ai:gemini.Model.GenerateStream",
 								Fields: fields,
@@ -294,11 +292,11 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 					toolCall.ThoughtSignature = append([]byte(nil), part.ThoughtSignature...)
 					if m.debug != nil {
 						fields := map[string]any{}
-						if gai.DebugContentEnabled(ctx, m.debug, gai.ContentKindToolInput) {
+						if gai.ObservationContentEnabled(ctx, m.debug, gai.ContentKindToolInput) {
 							fields["tool_call_id"] = toolCall.ID
-							gai.AddDebugContent(ctx, m.debug, fields, "tool_call_args", gai.ContentKindToolInput, toolCall.Args)
+							gai.AddObservationContent(ctx, m.debug, fields, "tool_call_args", gai.ContentKindToolInput, toolCall.Args)
 						}
-						m.debug.Emit(ctx, gai.DebugEvent{
+						gai.EmitObservation(ctx, m.debug, gai.Observation{
 							Name:   "gemini_stream_function_call_mapped",
 							Source: "ai:gemini.Model.GenerateStream",
 							Fields: fields,
@@ -328,10 +326,10 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 	if err := ai.ValidateModelRequest(m, req); err != nil {
 		return nil, err
 	}
-	if gai.DebugContentEnabled(ctx, m.debug, gai.ContentKindPrompt) {
+	if gai.ObservationContentEnabled(ctx, m.debug, gai.ContentKindPrompt) {
 		fields := map[string]any{"max_tokens": req.MaxTokens}
-		gai.AddDebugContent(ctx, m.debug, fields, "prompt", gai.ContentKindPrompt, req.Prompt)
-		m.debug.Emit(ctx, gai.DebugEvent{
+		gai.AddObservationContent(ctx, m.debug, fields, "prompt", gai.ContentKindPrompt, req.Prompt)
+		gai.EmitObservation(ctx, m.debug, gai.Observation{
 			Name:   "gemini_generate_request",
 			Source: "ai:gemini.Model.Generate",
 			Fields: fields,
@@ -341,7 +339,7 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 	client, err := m.getClient(ctx)
 	if err != nil {
 		if m.debug != nil {
-			m.debug.Emit(ctx, gai.DebugEvent{
+			gai.EmitObservation(ctx, m.debug, gai.Observation{
 				Name:   "gemini_get_client_failed",
 				Source: "ai:gemini.Model.Generate",
 				Fields: map[string]any{
@@ -377,7 +375,7 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 	)
 	if err != nil {
 		if m.debug != nil {
-			m.debug.Emit(ctx, gai.DebugEvent{
+			gai.EmitObservation(ctx, m.debug, gai.Observation{
 				Name:   "gemini_generate_content_failed",
 				Source: "ai:gemini.Model.Generate",
 				Fields: map[string]any{
@@ -408,9 +406,9 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 			"input_tokens":  inputTokens,
 			"output_tokens": outputTokens,
 		}
-		gai.AddDebugContent(ctx, m.debug, fields, "response_text", gai.ContentKindCompletion, text)
-		gai.AddDebugContent(ctx, m.debug, fields, "reasoning", gai.ContentKindReasoning, reasoning)
-		m.debug.Emit(ctx, gai.DebugEvent{
+		gai.AddObservationContent(ctx, m.debug, fields, "response_text", gai.ContentKindCompletion, text)
+		gai.AddObservationContent(ctx, m.debug, fields, "reasoning", gai.ContentKindReasoning, reasoning)
+		gai.EmitObservation(ctx, m.debug, gai.Observation{
 			Name:   "gemini_generate_content_success",
 			Source: "ai:gemini.Model.Generate",
 			Fields: fields,
