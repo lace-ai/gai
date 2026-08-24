@@ -104,6 +104,11 @@ func (l *Loop) Validate() error {
 // the configured set except that required named choices are similarly limited
 // for provider-side choice handling.
 func EffectiveTools(tools []Tool, choice ai.ToolChoice, transport ToolTransportMode) ([]Tool, error) {
+	switch transport {
+	case ToolTransportNative, ToolTransportText:
+	default:
+		return nil, fmt.Errorf("invalid tool transport mode: %d", transport)
+	}
 	if err := choice.Validate(); err != nil {
 		return nil, err
 	}

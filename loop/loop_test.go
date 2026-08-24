@@ -494,6 +494,22 @@ func TestEffectiveToolsAppliesTextTransportChoice(t *testing.T) {
 	}
 }
 
+func TestEffectiveToolsRejectsUnknownTransport(t *testing.T) {
+	t.Parallel()
+
+	_, err := loop.EffectiveTools(
+		[]loop.Tool{nil},
+		ai.ToolChoice{Mode: ai.ToolChoiceAuto},
+		loop.ToolTransportMode(255),
+	)
+	if err == nil {
+		t.Fatal("EffectiveTools() succeeded with an unknown transport mode")
+	}
+	if !strings.Contains(err.Error(), "invalid tool transport mode") {
+		t.Fatalf("EffectiveTools() error = %v, want invalid transport error", err)
+	}
+}
+
 func TestLoopValidateTextTransportRejectsInvalidToolDefinitions(t *testing.T) {
 	t.Parallel()
 
