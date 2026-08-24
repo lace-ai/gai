@@ -210,6 +210,26 @@ func TestAddObservationContentRequiresAnInstalledPolicy(t *testing.T) {
 	}
 }
 
+func TestAddObservationContentCapturesForActiveSpanWithoutSink(t *testing.T) {
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
+
+	ctx := WithContentCapturePolicy(t.Context(), ContentCapturePolicy{Prompt: CaptureEnabled})
+	ctx, span := provider.Tracer("content-capture-test").Start(ctx, "capture")
+	fields := map[string]any{}
+	AddObservationContent(ctx, nil, fields, "prompt", ContentKindPrompt, "allowed-content")
+	EmitObservation(ctx, nil, Observation{Name: "capture", Source: "test", Fields: fields})
+	span.End()
+
+	if fields["prompt"] != "allowed-content" {
+		t.Fatalf("policy-enabled content missing: %#v", fields)
+	}
+	if len(recorder.Ended()) != 1 || !containsAttribute(recorder.Ended()[0].Events()[0].Attributes, "debug.prompt", "allowed-content") {
+		t.Fatalf("policy-enabled content missing from OTel event: %#v", recorder.Ended())
+	}
+}
+
 func TestRedactedOrDisabledContentNeverReachesOTelEvent(t *testing.T) {
 	recorder := tracetest.NewSpanRecorder()
 	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))

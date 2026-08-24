@@ -41,7 +41,9 @@ func (f ObservationSinkFunc) Emit(ctx context.Context, observation Observation) 
 // kind would be captured under ctx's ContentCapturePolicy.
 func ObservationContentEnabled(ctx context.Context, sink ObservationSink, kind ContentKind) bool {
 	if sink == nil {
-		return false
+		if _, _, err := SpanContextIDs(ctx); err != nil {
+			return false
+		}
 	}
 	policy, ok := ContentCapturePolicyFromContext(ctx)
 	return ok && policy.captureMode(kind) == CaptureEnabled
@@ -51,7 +53,7 @@ func ObservationContentEnabled(ctx context.Context, sink ObservationSink, kind C
 // the request-scoped ContentCapturePolicy. With no installed policy, content
 // capture is disabled.
 func AddObservationContent(ctx context.Context, sink ObservationSink, fields map[string]any, field string, kind ContentKind, value any) {
-	if sink == nil || fields == nil || field == "" {
+	if fields == nil || field == "" {
 		return
 	}
 	if !ObservationContentEnabled(ctx, sink, kind) {
