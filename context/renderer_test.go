@@ -212,16 +212,19 @@ func TestRenderersEmitDetailedTruncatedDebugEvents(t *testing.T) {
 
 	tests := []struct {
 		name     string
+		source   string
 		renderer func(*rendererDebugSink) gaictx.Renderer
 	}{
 		{
-			name: "xml",
+			name:   "xml",
+			source: "context:XMLRenderer",
 			renderer: func(sink *rendererDebugSink) gaictx.Renderer {
 				return &gaictx.XMLRenderer{DebugSink: sink, DebugPreviewChars: 5}
 			},
 		},
 		{
-			name: "simple",
+			name:   "simple",
+			source: "context:SimpleRenderer",
 			renderer: func(sink *rendererDebugSink) gaictx.Renderer {
 				return &gaictx.SimpleRenderer{DebugSink: sink, DebugPreviewChars: 5}
 			},
@@ -253,6 +256,9 @@ func TestRenderersEmitDetailedTruncatedDebugEvents(t *testing.T) {
 			for i, want := range wantNames {
 				if got := sink.events[i].Name; got != want {
 					t.Fatalf("event %d: got %q want %q", i, got, want)
+				}
+				if got := sink.events[i].Source; got != tt.source {
+					t.Fatalf("event %d: source = %q, want %q", i, got, tt.source)
 				}
 			}
 
