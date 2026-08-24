@@ -175,15 +175,20 @@ func singleRendererContentKind(kinds map[gai.ContentKind]struct{}) (gai.ContentK
 
 func addRendererCapturedContent(ctx context.Context, debug gai.ObservationSink, fields map[string]any, key, content string, previewSize int, kind gai.ContentKind) {
 	gai.AddObservationContent(ctx, debug, fields, key, kind, content)
+	captured, ok := fields[key].(string)
+	if !ok {
+		return
+	}
+	addRendererPreview(fields, key, captured, previewSize)
 }
 
 func addRendererPreview(fields map[string]any, key, content string, previewSize int) {
-	runes := []rune(content)
-	if len(runes) <= previewSize*2 {
-		fields[key] = content
-		fields[key+"_mode"] = "full"
+	if len([]rune(content)) <= previewSize*2 {
 		return
 	}
+
+	runes := []rune(content)
+	delete(fields, key)
 	omitted := len(runes) - previewSize*2
 	fields[key+"_mode"] = "truncated"
 	fields[key+"_head"] = string(runes[:previewSize])

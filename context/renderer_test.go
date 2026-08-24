@@ -269,16 +269,36 @@ func TestRenderersEmitDetailedTruncatedObservations(t *testing.T) {
 			if !ok || node["type"] != "user" || node["value_content_kind"] != "prompt" {
 				t.Fatalf("unexpected node structure: %#v", partEvent.Fields["node"])
 			}
+			assertTruncatedPreview(t, partEvent.Fields, "rendered", 5)
+			assertTruncatedPreview(t, node, "value", 5)
 
 			finalEvent := sink.events[3]
 			if got := finalEvent.Fields["prompt_content_kind"]; got != "prompt" {
 				t.Fatalf("expected policy-captured prompt, got %v", got)
 			}
+			assertTruncatedPreview(t, finalEvent.Fields, "prompt", 5)
 			structure, ok := finalEvent.Fields["structure"].([]map[string]any)
 			if !ok || len(structure) != 2 {
 				t.Fatalf("unexpected final structure: %#v", finalEvent.Fields["structure"])
 			}
 		})
+	}
+}
+
+func assertTruncatedPreview(t *testing.T, fields map[string]any, key string, wantChars int) {
+	t.Helper()
+
+	for _, suffix := range []string{"_head", "_tail"} {
+		preview, ok := fields[key+suffix].(string)
+		if !ok {
+			t.Fatalf("missing %s preview: %#v", key+suffix, fields)
+		}
+		if got := len([]rune(preview)); got != wantChars {
+			t.Fatalf("%s preview characters = %d, want %d", key+suffix, got, wantChars)
+		}
+	}
+	if got := fields[key+"_mode"]; got != "truncated" {
+		t.Fatalf("%s preview mode = %v, want truncated", key, got)
 	}
 }
 
