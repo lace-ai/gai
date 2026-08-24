@@ -593,7 +593,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 		httpReq.Header.Set("Authorization", "Bearer "+m.client.apiKey)
 		httpReq.Header.Set("Content-Type", "application/json")
 		httpReq.Header.Set("Accept", "text/event-stream")
-		generationCtx, startedObservation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "mistral", Model: m.name, Streaming: true})
+		generationCtx, startedObservation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "mistral", Model: m.name, Streaming: true, Sink: m.debug})
 		observation = startedObservation
 		ctx = generationCtx
 		httpReq = httpReq.WithContext(generationCtx)
@@ -956,7 +956,7 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 	}
 	httpReq.Header.Set("Authorization", "Bearer "+m.client.apiKey)
 	httpReq.Header.Set("Content-Type", "application/json")
-	ctx, observation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "mistral", Model: m.name})
+	ctx, observation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "mistral", Model: m.name, Sink: m.debug})
 	httpReq = httpReq.WithContext(ctx)
 	generationResult := ai.GenerationResult{}
 	defer func() {

@@ -247,6 +247,7 @@ func (a *Agent) newLoop(ctx context.Context, input RunInput) (*loop.Loop, error)
 	}
 
 	l := loop.New(a.def.Model, execution.tools, promptBuilder, a.def.ToolResponseProcessor)
+	l.ObservationSink = a.def.ObservationSink
 	if !nativeTools {
 		l.ToolTransport = loop.ToolTransportText
 	}

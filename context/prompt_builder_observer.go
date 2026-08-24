@@ -2,7 +2,6 @@ package context
 
 import (
 	"context"
-	"strings"
 
 	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/internal/observe"
@@ -181,7 +180,7 @@ func (o *promptBuilderObserver) RenderFailed(ctx context.Context, stats promptRe
 	}, err)
 }
 
-func (o *promptBuilderObserver) RenderFinished(ctx context.Context, stats promptRenderStats, prompt string, _ map[string]any) {
+func (o *promptBuilderObserver) RenderFinished(ctx context.Context, stats promptRenderStats, prompt string) {
 	fields := map[string]any{
 		"part_count":            stats.PartCount,
 		"system_parts":          stats.SystemPartCount,
@@ -207,106 +206,4 @@ func (o *promptBuilderObserver) emit(ctx context.Context, name string, fields ma
 		return
 	}
 	o.operation.Emit(ctx, name, fields, err)
-}
-
-func promptDebugFields(ctx context.Context, parts []Part, prompt string) map[string]any {
-	fields := map[string]any{
-		"prompt_render_mode": "full",
-	}
-	if len(prompt) <= promptDebugFullLimit {
-		fields["prompt"] = prompt
-		return fields
-	}
-
-	fields["prompt_render_mode"] = "structured"
-	fields["prompt_head"] = clippedPrompt(prompt, 1000, false)
-	fields["prompt_tail"] = clippedPrompt(prompt, 1000, true)
-	fields["prompt_structure"] = promptStructure(ctx, parts)
-	return fields
-}
-
-func promptStructure(ctx context.Context, parts []Part) []map[string]any {
-	structure := make([]map[string]any, 0, len(parts))
-	for i, part := range parts {
-		entry := map[string]any{
-			"index": i,
-		}
-		if part == nil {
-			entry["name"] = "<nil>"
-			structure = append(structure, entry)
-			continue
-		}
-		entry["name"] = part.Name()
-		node, err := part.Render(ctx)
-		if err != nil {
-			entry["render_error"] = err.Error()
-			structure = append(structure, entry)
-			continue
-		}
-		entry["node"] = renderNodeStructure(node)
-		content := renderNodeText(node)
-		entry["chars"] = len(content)
-		entry["preview"] = clippedPrompt(content, promptDebugPreviewLimit, false)
-		if len(content) > promptDebugPreviewLimit {
-			entry["preview_tail"] = clippedPrompt(content, promptDebugPreviewLimit, true)
-		}
-		structure = append(structure, entry)
-	}
-	return structure
-}
-
-func renderNodeStructure(node RenderNode) map[string]any {
-	entry := map[string]any{
-		"type": node.Type,
-	}
-	if len(node.Fields) > 0 {
-		fields := make([]map[string]string, 0, len(node.Fields))
-		for _, field := range node.Fields {
-			fields = append(fields, map[string]string{
-				"key":   field.Key,
-				"value": field.Value,
-			})
-		}
-		entry["fields"] = fields
-	}
-	if node.Value != "" {
-		entry["value_chars"] = len(node.Value)
-		entry["value_preview"] = clippedPrompt(node.Value, promptDebugPreviewLimit, false)
-	}
-	if len(node.Children) > 0 {
-		children := make([]map[string]any, 0, len(node.Children))
-		for _, child := range node.Children {
-			children = append(children, renderNodeStructure(child))
-		}
-		entry["children"] = children
-	}
-	return entry
-}
-
-func renderNodeText(node RenderNode) string {
-	var builder strings.Builder
-	appendRenderNodeText(&builder, node)
-	return builder.String()
-}
-
-func appendRenderNodeText(builder *strings.Builder, node RenderNode) {
-	if node.Value != "" {
-		if builder.Len() > 0 {
-			builder.WriteString("\n")
-		}
-		builder.WriteString(node.Value)
-	}
-	for _, child := range node.Children {
-		appendRenderNodeText(builder, child)
-	}
-}
-
-func clippedPrompt(text string, limit int, tail bool) string {
-	if limit <= 0 || len(text) <= limit {
-		return text
-	}
-	if tail {
-		return "..." + text[len(text)-limit:]
-	}
-	return text[:limit] + "..."
 }

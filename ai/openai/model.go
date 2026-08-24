@@ -75,7 +75,7 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (result *ai.AIRe
 	if err != nil {
 		return nil, err
 	}
-	ctx, observation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "openai", Model: m.name})
+	ctx, observation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "openai", Model: m.name, Sink: m.provider.debug})
 	generationResult := ai.GenerationResult{}
 	defer func() {
 		generationResult.Err = err
@@ -144,7 +144,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			ai.SendToken(ctx, out, ai.Token{Type: ai.TokenTypeErr, Err: err, Text: err.Error()})
 			return
 		}
-		ctx, observation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "openai", Model: m.name, Streaming: true})
+		ctx, observation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "openai", Model: m.name, Streaming: true, Sink: m.provider.debug})
 		var streamErr error
 		generationResult := ai.GenerationResult{}
 		defer func() {

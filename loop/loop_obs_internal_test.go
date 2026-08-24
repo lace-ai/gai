@@ -50,6 +50,25 @@ func TestLoopRunSpanUsesRetryPolicyLimit(t *testing.T) {
 	}
 }
 
+func TestToolObservationEmitsOutcomeToSink(t *testing.T) {
+	var emitted gai.Observation
+	sink := gai.ObservationSinkFunc(func(_ context.Context, observation gai.Observation) {
+		emitted = observation
+	})
+	call := ai.ToolCall{ID: "call-1", Type: "function", Name: "test", Args: json.RawMessage(`{}`)}
+
+	callObservedTool(t.Context(), call, []Tool{observedTestTool{name: "test", call: func(context.Context, *ai.ToolCall) *ToolResponse {
+		return NewToolSuccess("ok")
+	}}}, sink)
+
+	if emitted.Name != "loop_tool_finished" || emitted.Source != "loop:Tool" {
+		t.Fatalf("observation identity = %#v", emitted)
+	}
+	if emitted.Fields["tool_name"] != "test" || emitted.Fields["tool_call_id"] != "call-1" || emitted.Fields["outcome"] != toolOutcomeSuccess {
+		t.Fatalf("tool fields = %#v", emitted.Fields)
+	}
+}
+
 func (t observedTestTool) Name() string              { return t.name }
 func (t observedTestTool) Description() string       { return "Test tool." }
 func (t observedTestTool) Params() ai.ToolParameters { return NewEchoTool().Params() }

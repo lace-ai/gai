@@ -336,15 +336,6 @@ func TestPromptBuilderKeepsTokenErrorEvents(t *testing.T) {
 	})
 	builder.SetTokenizer(debugTestTokenizer{})
 
-	promptFields := promptDebugFields(context.Background(), []Part{failingPart{}}, strings.Repeat("p", promptDebugFullLimit+1))
-	structure, ok := promptFields["prompt_structure"].([]map[string]any)
-	if !ok || len(structure) != 1 {
-		t.Fatalf("expected prompt structure entry, got %#v", promptFields["prompt_structure"])
-	}
-	if got := structure[0]["render_error"]; got != "render failed" {
-		t.Fatalf("expected render_error field, got %v", got)
-	}
-
 	builder.SystemInstructionsTokens(context.Background())
 
 	names := make([]string, 0, len(sink.events))

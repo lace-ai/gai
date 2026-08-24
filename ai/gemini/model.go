@@ -171,7 +171,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			return
 		}
 
-		generationCtx, startedObservation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "gemini", Model: m.name, Streaming: true})
+		generationCtx, startedObservation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "gemini", Model: m.name, Streaming: true, Sink: m.debug})
 		observation = startedObservation
 		ctx = generationCtx
 		for resp, err := range client.Models.GenerateContentStream(generationCtx, m.name, contents, config) {
@@ -360,7 +360,7 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 	if err != nil {
 		return nil, err
 	}
-	ctx, observation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "gemini", Model: m.name})
+	ctx, observation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "gemini", Model: m.name, Sink: m.debug})
 	generationResult := ai.GenerationResult{}
 	defer func() {
 		generationResult.HTTPStatus = geminiHTTPStatus(err)
