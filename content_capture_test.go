@@ -156,8 +156,7 @@ func TestCaptureContentKeepsOversizedJSONValidAndDeterministic(t *testing.T) {
 }
 
 type capturePolicyTestSink struct {
-	sensitive bool
-	event     Observation
+	event Observation
 }
 
 type panickingJSONMarshaler struct{}
