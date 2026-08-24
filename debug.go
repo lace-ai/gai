@@ -126,12 +126,11 @@ func EnrichObservation(ctx context.Context, observation Observation) Observation
 // and the optional application sink. Domain observers should use this helper
 // rather than calling a sink directly.
 func EmitObservation(ctx context.Context, sink ObservationSink, observation Observation) {
-	if sink == nil {
-		return
-	}
 	observation = EnrichObservation(ctx, observation)
 	RecordObservation(ctx, observation)
-	sink.Emit(ctx, observation)
+	if sink != nil {
+		sink.Emit(ctx, observation)
+	}
 }
 
 type observationRunIDContextKey struct{}

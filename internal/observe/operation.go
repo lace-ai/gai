@@ -42,7 +42,7 @@ func (o *Operation) Set(attrs ...attribute.KeyValue) {
 
 // Emit finalizes and projects one domain-specific observation.
 func (o *Operation) Emit(ctx context.Context, name string, fields map[string]any, err error) {
-	if o == nil || o.sink == nil {
+	if o == nil {
 		return
 	}
 	gai.EmitObservation(ctx, o.sink, gai.Observation{Name: name, Source: o.source, Fields: fields, Err: err})

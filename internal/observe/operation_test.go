@@ -65,8 +65,29 @@ func TestOperationPreservesSpanAndObservationSemantics(t *testing.T) {
 	}
 }
 
-func TestOperationHandlesNilSink(t *testing.T) {
+func TestOperationRecordsObservationWithNilSink(t *testing.T) {
+	previousProvider := otel.GetTracerProvider()
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	otel.SetTracerProvider(provider)
+	t.Cleanup(func() {
+		_ = provider.Shutdown(context.Background())
+		otel.SetTracerProvider(previousProvider)
+	})
+
 	ctx, operation := observe.Start(t.Context(), nil, "test-tracer", "test", "test.operation", "run", "test:observer")
-	operation.Emit(ctx, "completed", nil, nil)
+	operation.Emit(ctx, "completed", map[string]any{"result": "ok"}, nil)
 	operation.Finish(nil)
+
+	spans := recorder.Ended()
+	if len(spans) != 1 {
+		t.Fatalf("spans = %d, want 1", len(spans))
+	}
+	events := spans[0].Events()
+	if len(events) != 1 {
+		t.Fatalf("events = %d, want 1", len(events))
+	}
+	if events[0].Name != "debug.completed" {
+		t.Fatalf("event name = %q, want debug.completed", events[0].Name)
+	}
 }
