@@ -291,7 +291,7 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 	if err != nil {
 		return nil, err
 	}
-	if gai.ObservationContentEnabled(ctx, m.debug, gai.ContentKindPrompt) {
+	if m.debug != nil {
 		fields := map[string]any{}
 		gai.AddObservationContent(ctx, m.debug, fields, "payload", gai.ContentKindPrompt, payload)
 		gai.AddObservationContent(ctx, m.debug, fields, "prompt", gai.ContentKindPrompt, req.Prompt)

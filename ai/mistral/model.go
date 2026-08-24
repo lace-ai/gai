@@ -508,7 +508,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 		var observation *ai.GenerationObservation
 		generationResult := ai.GenerationResult{}
 		defer close(raw)
-		if gai.ObservationContentEnabled(ctx, m.debug, gai.ContentKindPrompt) {
+		if m.debug != nil {
 			fields := map[string]any{"max_tokens": req.MaxTokens}
 			gai.AddObservationContent(ctx, m.debug, fields, "prompt", gai.ContentKindPrompt, req.Prompt)
 			gai.EmitObservation(ctx, m.debug, gai.Observation{
@@ -925,7 +925,7 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 	if err := ai.ValidateModelRequest(m, req); err != nil {
 		return nil, err
 	}
-	if gai.ObservationContentEnabled(ctx, m.debug, gai.ContentKindPrompt) {
+	if m.debug != nil {
 		fields := map[string]any{"max_tokens": req.MaxTokens}
 		gai.AddObservationContent(ctx, m.debug, fields, "prompt", gai.ContentKindPrompt, req.Prompt)
 		gai.EmitObservation(ctx, m.debug, gai.Observation{
