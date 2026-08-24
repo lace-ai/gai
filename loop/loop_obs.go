@@ -66,6 +66,7 @@ type loopIterationState struct {
 }
 
 type loopIterationStats struct {
+	Iteration      int
 	Retrying       bool
 	Final          bool
 	Canceled       bool
@@ -129,7 +130,7 @@ func (s *loopRunState) startIteration(ctx context.Context, count int, attempt in
 		obs:   &iterationObserver{span: span},
 		ctx:   ctx,
 		sink:  sink,
-		stats: loopIterationStats{AttemptID: attempt},
+		stats: loopIterationStats{Iteration: count, AttemptID: attempt},
 	}
 }
 
@@ -240,6 +241,7 @@ func (s *loopIterationState) markRetrying(retryCount int, reason string, delay t
 		Name:   "loop_retry_scheduled",
 		Source: "loop:Iteration",
 		Fields: map[string]any{
+			"iteration":      s.stats.Iteration,
 			"attempt":        s.stats.AttemptID,
 			"retry_count":    retryCount,
 			"retry_reason":   reason,

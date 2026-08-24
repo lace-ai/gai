@@ -1386,14 +1386,14 @@ func TestLoopRetryObservabilityReportsClassificationAndDelay(t *testing.T) {
 	observationMu.Lock()
 	retryObserved := false
 	for _, observation := range observations {
-		if observation.Name == "loop_retry_scheduled" && observation.Fields["retry_reason"] == "rate_limited" && observation.Fields["retry_delay_ms"] == retryDelay.Milliseconds() {
+		if observation.Name == "loop_retry_scheduled" && observation.Fields["iteration"] == 1 && observation.Fields["retry_reason"] == "rate_limited" && observation.Fields["retry_delay_ms"] == retryDelay.Milliseconds() {
 			retryObserved = true
 			break
 		}
 	}
 	observationMu.Unlock()
 	if !retryObserved {
-		t.Fatalf("retry observation missing classification or delay: %#v", observations)
+		t.Fatalf("retry observation missing iteration, classification, or delay: %#v", observations)
 	}
 
 	for _, span := range recorder.Ended() {
