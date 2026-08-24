@@ -110,6 +110,25 @@ func TestGenerationObservationRecordsSemanticContract(t *testing.T) {
 	}
 }
 
+func TestGenerationObservationFailureRecordsOneException(t *testing.T) {
+	recorder, restore := installGenerationSpanRecorder(t)
+	defer restore()
+
+	_, observation := StartGenerationObservation(context.Background(), AIRequest{}, GenerationConfig{Provider: "test", Model: "m"})
+	observation.Finish(GenerationResult{Err: errors.New("generation failed")})
+
+	span := generationSpan(t, recorder.Ended())
+	var exceptions int
+	for _, event := range span.Events() {
+		if event.Name == "exception" {
+			exceptions++
+		}
+	}
+	if exceptions != 1 {
+		t.Fatalf("exception events = %d, want 1; events = %#v", exceptions, span.Events())
+	}
+}
+
 func TestGenerationObservationTimingBaselineDoesNotPredateSpan(t *testing.T) {
 	recorder, restore := installGenerationSpanRecorder(t)
 	defer restore()

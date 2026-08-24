@@ -70,9 +70,6 @@ func RecordObservation(ctx context.Context, e Observation) {
 	if !span.SpanContext().IsValid() {
 		return
 	}
-	if e.Err != nil {
-		RecordSpanError(span, e.Err)
-	}
 	span.AddEvent("debug."+e.Name, trace.WithAttributes(debugEventAttributes(e)...))
 }
 
