@@ -134,7 +134,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 		client, err := m.getClient(ctx)
 		if err != nil {
 			streamErr = err
-			if m.debug != nil {
+			if gai.ObservationEnabled(ctx, m.debug) {
 				gai.EmitObservation(ctx, m.debug, gai.Observation{
 					Name:   "gemini_get_client_failed",
 					Source: "ai:gemini.Model.GenerateStream",
@@ -165,7 +165,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 		generationCtx, startedObservation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "gemini", Model: m.name, Streaming: true, Sink: m.debug})
 		observation = startedObservation
 		ctx = generationCtx
-		if m.debug != nil {
+		if gai.ObservationEnabled(ctx, m.debug) {
 			fields := map[string]any{"max_tokens": req.MaxTokens}
 			gai.AddObservationContent(ctx, m.debug, fields, "prompt", gai.ContentKindPrompt, req.Prompt)
 			gai.EmitObservation(ctx, m.debug, gai.Observation{
@@ -177,7 +177,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 		for resp, err := range client.Models.GenerateContentStream(generationCtx, m.name, contents, config) {
 			if err != nil {
 				streamErr = classifyProviderError(fmt.Errorf("error generating content stream: %w", err))
-				if m.debug != nil {
+				if gai.ObservationEnabled(ctx, m.debug) {
 					gai.EmitObservation(ctx, m.debug, gai.Observation{
 						Name:   "gemini_stream_generation_failed",
 						Source: "ai:gemini.Model.GenerateStream",
@@ -252,7 +252,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 					if err != nil {
 						encodeErr := fmt.Errorf("error encoding part: %w", err)
 						streamErr = encodeErr
-						if m.debug != nil {
+						if gai.ObservationEnabled(ctx, m.debug) {
 							fields := map[string]any{
 								"error": err.Error(),
 							}
@@ -271,7 +271,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 					if err != nil {
 						mapErr := fmt.Errorf("error mapping function call: %w", err)
 						streamErr = mapErr
-						if m.debug != nil {
+						if gai.ObservationEnabled(ctx, m.debug) {
 							fields := map[string]any{
 								"error": err.Error(),
 							}
@@ -290,7 +290,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 						return
 					}
 					toolCall.ThoughtSignature = append([]byte(nil), part.ThoughtSignature...)
-					if m.debug != nil {
+					if gai.ObservationEnabled(ctx, m.debug) {
 						fields := map[string]any{}
 						if gai.ObservationContentEnabled(ctx, m.debug, gai.ContentKindToolInput) {
 							fields["tool_call_id"] = toolCall.ID
@@ -328,7 +328,7 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 	}
 	client, err := m.getClient(ctx)
 	if err != nil {
-		if m.debug != nil {
+		if gai.ObservationEnabled(ctx, m.debug) {
 			gai.EmitObservation(ctx, m.debug, gai.Observation{
 				Name:   "gemini_get_client_failed",
 				Source: "ai:gemini.Model.Generate",
@@ -351,7 +351,7 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 		return nil, err
 	}
 	ctx, observation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "gemini", Model: m.name, Sink: m.debug})
-	if m.debug != nil {
+	if gai.ObservationEnabled(ctx, m.debug) {
 		fields := map[string]any{"max_tokens": req.MaxTokens}
 		gai.AddObservationContent(ctx, m.debug, fields, "prompt", gai.ContentKindPrompt, req.Prompt)
 		gai.EmitObservation(ctx, m.debug, gai.Observation{
@@ -373,7 +373,7 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 		config,
 	)
 	if err != nil {
-		if m.debug != nil {
+		if gai.ObservationEnabled(ctx, m.debug) {
 			gai.EmitObservation(ctx, m.debug, gai.Observation{
 				Name:   "gemini_generate_content_failed",
 				Source: "ai:gemini.Model.Generate",
@@ -400,7 +400,7 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 	if err != nil {
 		return nil, err
 	}
-	if m.debug != nil {
+	if gai.ObservationEnabled(ctx, m.debug) {
 		fields := map[string]any{
 			"input_tokens":  inputTokens,
 			"output_tokens": outputTokens,

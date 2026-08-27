@@ -10,6 +10,7 @@ import (
 	"github.com/lace-ai/gai/ai"
 	"go.opentelemetry.io/otel"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 func TestGenerateEmitsRequestObservationWithoutContentCapture(t *testing.T) {
@@ -59,4 +60,47 @@ func TestGenerateEmitsRequestObservationWithoutContentCapture(t *testing.T) {
 	if request.TraceID != finished.TraceID || request.SpanID != finished.SpanID {
 		t.Fatalf("request correlation = (%q, %q), generation_finished = (%q, %q)", request.TraceID, request.SpanID, finished.TraceID, finished.SpanID)
 	}
+}
+
+func TestGenerateEmitsRequestAndContentToOTelWithoutSink(t *testing.T) {
+	previousProvider := otel.GetTracerProvider()
+	recorder := tracetest.NewSpanRecorder()
+	providerTracer := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	otel.SetTracerProvider(providerTracer)
+	t.Cleanup(func() {
+		_ = providerTracer.Shutdown(context.Background())
+		otel.SetTracerProvider(previousProvider)
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"answer"}],"usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer server.Close()
+
+	provider := New("test-key", nil)
+	provider.baseURL = server.URL
+	model, err := provider.Model(ClaudeSonnet4_6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := gai.WithContentCapturePolicy(t.Context(), gai.ContentCapturePolicy{Prompt: gai.CaptureEnabled})
+	if _, err := model.Generate(ctx, ai.AIRequest{Prompt: "allowed prompt"}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, span := range recorder.Ended() {
+		for _, event := range span.Events() {
+			if event.Name != "debug.anthropic_generate_request" {
+				continue
+			}
+			for _, attribute := range event.Attributes {
+				if string(attribute.Key) == "debug.prompt" && attribute.Value.AsString() == "allowed prompt" {
+					return
+				}
+			}
+			t.Fatalf("request event omitted policy-enabled prompt: %#v", event.Attributes)
+		}
+	}
+	t.Fatalf("OTel-only generation omitted request observation: %#v", recorder.Ended())
 }

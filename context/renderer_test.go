@@ -9,6 +9,8 @@ import (
 	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
 	gaictx "github.com/lace-ai/gai/context"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 type renderTestPart struct {
@@ -34,6 +36,35 @@ func (p renderTestPart) Tokens(ctx context.Context, tokenizer ai.Tokenizer) (int
 
 func (p renderTestPart) Render(ctx context.Context) (gaictx.RenderNode, error) {
 	return p.node, nil
+}
+
+func TestRendererEmitsToOTelWithoutSink(t *testing.T) {
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
+
+	ctx := gai.WithContentCapturePolicy(t.Context(), gai.ContentCapturePolicy{Prompt: gai.CaptureEnabled})
+	ctx, span := provider.Tracer("renderer-test").Start(ctx, "render")
+	_, err := (gaictx.SimpleRenderer{}).Render(ctx, []gaictx.Part{
+		gaictx.NewMessagePart(gaictx.RoleUser, gaictx.NewTextContent("allowed prompt")),
+	})
+	span.End()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, event := range recorder.Ended()[0].Events() {
+		if event.Name != "debug.renderer_part_rendered" {
+			continue
+		}
+		for _, attribute := range event.Attributes {
+			if string(attribute.Key) == "debug.rendered" && attribute.Value.AsString() == "user: allowed prompt" {
+				return
+			}
+		}
+		t.Fatalf("renderer event omitted policy-enabled content: %#v", event.Attributes)
+	}
+	t.Fatalf("OTel-only renderer omitted part observation: %#v", recorder.Ended())
 }
 
 func TestXMLRendererRendersNestedNodesAndEscapesContent(t *testing.T) {

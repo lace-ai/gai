@@ -75,7 +75,7 @@ func (t *Turn) Tokenize(ctx context.Context, tokenizer ai.Tokenizer, store TurnT
 	}
 	_, err = t.saveTokens(ctx, store, tokenizerID, count)
 	if err != nil {
-		if t.debugSink != nil {
+		if gai.ObservationEnabled(ctx, t.debugSink) {
 			gai.EmitObservation(ctx, t.debugSink, gai.Observation{
 				Name:   "turn_token_save_failed",
 				Source: "context:Turn.Tokenize",

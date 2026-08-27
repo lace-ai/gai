@@ -327,7 +327,7 @@ func (t *Tokenizer) CountTokens(ctx context.Context, text string) (tokens int, e
 
 	res, err := t.client.httpClient.Do(httpReq)
 	if err != nil {
-		if t.debug != nil {
+		if gai.ObservationEnabled(ctx, t.debug) {
 			gai.EmitObservation(ctx, t.debug, gai.Observation{
 				Name:   "mistral_token_count_request_failed",
 				Source: "ai:mistral.Tokenizer.CountTokens",
@@ -349,7 +349,7 @@ func (t *Tokenizer) CountTokens(ctx context.Context, text string) (tokens int, e
 
 	if res.StatusCode >= http.StatusMultipleChoices {
 		span.SetAttributes(attribute.Int("http.response.status_code", res.StatusCode))
-		if t.debug != nil {
+		if gai.ObservationEnabled(ctx, t.debug) {
 			fields := map[string]any{
 				"status_code": res.StatusCode,
 			}
@@ -540,7 +540,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 		body, err := json.Marshal(payload)
 		if err != nil {
 			streamErr = err
-			if m.debug != nil {
+			if gai.ObservationEnabled(ctx, m.debug) {
 				fields := map[string]any{
 					"error": err.Error(),
 				}
@@ -566,7 +566,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 		)
 		if err != nil {
 			streamErr = err
-			if m.debug != nil {
+			if gai.ObservationEnabled(ctx, m.debug) {
 				gai.EmitObservation(ctx, m.debug, gai.Observation{
 					Name:   "mistral_stream_request_creation_failed",
 					Source: "ai:mistral.Model.GenerateStream",
@@ -587,7 +587,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 		generationCtx, startedObservation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "mistral", Model: m.name, Streaming: true, Sink: m.debug})
 		observation = startedObservation
 		ctx = generationCtx
-		if m.debug != nil {
+		if gai.ObservationEnabled(ctx, m.debug) {
 			fields := map[string]any{"max_tokens": req.MaxTokens}
 			gai.AddObservationContent(ctx, m.debug, fields, "prompt", gai.ContentKindPrompt, req.Prompt)
 			gai.EmitObservation(ctx, m.debug, gai.Observation{
@@ -601,7 +601,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 		res, err := m.client.httpClient.Do(httpReq)
 		if err != nil {
 			streamErr = err
-			if m.debug != nil {
+			if gai.ObservationEnabled(ctx, m.debug) {
 				gai.EmitObservation(ctx, m.debug, gai.Observation{
 					Name:   "mistral_stream_request_failed",
 					Source: "ai:mistral.Model.GenerateStream",
@@ -623,7 +623,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			const maxResponseBody = 1 << 20 // 1MB
 			resBody, readErr := io.ReadAll(io.LimitReader(res.Body, maxResponseBody))
 			if readErr != nil {
-				if m.debug != nil {
+				if gai.ObservationEnabled(ctx, m.debug) {
 					gai.EmitObservation(ctx, m.debug, gai.Observation{
 						Name:   "mistral_stream_request_failed_with_unreadable_body",
 						Source: "ai:mistral.Model.GenerateStream",
@@ -643,7 +643,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 				}
 				return
 			}
-			if m.debug != nil {
+			if gai.ObservationEnabled(ctx, m.debug) {
 				fields := map[string]any{
 					"status_code": res.StatusCode,
 				}
@@ -760,7 +760,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			if (toolCalls != "" && toolCalls != "null") || finalToolCalls {
 				calls, mapErr := toolCallAccumulator.add(chunk.Choices[0].Delta.ToolCalls, finalToolCalls)
 				if mapErr != nil {
-					if m.debug != nil {
+					if gai.ObservationEnabled(ctx, m.debug) {
 						fields := map[string]any{
 							"error": mapErr.Error(),
 						}
@@ -775,7 +775,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 					streamErr = fmt.Errorf("map tool_calls: %w", mapErr)
 					return streamErr
 				}
-				if m.debug != nil {
+				if gai.ObservationEnabled(ctx, m.debug) {
 					fields := map[string]any{}
 					gai.AddObservationContent(ctx, m.debug, fields, "tool_calls", gai.ContentKindToolInput, calls)
 					gai.EmitObservation(ctx, m.debug, gai.Observation{
@@ -802,7 +802,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 		for {
 			line, err := reader.ReadString('\n')
 			if err != nil && !errors.Is(err, io.EOF) {
-				if m.debug != nil {
+				if gai.ObservationEnabled(ctx, m.debug) {
 					gai.EmitObservation(ctx, m.debug, gai.Observation{
 						Name:   "mistral_stream_read_failed",
 						Source: "ai:mistral.Model.GenerateStream",
@@ -823,7 +823,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			if line == "" {
 				if flushErr := flushEvent(); flushErr != nil {
 					if errors.Is(flushErr, io.EOF) {
-						if m.debug != nil {
+						if gai.ObservationEnabled(ctx, m.debug) {
 							gai.EmitObservation(ctx, m.debug, gai.Observation{
 								Name:   "mistral_stream_read_eof",
 								Source: "ai:mistral.Model.GenerateStream",
@@ -832,7 +832,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 						}
 						return
 					}
-					if m.debug != nil {
+					if gai.ObservationEnabled(ctx, m.debug) {
 						gai.EmitObservation(ctx, m.debug, gai.Observation{
 							Name:   "mistral_stream_chunk_processing_failed",
 							Source: "ai:mistral.Model.GenerateStream",
@@ -856,7 +856,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			}
 
 			if errors.Is(err, io.EOF) {
-				if m.debug != nil {
+				if gai.ObservationEnabled(ctx, m.debug) {
 					gai.EmitObservation(ctx, m.debug, gai.Observation{
 						Name:   "mistral_stream_read_eof",
 						Source: "ai:mistral.Model.GenerateStream",
@@ -864,7 +864,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 					})
 				}
 				if flushErr := flushEvent(); flushErr != nil && !errors.Is(flushErr, io.EOF) {
-					if m.debug != nil {
+					if gai.ObservationEnabled(ctx, m.debug) {
 						gai.EmitObservation(ctx, m.debug, gai.Observation{
 							Name:   "mistral_stream_final_flush_failed",
 							Source: "ai:mistral.Model.GenerateStream",
@@ -947,7 +947,7 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 	httpReq.Header.Set("Authorization", "Bearer "+m.client.apiKey)
 	httpReq.Header.Set("Content-Type", "application/json")
 	ctx, observation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "mistral", Model: m.name, Sink: m.debug})
-	if m.debug != nil {
+	if gai.ObservationEnabled(ctx, m.debug) {
 		fields := map[string]any{"max_tokens": req.MaxTokens}
 		gai.AddObservationContent(ctx, m.debug, fields, "prompt", gai.ContentKindPrompt, req.Prompt)
 		gai.EmitObservation(ctx, m.debug, gai.Observation{
@@ -1000,7 +1000,7 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 	generationResult.RequestID = parsed.ID
 	generationResult.FinishReason = parsed.Choices[0].FinishReason
 	generationResult.ToolCallCount = len(toolCalls)
-	if m.debug != nil {
+	if gai.ObservationEnabled(ctx, m.debug) {
 		fields := map[string]any{
 			"input_tokens":  usage.InputTokens,
 			"output_tokens": usage.OutputTokens,

@@ -293,7 +293,7 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 	}
 	client := m.client.sdkClient()
 	ctx, observation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "anthropic", Model: m.name, Sink: m.debug})
-	if m.debug != nil {
+	if gai.ObservationEnabled(ctx, m.debug) {
 		fields := map[string]any{}
 		gai.AddObservationContent(ctx, m.debug, fields, "payload", gai.ContentKindPrompt, payload)
 		gai.AddObservationContent(ctx, m.debug, fields, "prompt", gai.ContentKindPrompt, req.Prompt)
@@ -327,7 +327,7 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 	if message.JSON.Usage.Valid() {
 		generationResult.Usage = &usage
 	}
-	if m.debug != nil {
+	if gai.ObservationEnabled(ctx, m.debug) {
 		fields := map[string]any{"input_tokens": input, "output_tokens": output}
 		gai.AddObservationContent(ctx, m.debug, fields, "response", gai.ContentKindCompletion, message.RawJSON())
 		gai.AddObservationContent(ctx, m.debug, fields, "response_text", gai.ContentKindCompletion, text)

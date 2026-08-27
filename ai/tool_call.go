@@ -199,7 +199,7 @@ func DetectToolCallsInStream(ctx context.Context, in <-chan Token, debug gai.Obs
 				return false
 			}
 			if inString || objDepth != 0 || arrDepth != 0 {
-				if debug != nil {
+				if gai.ObservationEnabled(ctx, debug) {
 					fields := map[string]any{
 						"reason": fmt.Sprintf("inString=%v objDepth=%d arrDepth=%d", inString, objDepth, arrDepth),
 					}
@@ -218,7 +218,7 @@ func DetectToolCallsInStream(ctx context.Context, in <-chan Token, debug gai.Obs
 				payload = append(joinTokenData(pending[:len(pending)-1]), payload...)
 			}
 			if tc, ok := parseToolCall(payload); ok {
-				if debug != nil {
+				if gai.ObservationEnabled(ctx, debug) {
 					fields := map[string]any{
 						"id":   tc.ID,
 						"type": tc.Type,
@@ -242,7 +242,7 @@ func DetectToolCallsInStream(ctx context.Context, in <-chan Token, debug gai.Obs
 				detectedToolCallCount++
 				resetTracking()
 			} else {
-				if debug != nil {
+				if gai.ObservationEnabled(ctx, debug) {
 					fields := map[string]any{
 						"reason": "parse failed",
 					}
@@ -294,7 +294,7 @@ func DetectToolCallsInStream(ctx context.Context, in <-chan Token, debug gai.Obs
 						}
 						seenNonWS = true
 						if b == '{' {
-							if debug != nil {
+							if gai.ObservationEnabled(ctx, debug) {
 								fields := map[string]any{}
 								gai.AddObservationContent(ctx, debug, fields, "data", gai.ContentKindCompletion, tokenStr.String())
 								gai.EmitObservation(ctx, debug, gai.Observation{
@@ -318,7 +318,7 @@ func DetectToolCallsInStream(ctx context.Context, in <-chan Token, debug gai.Obs
 							pending = append(pending, Token{Type: TokenTypeText, Data: remaining[idx:]})
 							tokenStr.Reset()
 							tokenStr.WriteByte(b)
-							if debug != nil {
+							if gai.ObservationEnabled(ctx, debug) {
 								fields := map[string]any{}
 								gai.AddObservationContent(ctx, debug, fields, "data", gai.ContentKindCompletion, tokenStr.String())
 								gai.EmitObservation(ctx, debug, gai.Observation{
@@ -386,7 +386,7 @@ func DetectToolCallsInStream(ctx context.Context, in <-chan Token, debug gai.Obs
 
 	streamDone:
 
-		if debug != nil {
+		if gai.ObservationEnabled(ctx, debug) {
 			fields := map[string]any{}
 			gai.AddObservationContent(ctx, debug, fields, "pending_data", gai.ContentKindCompletion, joinTokenData(pending))
 			gai.EmitObservation(ctx, debug, gai.Observation{

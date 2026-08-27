@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"reflect"
 	"time"
+
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Observation is a finalized, best-effort observability projection. It is not
@@ -37,13 +39,16 @@ func (f ObservationSinkFunc) Emit(ctx context.Context, observation Observation) 
 	}
 }
 
+// ObservationEnabled reports whether ctx has an observation destination.
+func ObservationEnabled(ctx context.Context, sink ObservationSink) bool {
+	return sink != nil || trace.SpanFromContext(ctx).IsRecording()
+}
+
 // ObservationContentEnabled reports whether a library-managed content field of
 // kind would be captured under ctx's ContentCapturePolicy.
 func ObservationContentEnabled(ctx context.Context, sink ObservationSink, kind ContentKind) bool {
-	if sink == nil {
-		if _, _, err := SpanContextIDs(ctx); err != nil {
-			return false
-		}
+	if !ObservationEnabled(ctx, sink) {
+		return false
 	}
 	policy, ok := ContentCapturePolicyFromContext(ctx)
 	return ok && policy.captureMode(kind) == CaptureEnabled

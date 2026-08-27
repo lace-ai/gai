@@ -31,7 +31,7 @@ func newRenderObserver(renderer string, debug gai.ObservationSink, previewSize i
 }
 
 func (o *renderObserver) started(ctx context.Context, partCount int) {
-	if !o.enabled() {
+	if !o.enabled(ctx) {
 		return
 	}
 	o.emit(ctx, "renderer_render_started", map[string]any{
@@ -41,7 +41,7 @@ func (o *renderObserver) started(ctx context.Context, partCount int) {
 }
 
 func (o *renderObserver) partRendered(ctx context.Context, index int, part Part, node *RenderNode, rendered string) {
-	if !o.enabled() {
+	if !o.enabled(ctx) {
 		return
 	}
 	fields := map[string]any{
@@ -64,7 +64,7 @@ func (o *renderObserver) partRendered(ctx context.Context, index int, part Part,
 }
 
 func (o *renderObserver) partFailed(ctx context.Context, index int, part Part, err error) {
-	if !o.enabled() {
+	if !o.enabled(ctx) {
 		return
 	}
 	fields := map[string]any{
@@ -76,7 +76,7 @@ func (o *renderObserver) partFailed(ctx context.Context, index int, part Part, e
 }
 
 func (o *renderObserver) finished(ctx context.Context, err error, prompt string) {
-	if !o.enabled() {
+	if !o.enabled(ctx) {
 		return
 	}
 	fields := map[string]any{
@@ -89,8 +89,8 @@ func (o *renderObserver) finished(ctx context.Context, err error, prompt string)
 	o.emit(ctx, "renderer_render_finished", fields, err)
 }
 
-func (o *renderObserver) enabled() bool {
-	return o != nil && o.operation != nil && o.debug != nil
+func (o *renderObserver) enabled(ctx context.Context) bool {
+	return o != nil && o.operation != nil && gai.ObservationEnabled(ctx, o.debug)
 }
 
 func (o *renderObserver) emit(ctx context.Context, name string, fields map[string]any, err error) {
