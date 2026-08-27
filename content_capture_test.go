@@ -288,6 +288,7 @@ func TestEmitObservationDoesNotExportRawErrorsWithoutContentPolicy(t *testing.T)
 	EmitObservation(ctx, sink, Observation{
 		Name:   "failed",
 		Source: "test",
+		Fields: map[string]any{"retained": "yes", "error": "caller-supplied"},
 		Err:    errors.New("sentinel-error-content"),
 	})
 	span.End()
@@ -295,8 +296,11 @@ func TestEmitObservationDoesNotExportRawErrorsWithoutContentPolicy(t *testing.T)
 	if sink.event.Err != nil || strings.Contains(fmt.Sprintf("%#v", sink.event), "sentinel-error-content") {
 		t.Fatalf("raw error reached observation sink: %#v", sink.event)
 	}
-	if sink.event.Fields["outcome"] != "error" || sink.event.Fields["error_type"] != "*errors.errorString" {
+	if sink.event.Fields["outcome"] != "error" || sink.event.Fields["error_type"] != "*errors.errorString" || sink.event.Fields["retained"] != "yes" {
 		t.Fatalf("safe error metadata = %#v", sink.event.Fields)
+	}
+	if _, ok := sink.event.Fields["error"]; ok {
+		t.Fatalf("caller-supplied error field reached observation sink: %#v", sink.event.Fields)
 	}
 
 	var exported strings.Builder

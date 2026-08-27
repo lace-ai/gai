@@ -112,7 +112,7 @@ func EnrichObservation(ctx context.Context, observation Observation) Observation
 		observation.TraceID = traceID
 		observation.SpanID = spanID
 	}
-	fields := make(map[string]any, len(observation.Fields)+2)
+	fields := make(map[string]any, len(observation.Fields))
 	for key, value := range observation.Fields {
 		fields[key] = value
 	}
