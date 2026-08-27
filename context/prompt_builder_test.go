@@ -326,6 +326,56 @@ func TestPromptBuilderEmitsSensitiveRenderFieldsWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestPromptBuilderSetObservationSinkUpdatesDefaultRenderer(t *testing.T) {
+	ctx := gai.WithContentCapturePolicy(context.Background(), gai.ContentCapturePolicy{Prompt: gai.CaptureEnabled})
+
+	t.Run("replacement", func(t *testing.T) {
+		original := &debugEventSink{}
+		replacement := &debugEventSink{}
+		builder := New(Definition{
+			PromptInput:     PromptInput{User: NewTextContent("find docs")},
+			ObservationSink: original,
+		})
+		builder.SetObservationSink(replacement)
+
+		if _, err := builder.BuildPrompt(ctx, emptyConversation{}); err != nil {
+			t.Fatalf("BuildPrompt failed: %v", err)
+		}
+		if len(original.events) != 0 {
+			t.Fatalf("original sink received events after replacement: %#v", original.events)
+		}
+		assertPromptBuilderAndRendererEvents(t, replacement.events)
+	})
+
+	t.Run("nil", func(t *testing.T) {
+		original := &debugEventSink{}
+		builder := New(Definition{
+			PromptInput:     PromptInput{User: NewTextContent("find docs")},
+			ObservationSink: original,
+		})
+		builder.SetObservationSink(nil)
+
+		if _, err := builder.BuildPrompt(ctx, emptyConversation{}); err != nil {
+			t.Fatalf("BuildPrompt failed: %v", err)
+		}
+		if len(original.events) != 0 {
+			t.Fatalf("original sink received events after removal: %#v", original.events)
+		}
+	})
+}
+
+func assertPromptBuilderAndRendererEvents(t *testing.T, events []gai.Observation) {
+	t.Helper()
+	var sawBuilder, sawRenderer bool
+	for _, event := range events {
+		sawBuilder = sawBuilder || event.Name == "prompt_builder_render_finished"
+		sawRenderer = sawRenderer || event.Name == "renderer_render_finished"
+	}
+	if !sawBuilder || !sawRenderer {
+		t.Fatalf("expected prompt builder and renderer events, got %#v", events)
+	}
+}
+
 func TestPromptBuilderKeepsTokenErrorEvents(t *testing.T) {
 	t.Parallel()
 

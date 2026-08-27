@@ -91,6 +91,7 @@ type Builder struct {
 	Iteration          []Part
 	TokenBudget        int
 	Renderer           Renderer
+	defaultRenderer    *XMLRenderer
 	debugSink          gai.ObservationSink
 	input              PromptInput
 	tokenizer          ai.Tokenizer
@@ -100,11 +101,13 @@ type Builder struct {
 // New creates a prompt builder from def.
 func New(def Definition) *Builder {
 	renderer := def.Renderer
+	var defaultRenderer *XMLRenderer
 	if renderer == nil {
-		renderer = &XMLRenderer{
+		defaultRenderer = &XMLRenderer{
 			ObservationSink:   def.ObservationSink,
 			DebugPreviewChars: 100,
 		}
+		renderer = defaultRenderer
 	}
 	return &Builder{
 		SystemInstructions: append([]Part{}, def.SystemInstructions...),
@@ -114,6 +117,7 @@ func New(def Definition) *Builder {
 		TokenBudget:        def.TokenBudget,
 		OutputTokenReserve: def.OutputTokenReserve,
 		Renderer:           renderer,
+		defaultRenderer:    defaultRenderer,
 		debugSink:          def.ObservationSink,
 		input:              def.PromptInput.Clone(),
 		tokenizer:          def.Tokenizer,
@@ -130,6 +134,9 @@ func NewBuilder(renderer Renderer, tokenBudget int) *Builder {
 
 func (b *Builder) SetObservationSink(debugSink gai.ObservationSink) {
 	b.debugSink = debugSink
+	if b.defaultRenderer != nil {
+		b.defaultRenderer.ObservationSink = debugSink
+	}
 }
 
 func (b *Builder) AppendContextSource(ctx context.Context, source ContextSource) error {
