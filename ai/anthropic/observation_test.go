@@ -104,3 +104,56 @@ func TestGenerateEmitsRequestAndContentToOTelWithoutSink(t *testing.T) {
 	}
 	t.Fatalf("OTel-only generation omitted request observation: %#v", recorder.Ended())
 }
+
+func TestGenerateOmitsMixedProviderEnvelopesFromCapturedObservations(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"completion text"},{"type":"thinking","thinking":"reasoning secret"},{"type":"tool_use","id":"toolu_1","name":"search","input":{"query":"tool-input secret"}}],"usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer server.Close()
+
+	var events []gai.Observation
+	provider := New("test-key", gai.ObservationSinkFunc(func(_ context.Context, event gai.Observation) {
+		events = append(events, event)
+	}))
+	provider.baseURL = server.URL
+	model, err := provider.Model(ClaudeSonnet4_6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := gai.WithContentCapturePolicy(t.Context(), gai.ContentCapturePolicy{
+		Prompt:     gai.CaptureEnabled,
+		Completion: gai.CaptureEnabled,
+	})
+	if _, err := model.Generate(ctx, ai.AIRequest{
+		Prompt: "prompt secret",
+		Messages: []ai.RequestMessage{
+			{Role: ai.RequestMessageRoleAssistant, ToolCalls: []ai.RequestToolCall{{ID: "call_1", Name: "search", Arguments: []byte(`{"query":"prior tool-input secret"}`)}}},
+			{Role: ai.RequestMessageRoleTool, ToolResult: &ai.RequestToolResult{ToolCallID: "call_1", Name: "search", Content: "prior tool-output secret"}},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, event := range events {
+		switch event.Name {
+		case "anthropic_generate_request":
+			if _, ok := event.Fields["payload"]; ok {
+				t.Fatalf("request observation captured mixed payload: %#v", event.Fields)
+			}
+			if event.Fields["prompt"] != "prompt secret" {
+				t.Fatalf("request observation prompt = %#v", event.Fields)
+			}
+		case "anthropic_generate_success":
+			if _, ok := event.Fields["response"]; ok {
+				t.Fatalf("success observation captured mixed response: %#v", event.Fields)
+			}
+			if event.Fields["response_text"] != "completion text" {
+				t.Fatalf("success observation completion = %#v", event.Fields)
+			}
+			if _, ok := event.Fields["reasoning"]; ok {
+				t.Fatalf("success observation captured disabled reasoning: %#v", event.Fields)
+			}
+		}
+	}
+}

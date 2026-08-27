@@ -295,7 +295,6 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 	ctx, observation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "anthropic", Model: m.name, Sink: m.debug})
 	if gai.ObservationEnabled(ctx, m.debug) {
 		fields := map[string]any{}
-		gai.AddObservationContent(ctx, m.debug, fields, "payload", gai.ContentKindPrompt, payload)
 		gai.AddObservationContent(ctx, m.debug, fields, "prompt", gai.ContentKindPrompt, req.Prompt)
 		gai.EmitObservation(ctx, m.debug, gai.Observation{Name: "anthropic_generate_request", Source: "ai:anthropic.Model.Generate", Fields: fields})
 	}
@@ -329,7 +328,6 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 	}
 	if gai.ObservationEnabled(ctx, m.debug) {
 		fields := map[string]any{"input_tokens": input, "output_tokens": output}
-		gai.AddObservationContent(ctx, m.debug, fields, "response", gai.ContentKindCompletion, message.RawJSON())
 		gai.AddObservationContent(ctx, m.debug, fields, "response_text", gai.ContentKindCompletion, text)
 		gai.AddObservationContent(ctx, m.debug, fields, "reasoning", gai.ContentKindReasoning, thinking)
 		gai.EmitObservation(ctx, m.debug, gai.Observation{Name: "anthropic_generate_success", Source: "ai:anthropic.Model.Generate", Fields: fields})
