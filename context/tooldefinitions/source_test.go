@@ -225,7 +225,7 @@ func TestSourceErrorHandling(t *testing.T) {
 		t.Fatalf("Function error = %v, want ErrToolInvalid", err)
 	}
 	events := sink.Events()
-	if len(events) != 2 || events[1].Name != "tool_definitions_build_failed" || events[1].Err == nil {
+	if len(events) != 2 || events[1].Name != "tool_definitions_build_failed" || events[1].Err != nil || events[1].Fields["outcome"] != "error" {
 		t.Fatalf("unexpected failure events: %#v", events)
 	}
 }

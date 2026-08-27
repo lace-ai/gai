@@ -3,7 +3,7 @@ package gai
 import (
 	"context"
 	"encoding/json"
-	"math"
+	"reflect"
 	"time"
 )
 
@@ -112,16 +112,30 @@ func EnrichObservation(ctx context.Context, observation Observation) Observation
 		observation.TraceID = traceID
 		observation.SpanID = spanID
 	}
-	capHint := 0
-	if len(observation.Fields) <= math.MaxInt {
-		capHint = len(observation.Fields)
-	}
-	fields := make(map[string]any, capHint)
+	fields := make(map[string]any, len(observation.Fields)+2)
 	for key, value := range observation.Fields {
 		fields[key] = value
 	}
+	if observation.Err != nil {
+		delete(fields, "error")
+		fields["outcome"] = "error"
+		fields["error_type"] = observationErrorType(observation.Err)
+		// Errors may include provider responses, prompts, or tool output. Raw
+		// errors remain available to control flow, but never leave it through a
+		// finalized observation unless explicitly captured as managed content.
+		observation.Err = nil
+	}
 	observation.Fields = fields
 	return observation
+}
+
+func observationErrorType(err error) string {
+	const maxErrorTypeBytes = 256
+	typeName := reflect.TypeOf(err).String()
+	if len(typeName) == 0 || len(typeName) > maxErrorTypeBytes {
+		return "error"
+	}
+	return typeName
 }
 
 // EmitObservation finalizes and projects one semantic occurrence to OpenTelemetry

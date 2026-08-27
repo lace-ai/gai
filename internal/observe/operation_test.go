@@ -37,7 +37,7 @@ func TestOperationPreservesSpanAndObservationSemantics(t *testing.T) {
 		t.Fatalf("events = %d, want 1", len(events))
 	}
 	event := events[0]
-	if event.Name != "completed" || event.Source != "test:observer" || event.Fields["result"] != "ok" || !errors.Is(event.Err, emitErr) {
+	if event.Name != "completed" || event.Source != "test:observer" || event.Fields["result"] != "ok" || event.Err != nil || event.Fields["outcome"] != "error" || event.Fields["error_type"] != "*errors.errorString" {
 		t.Fatalf("event = %#v", event)
 	}
 	traceID, spanID, err := gai.SpanContextIDs(ctx)

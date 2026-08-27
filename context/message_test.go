@@ -282,8 +282,8 @@ func TestTurnTokenizeEmitsObservationWhenSavingTokensFails(t *testing.T) {
 	if event.Source != "context:Turn.Tokenize" {
 		t.Fatalf("unexpected event source: %q", event.Source)
 	}
-	if !errors.Is(event.Err, saveErr) {
-		t.Fatalf("expected save error on event, got %v", event.Err)
+	if event.Err != nil || event.Fields["outcome"] != "error" {
+		t.Fatalf("expected safe save-error observation, got %#v", event)
 	}
 	if event.Fields["turn_id"] != "turn-1" || event.Fields["turn_count"] != 2 ||
 		event.Fields["tokenizer_id"] != "mock.tokenizer" || event.Fields["token_count"] != 3 {

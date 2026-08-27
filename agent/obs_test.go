@@ -194,7 +194,7 @@ func TestAgentObservabilityReportsCreationAndMiddlewareFailures(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected run creation failure")
 	}
-	if event, ok := sink.event("agent_run_creation_failed"); !ok || event.Err == nil {
+	if event, ok := sink.event("agent_run_creation_failed"); !ok || event.Err != nil || event.Fields["outcome"] != "error" {
 		t.Fatalf("missing creation failure event: %+v", event)
 	}
 
@@ -229,7 +229,7 @@ func TestAgentObservabilityReportsCreationAndMiddlewareFailures(t *testing.T) {
 		t.Fatalf("record-only middleware failure propagated: %v", consumed.errs)
 	}
 	event, ok := sink.event("agent_middleware_failed")
-	if !ok || !errors.Is(event.Err, mapErr) {
+	if !ok || event.Err != nil || event.Fields["outcome"] != "error" {
 		t.Fatalf("missing middleware failure event: %+v", event)
 	}
 }

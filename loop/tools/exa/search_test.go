@@ -146,7 +146,7 @@ func TestSearchToolReturnsAPIError(t *testing.T) {
 		t.Fatalf("unexpected API error: %#v", apiErr)
 	}
 	events := sink.Events()
-	if len(events) != 2 || events[1].Name != "exa_search_failed" || events[1].Err == nil {
+	if len(events) != 2 || events[1].Name != "exa_search_failed" || events[1].Err != nil || events[1].Fields["outcome"] != "error" {
 		t.Fatalf("unexpected failure events: %#v", events)
 	}
 	if got := events[1].Fields["stage"]; got != "api_response" {

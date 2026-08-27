@@ -277,3 +277,36 @@ func containsAttribute(attrs []attribute.KeyValue, key, value string) bool {
 	}
 	return false
 }
+
+func TestEmitObservationDoesNotExportRawErrorsWithoutContentPolicy(t *testing.T) {
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
+
+	ctx, span := provider.Tracer("content-capture-test").Start(t.Context(), "capture")
+	sink := &capturePolicyTestSink{}
+	EmitObservation(ctx, sink, Observation{
+		Name:   "failed",
+		Source: "test",
+		Err:    errors.New("sentinel-error-content"),
+	})
+	span.End()
+
+	if sink.event.Err != nil || strings.Contains(fmt.Sprintf("%#v", sink.event), "sentinel-error-content") {
+		t.Fatalf("raw error reached observation sink: %#v", sink.event)
+	}
+	if sink.event.Fields["outcome"] != "error" || sink.event.Fields["error_type"] != "*errors.errorString" {
+		t.Fatalf("safe error metadata = %#v", sink.event.Fields)
+	}
+
+	var exported strings.Builder
+	for _, event := range recorder.Ended()[0].Events() {
+		for _, attr := range event.Attributes {
+			exported.WriteString(string(attr.Key))
+			exported.WriteString(attr.Value.String())
+		}
+	}
+	if strings.Contains(exported.String(), "sentinel-error-content") {
+		t.Fatalf("raw error reached OTel observation: %s", exported.String())
+	}
+}

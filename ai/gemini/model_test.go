@@ -213,7 +213,7 @@ func TestGenerateEmitsObservationOnGenerationFailure(t *testing.T) {
 	}
 	found := false
 	for _, event := range events {
-		if event.Name == "gemini_generate_content_failed" && event.Err != nil {
+		if event.Name == "gemini_generate_content_failed" && event.Err == nil && event.Fields["outcome"] == "error" {
 			found = true
 		}
 	}
