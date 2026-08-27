@@ -386,7 +386,7 @@ Middleware is post-processing, not a supervisor or handoff runtime. Tool authori
 
 GAI creates OpenTelemetry spans across agent runs, workflows, model attempts, and tools. Safe metadata is recorded by default; prompts, completions, reasoning, tool arguments, tool results, and metadata values are not exported unless the application deliberately enables them.
 
-Set `Definition.DebugSink` for structured lifecycle events. Install any OpenTelemetry-compatible exporter before creating agents.
+Set `Definition.ObservationSink` for structured lifecycle observations. Observation events and attributes use the `observation.*` OpenTelemetry namespace. Install any OpenTelemetry-compatible exporter before creating agents.
 
 The optional `observability/langfuse` package provides a batched OTLP tracer provider for Langfuse:
 

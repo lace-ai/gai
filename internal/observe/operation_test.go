@@ -87,7 +87,7 @@ func TestOperationRecordsObservationWithNilSink(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("events = %d, want 1", len(events))
 	}
-	if events[0].Name != "debug.completed" {
-		t.Fatalf("event name = %q, want debug.completed", events[0].Name)
+	if events[0].Name != "observation.completed" {
+		t.Fatalf("event name = %q, want observation.completed", events[0].Name)
 	}
 }

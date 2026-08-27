@@ -91,11 +91,11 @@ func TestGenerateEmitsRequestAndContentToOTelWithoutSink(t *testing.T) {
 
 	for _, span := range recorder.Ended() {
 		for _, event := range span.Events() {
-			if event.Name != "debug.anthropic_generate_request" {
+			if event.Name != "observation.anthropic_generate_request" {
 				continue
 			}
 			for _, attribute := range event.Attributes {
-				if string(attribute.Key) == "debug.prompt" && attribute.Value.AsString() == "allowed prompt" {
+				if string(attribute.Key) == "observation.prompt" && attribute.Value.AsString() == "allowed prompt" {
 					return
 				}
 			}

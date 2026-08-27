@@ -225,7 +225,7 @@ func TestAddObservationContentCapturesForActiveSpanWithoutSink(t *testing.T) {
 	if fields["prompt"] != "allowed-content" {
 		t.Fatalf("policy-enabled content missing: %#v", fields)
 	}
-	if len(recorder.Ended()) != 1 || !containsAttribute(recorder.Ended()[0].Events()[0].Attributes, "debug.prompt", "allowed-content") {
+	if len(recorder.Ended()) != 1 || !containsAttribute(recorder.Ended()[0].Events()[0].Attributes, "observation.prompt", "allowed-content") {
 		t.Fatalf("policy-enabled content missing from OTel event: %#v", recorder.Ended())
 	}
 }
@@ -264,7 +264,7 @@ func TestRedactedOrDisabledContentNeverReachesOTelEvent(t *testing.T) {
 	if !strings.Contains(exported.String(), "[REDACTED]") {
 		t.Fatalf("redacted value missing from OTel: %s", exported.String())
 	}
-	if !containsAttribute(recorder.Ended()[0].Events()[0].Attributes, "debug.completion_redaction_applied", "true") {
+	if !containsAttribute(recorder.Ended()[0].Events()[0].Attributes, "observation.completion_redaction_applied", "true") {
 		t.Fatal("redaction metadata missing from OTel")
 	}
 }

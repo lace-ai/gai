@@ -54,11 +54,11 @@ func TestRendererEmitsToOTelWithoutSink(t *testing.T) {
 	}
 
 	for _, event := range recorder.Ended()[0].Events() {
-		if event.Name != "debug.renderer_part_rendered" {
+		if event.Name != "observation.renderer_part_rendered" {
 			continue
 		}
 		for _, attribute := range event.Attributes {
-			if string(attribute.Key) == "debug.rendered" && attribute.Value.AsString() == "user: allowed prompt" {
+			if string(attribute.Key) == "observation.rendered" && attribute.Value.AsString() == "user: allowed prompt" {
 				return
 			}
 		}
@@ -245,14 +245,14 @@ func TestRenderersEmitDetailedTruncatedObservations(t *testing.T) {
 			name:   "xml",
 			source: "context:XMLRenderer",
 			renderer: func(sink *rendererObservationSink) gaictx.Renderer {
-				return &gaictx.XMLRenderer{ObservationSink: sink, DebugPreviewChars: 5}
+				return &gaictx.XMLRenderer{ObservationSink: sink, ObservationPreviewChars: 5}
 			},
 		},
 		{
 			name:   "simple",
 			source: "context:SimpleRenderer",
 			renderer: func(sink *rendererObservationSink) gaictx.Renderer {
-				return &gaictx.SimpleRenderer{ObservationSink: sink, DebugPreviewChars: 5}
+				return &gaictx.SimpleRenderer{ObservationSink: sink, ObservationPreviewChars: 5}
 			},
 		},
 	}

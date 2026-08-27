@@ -8,7 +8,7 @@ import (
 	"github.com/lace-ai/gai/internal/observe"
 )
 
-const defaultRendererDebugPreviewChars = 500
+const defaultRendererObservationPreviewChars = 500
 
 type renderObserver struct {
 	renderer    string
@@ -20,7 +20,7 @@ type renderObserver struct {
 
 func newRenderObserver(renderer string, debug gai.ObservationSink, previewSize int) *renderObserver {
 	if previewSize <= 0 {
-		previewSize = defaultRendererDebugPreviewChars
+		previewSize = defaultRendererObservationPreviewChars
 	}
 	return &renderObserver{
 		renderer:    renderer,

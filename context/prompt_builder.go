@@ -104,8 +104,8 @@ func New(def Definition) *Builder {
 	var defaultRenderer *XMLRenderer
 	if renderer == nil {
 		defaultRenderer = &XMLRenderer{
-			ObservationSink:   def.ObservationSink,
-			DebugPreviewChars: 100,
+			ObservationSink:         def.ObservationSink,
+			ObservationPreviewChars: 100,
 		}
 		renderer = defaultRenderer
 	}

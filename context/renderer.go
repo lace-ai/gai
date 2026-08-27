@@ -52,18 +52,18 @@ type (
 		// ObservationSink enables detailed renderer events. Prompt content is included
 		// only when the context has an enabling ContentCapturePolicy.
 		ObservationSink gai.ObservationSink
-		// DebugPreviewChars controls how much content is retained at each end of a preview.
-		DebugPreviewChars    int
-		renderResultCallback RenderResultCallback
+		// ObservationPreviewChars controls how much content is retained at each end of an observation preview.
+		ObservationPreviewChars int
+		renderResultCallback    RenderResultCallback
 	}
 	// SimpleRenderer renders nodes as compact role-labelled plain text.
 	SimpleRenderer struct {
 		// ObservationSink enables detailed renderer events. Prompt content is included
 		// only when the context has an enabling ContentCapturePolicy.
 		ObservationSink gai.ObservationSink
-		// DebugPreviewChars controls how much content is retained at each end of a preview.
-		DebugPreviewChars    int
-		renderResultCallback RenderResultCallback
+		// ObservationPreviewChars controls how much content is retained at each end of an observation preview.
+		ObservationPreviewChars int
+		renderResultCallback    RenderResultCallback
 	}
 )
 
@@ -108,7 +108,7 @@ func renderToolSignatures(tools []ToolSignature) (string, error) {
 }
 
 func (r XMLRenderer) Render(ctx context.Context, parts []Part) (string, error) {
-	obs := newRenderObserver("xml", r.ObservationSink, r.DebugPreviewChars)
+	obs := newRenderObserver("xml", r.ObservationSink, r.ObservationPreviewChars)
 	obs.started(ctx, len(parts))
 	if len(parts) == 0 {
 		r.notifyRenderResult(parts, "")
@@ -144,7 +144,7 @@ func (r XMLRenderer) Render(ctx context.Context, parts []Part) (string, error) {
 }
 
 func (r SimpleRenderer) Render(ctx context.Context, parts []Part) (string, error) {
-	obs := newRenderObserver("simple", r.ObservationSink, r.DebugPreviewChars)
+	obs := newRenderObserver("simple", r.ObservationSink, r.ObservationPreviewChars)
 	obs.started(ctx, len(parts))
 	if len(parts) == 0 {
 		r.notifyRenderResult(parts, "")
