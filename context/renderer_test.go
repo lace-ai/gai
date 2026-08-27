@@ -285,6 +285,36 @@ func TestRenderersEmitDetailedTruncatedObservations(t *testing.T) {
 	}
 }
 
+func TestRendererObservationsSnapshotNestedFieldsAcrossEvents(t *testing.T) {
+	sink := &rendererObservationSink{}
+	ctx := gai.WithContentCapturePolicy(context.Background(), gai.ContentCapturePolicy{Prompt: gai.CaptureEnabled})
+	_, err := (&gaictx.SimpleRenderer{ObservationSink: sink}).Render(ctx, []gaictx.Part{
+		gaictx.NewMessagePart(gaictx.RoleUser, gaictx.NewTextContent("first message")),
+	})
+	if err != nil {
+		t.Fatalf("Render failed: %v", err)
+	}
+
+	partNode, ok := sink.events[1].Fields["node"].(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected part node: %#v", sink.events[1].Fields["node"])
+	}
+	partNode["type"] = "mutated"
+
+	finished := sink.events[len(sink.events)-1]
+	structure, ok := finished.Fields["structure"].([]map[string]any)
+	if !ok || len(structure) != 1 {
+		t.Fatalf("unexpected finished structure: %#v", finished.Fields["structure"])
+	}
+	finishedNode, ok := structure[0]["node"].(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected finished node: %#v", structure[0]["node"])
+	}
+	if got := finishedNode["type"]; got != "user" {
+		t.Fatalf("finished observation was mutated through part observation: type = %v, want user", got)
+	}
+}
+
 func assertTruncatedPreview(t *testing.T, fields map[string]any, key string, wantChars int) {
 	t.Helper()
 

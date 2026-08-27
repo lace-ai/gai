@@ -99,7 +99,7 @@ func debugContentBytes(value any) (raw []byte, ok bool) {
 	}
 }
 
-// EnrichObservation stamps time, run and trace correlation, and copies Fields
+// EnrichObservation stamps time, run and trace correlation, and snapshots Fields
 // so callers cannot mutate an emitted observation after the fact.
 func EnrichObservation(ctx context.Context, observation Observation) Observation {
 	if observation.OccurredAt.IsZero() {
@@ -114,7 +114,7 @@ func EnrichObservation(ctx context.Context, observation Observation) Observation
 	}
 	fields := make(map[string]any, len(observation.Fields))
 	for key, value := range observation.Fields {
-		fields[key] = value
+		fields[key] = snapshotObservationField(value)
 	}
 	if observation.Err != nil {
 		delete(fields, "error")
@@ -127,6 +127,52 @@ func EnrichObservation(ctx context.Context, observation Observation) Observation
 	}
 	observation.Fields = fields
 	return observation
+}
+
+// snapshotObservationField copies maps and slices recursively. These are the
+// supported mutable structured field values; scalar values are immutable.
+func snapshotObservationField(value any) any {
+	if value == nil {
+		return nil
+	}
+	return snapshotObservationReflectValue(reflect.ValueOf(value)).Interface()
+}
+
+func snapshotObservationReflectValue(value reflect.Value) reflect.Value {
+	if !value.IsValid() {
+		return value
+	}
+
+	switch value.Kind() {
+	case reflect.Interface:
+		if value.IsNil() {
+			return value
+		}
+		copy := reflect.New(value.Type()).Elem()
+		copy.Set(snapshotObservationReflectValue(value.Elem()))
+		return copy
+	case reflect.Map:
+		if value.IsNil() {
+			return value
+		}
+		copy := reflect.MakeMapWithSize(value.Type(), value.Len())
+		iter := value.MapRange()
+		for iter.Next() {
+			copy.SetMapIndex(iter.Key(), snapshotObservationReflectValue(iter.Value()))
+		}
+		return copy
+	case reflect.Slice:
+		if value.IsNil() {
+			return value
+		}
+		copy := reflect.MakeSlice(value.Type(), value.Len(), value.Len())
+		for i := 0; i < value.Len(); i++ {
+			copy.Index(i).Set(snapshotObservationReflectValue(value.Index(i)))
+		}
+		return copy
+	default:
+		return value
+	}
 }
 
 func observationErrorType(err error) string {
