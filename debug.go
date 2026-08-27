@@ -23,9 +23,10 @@ type Observation struct {
 	Err        error
 }
 
-// ObservationSink receives finalized observations synchronously. Implementations
-// must return promptly and should enqueue internally when persistence is slow.
-// GAI does not retry or wait for external persistence.
+// ObservationSink receives finalized observations synchronously. Emit may be
+// invoked concurrently; implementations must be concurrency-safe, return
+// promptly, and should enqueue internally when persistence is slow. GAI does
+// not retry or wait for external persistence.
 type ObservationSink interface {
 	Emit(context.Context, Observation)
 }

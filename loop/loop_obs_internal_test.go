@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -350,12 +351,25 @@ func TestExecuteToolCallsCreatesConcurrentChildSpans(t *testing.T) {
 	recorder := obstest.Install(t)
 	entered := make(chan string, 2)
 	release := make(chan struct{})
+	sinkEntered := make(chan struct{}, 2)
+	releaseSink := make(chan struct{})
+	var observationsMu sync.Mutex
+	var observations []gai.Observation
 	tool := observedTestTool{name: "concurrent", call: func(_ context.Context, call *ai.ToolCall) *ToolResponse {
 		entered <- call.ID
 		<-release
 		return NewToolSuccess(call.ID)
 	}}
-	l := &Loop{Tools: []Tool{tool}}
+	l := &Loop{
+		Tools: []Tool{tool},
+		ObservationSink: gai.ObservationSinkFunc(func(_ context.Context, observation gai.Observation) {
+			observationsMu.Lock()
+			observations = append(observations, observation)
+			observationsMu.Unlock()
+			sinkEntered <- struct{}{}
+			<-releaseSink
+		}),
+	}
 	iteration := &Iteration{Parts: make([]IterationPart, 2)}
 	calls := []pendingToolCall{
 		{partIndex: 0, call: ai.ToolCall{ID: "call-1", Type: "function", Name: "concurrent", Args: json.RawMessage(`{}`)}},
@@ -375,12 +389,30 @@ func TestExecuteToolCallsCreatesConcurrentChildSpans(t *testing.T) {
 		}
 	}
 	close(release)
+	for range calls {
+		select {
+		case <-sinkEntered:
+		case <-time.After(time.Second):
+			t.Fatal("observation sink calls did not overlap")
+		}
+	}
+	close(releaseSink)
 	if err := <-done; err != nil {
 		t.Fatalf("executeToolCalls error: %v", err)
 	}
 	parent.End()
 	if !seen["call-1"] || !seen["call-2"] {
 		t.Fatalf("executed calls = %#v", seen)
+	}
+	observationsMu.Lock()
+	defer observationsMu.Unlock()
+	if len(observations) != 2 {
+		t.Fatalf("observations = %#v, want one per concurrent tool call", observations)
+	}
+	for _, observation := range observations {
+		if observation.Name != "loop_tool_finished" {
+			t.Fatalf("observation name = %q, want loop_tool_finished", observation.Name)
+		}
 	}
 
 	spans := requireToolSpans(t, recorder, 2)
