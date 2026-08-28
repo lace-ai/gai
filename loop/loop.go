@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lace-ai/gai"
 	"github.com/lace-ai/gai/ai"
 	gaictx "github.com/lace-ai/gai/context"
 )
@@ -43,6 +44,8 @@ type ToolResponseProcessor interface {
 // must not be run concurrently or reused without explicitly clearing that
 // state.
 type Loop struct {
+	// ObservationSink receives finalized normalized loop observations.
+	ObservationSink gai.ObservationSink
 	// Iterations contains completed model/tool interaction rounds.
 	Iterations []Iteration
 	// Model generates tokens for each iteration.
@@ -698,9 +701,7 @@ func (l *Loop) executeToolCalls(ctx context.Context, iteration *Iteration, toolC
 		go func(tc pendingToolCall) {
 			defer wg.Done()
 
-			started := time.Now()
-			toolRes := callObservedTool(ctx, tc.call, tools)
-			duration := time.Since(started)
+			toolRes, duration := callObservedTool(ctx, tc.call, tools, l.ObservationSink)
 			iteration.Parts[tc.partIndex].ToolResp = toolRes
 			if l.ToolResponseProcessor != nil {
 				if err := l.ToolResponseProcessor.Process(tc.call, toolRes); err != nil {

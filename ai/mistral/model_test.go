@@ -93,8 +93,8 @@ func TestModelGenerateUsesContentCapturePolicy(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	var events []gai.DebugEvent
-	p := New("api-key-must-not-appear", gai.DebugSinkFunc(func(_ context.Context, event gai.DebugEvent) {
+	var events []gai.Observation
+	p := New("api-key-must-not-appear", gai.ObservationSinkFunc(func(_ context.Context, event gai.Observation) {
 		events = append(events, event)
 	}))
 	p.baseURL = ts.URL
@@ -112,7 +112,7 @@ func TestModelGenerateUsesContentCapturePolicy(t *testing.T) {
 		t.Fatalf("Generate error: %v", err)
 	}
 
-	var request, response gai.DebugEvent
+	var request, response gai.Observation
 	for _, event := range events {
 		switch event.Name {
 		case "mistral_generate_request":

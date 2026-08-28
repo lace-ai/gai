@@ -14,7 +14,7 @@ const contextTracerName = "github.com/lace-ai/gai/context"
 type historyObserver struct {
 	op string
 
-	debug     gai.DebugSink
+	debug     gai.ObservationSink
 	operation *observe.Operation
 
 	sessionID     string
@@ -44,7 +44,7 @@ type historyObserver struct {
 	summarySkipReason     string
 }
 
-func newHistoryBuildObserver(ctx context.Context, debug gai.DebugSink, sessionID string, tokenBudget int, summaryConfigured bool) (context.Context, *historyObserver) {
+func newHistoryBuildObserver(ctx context.Context, debug gai.ObservationSink, sessionID string, tokenBudget int, summaryConfigured bool) (context.Context, *historyObserver) {
 	ctx, operation := observe.Start(ctx, debug, contextTracerName, "context.history", "context.operation", "build", "context:HistorySource",
 		attribute.String("context.source", "history"),
 		attribute.String("context.session_id", sessionID),
@@ -60,7 +60,7 @@ func newHistoryBuildObserver(ctx context.Context, debug gai.DebugSink, sessionID
 	}
 }
 
-func newHistorySummaryObserver(ctx context.Context, debug gai.DebugSink, sessionID string, tokenBudget int, summaryAmount float32) (context.Context, *historyObserver) {
+func newHistorySummaryObserver(ctx context.Context, debug gai.ObservationSink, sessionID string, tokenBudget int, summaryAmount float32) (context.Context, *historyObserver) {
 	ctx, operation := observe.Start(ctx, debug, contextTracerName, "context.history", "context.operation", "summarize", "context:HistorySource",
 		attribute.String("context.session_id", sessionID),
 		attribute.Int("context.token_budget", tokenBudget),
@@ -236,7 +236,7 @@ func (o *historyObserver) SummaryIncluded(ctx context.Context, summary *Summary)
 		"summary_start_count": summary.StartTurnCount,
 		"summary_end_count":   summary.EndTurnCount,
 	}
-	gai.AddDebugContent(ctx, o.debug, fields, "summary_content", gai.ContentKindMemory, summary.Content.String())
+	gai.AddObservationContent(ctx, o.debug, fields, "summary_content", gai.ContentKindMemory, summary.Content.String())
 	o.emit(ctx, "history_source_summary_included", fields, nil)
 }
 
@@ -252,7 +252,7 @@ func (o *historyObserver) SummaryTokenCountFailed(ctx context.Context, summary *
 		"summary_start_count": summary.StartTurnCount,
 		"summary_end_count":   summary.EndTurnCount,
 	}
-	gai.AddDebugContent(ctx, o.debug, fields, "summary_content", gai.ContentKindMemory, summary.Content.String())
+	gai.AddObservationContent(ctx, o.debug, fields, "summary_content", gai.ContentKindMemory, summary.Content.String())
 	o.emit(ctx, "history_source_summary_token_count_failed", fields, err)
 }
 
@@ -308,9 +308,9 @@ func (o *historyObserver) BuildFinished(ctx context.Context, part *Part, tokenCo
 		"message_count": messageCount,
 		"content_count": o.contentCount,
 	}
-	if part != nil && gai.DebugContentEnabled(ctx, o.debug, gai.ContentKindMemory) {
+	if part != nil && gai.ObservationContentEnabled(ctx, o.debug, gai.ContentKindMemory) {
 		if rendered, err := (gaictx.XMLRenderer{}).Render(ctx, []gaictx.Part{part}); err == nil {
-			gai.AddDebugContent(ctx, o.debug, fields, "history_content", gai.ContentKindMemory, rendered)
+			gai.AddObservationContent(ctx, o.debug, fields, "history_content", gai.ContentKindMemory, rendered)
 		}
 	}
 	o.emit(ctx, "history_source_build_finished", fields, nil)
@@ -340,7 +340,7 @@ func (o *historyObserver) SummaryGenerated(ctx context.Context, summary *Summary
 		"summary_end_count":      summary.EndTurnCount,
 		"previous_summary_found": previousSummaryFound,
 	}
-	gai.AddDebugContent(ctx, o.debug, fields, "summary_content", gai.ContentKindMemory, summary.Content.String())
+	gai.AddObservationContent(ctx, o.debug, fields, "summary_content", gai.ContentKindMemory, summary.Content.String())
 	o.emit(ctx, "history_source_summary_generated", fields, nil)
 }
 

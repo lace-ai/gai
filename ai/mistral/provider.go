@@ -18,7 +18,7 @@ type Provider struct {
 	apiKey     string
 	baseURL    string
 	httpClient *http.Client
-	debug      gai.DebugSink
+	debug      gai.ObservationSink
 	catalog    ai.ModelCatalogCache
 	catalogMu  ai.ContextMutex
 }
@@ -26,7 +26,7 @@ type Provider struct {
 var _ ai.Provider = (*Provider)(nil)
 var _ ai.ModelCatalogProvider = (*Provider)(nil)
 
-func New(apiKey string, debug gai.DebugSink) *Provider {
+func New(apiKey string, debug gai.ObservationSink) *Provider {
 	return &Provider{
 		apiKey:  apiKey,
 		baseURL: "https://api.mistral.ai",

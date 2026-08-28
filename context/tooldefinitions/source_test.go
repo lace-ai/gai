@@ -225,7 +225,7 @@ func TestSourceErrorHandling(t *testing.T) {
 		t.Fatalf("Function error = %v, want ErrToolInvalid", err)
 	}
 	events := sink.Events()
-	if len(events) != 2 || events[1].Name != "tool_definitions_build_failed" || events[1].Err == nil {
+	if len(events) != 2 || events[1].Name != "tool_definitions_build_failed" || events[1].Err != nil || events[1].Fields["outcome"] != "error" {
 		t.Fatalf("unexpected failure events: %#v", events)
 	}
 }
@@ -324,19 +324,17 @@ func invalidParams() ai.ToolParameters {
 
 type captureSink struct {
 	mu     sync.Mutex
-	events []gai.DebugEvent
+	events []gai.Observation
 }
 
-func (s *captureSink) Emit(_ context.Context, event gai.DebugEvent) {
+func (s *captureSink) Emit(_ context.Context, event gai.Observation) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.events = append(s.events, event)
 }
 
-func (s *captureSink) IncludeSensitiveData() bool { return false }
-
-func (s *captureSink) Events() []gai.DebugEvent {
+func (s *captureSink) Events() []gai.Observation {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]gai.DebugEvent(nil), s.events...)
+	return append([]gai.Observation(nil), s.events...)
 }

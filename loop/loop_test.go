@@ -1353,6 +1353,8 @@ func TestLoopRetryObservabilityReportsClassificationAndDelay(t *testing.T) {
 	})
 
 	retryDelay := 7 * time.Millisecond
+	var observationMu sync.Mutex
+	var observations []gai.Observation
 	model := &scriptedStreamModel{sequences: [][]ai.Token{
 		{{Err: &ai.ProviderError{Kind: ai.ProviderErrorRateLimited}}},
 		{{Type: ai.TokenTypeText, Data: []byte("done")}},
@@ -1364,6 +1366,11 @@ func TestLoopRetryObservabilityReportsClassificationAndDelay(t *testing.T) {
 		InitialBackoff: retryDelay,
 		Wait:           func(context.Context, time.Duration) error { return nil },
 	}
+	l.ObservationSink = gai.ObservationSinkFunc(func(_ context.Context, observation gai.Observation) {
+		observationMu.Lock()
+		defer observationMu.Unlock()
+		observations = append(observations, observation)
+	})
 
 	events := collectLoopEvents(t, l, context.Background())
 	if err := loopError(events); err != nil {
@@ -1375,6 +1382,18 @@ func TestLoopRetryObservabilityReportsClassificationAndDelay(t *testing.T) {
 	}
 	if retries[0].RetryReason != "rate_limited" || retries[0].RetryDelay != retryDelay {
 		t.Fatalf("retry event observability = %#v, want reason rate_limited and delay %s", retries[0], retryDelay)
+	}
+	observationMu.Lock()
+	retryObserved := false
+	for _, observation := range observations {
+		if observation.Name == "loop_retry_scheduled" && observation.Fields["iteration"] == 1 && observation.Fields["retry_reason"] == "rate_limited" && observation.Fields["retry_delay_ms"] == retryDelay.Milliseconds() {
+			retryObserved = true
+			break
+		}
+	}
+	observationMu.Unlock()
+	if !retryObserved {
+		t.Fatalf("retry observation missing iteration, classification, or delay: %#v", observations)
 	}
 
 	for _, span := range recorder.Ended() {

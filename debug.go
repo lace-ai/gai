@@ -3,87 +3,68 @@ package gai
 import (
 	"context"
 	"encoding/json"
-	"math"
+	"reflect"
+	"time"
+
+	"go.opentelemetry.io/otel/trace"
 )
 
-type DebugEvent struct {
-	Name   string
-	Source string
-	Fields map[string]any
-	Err    error
+// Observation is a finalized, best-effort observability projection. It is not
+// an ordered workflow execution event; applications needing replay or transport
+// semantics should consume agent.Workflow.RunEvents instead.
+type Observation struct {
+	Name       string
+	Source     string
+	OccurredAt time.Time
+	RunID      string
+	TraceID    string
+	SpanID     string
+	Fields     map[string]any
+	Err        error
 }
 
-type DebugSink interface {
-	Emit(ctx context.Context, e DebugEvent)
-	// IncludeSensitiveData enables the legacy unbounded, all-or-nothing
-	// content path when no ContentCapturePolicy is installed on ctx.
-	// Prefer WithContentCapturePolicy for new applications.
-	IncludeSensitiveData() bool
+// ObservationSink receives finalized observations synchronously. Emit may be
+// invoked concurrently; implementations must be concurrency-safe, return
+// promptly, and should enqueue internally when persistence is slow. GAI does
+// not retry or wait for external persistence.
+type ObservationSink interface {
+	Emit(context.Context, Observation)
 }
 
-type DebugSinkFunc func(ctx context.Context, e DebugEvent)
+// ObservationSinkFunc adapts a function into an ObservationSink.
+type ObservationSinkFunc func(context.Context, Observation)
 
-func (f DebugSinkFunc) Emit(ctx context.Context, e DebugEvent) {
+func (f ObservationSinkFunc) Emit(ctx context.Context, observation Observation) {
 	if f != nil {
-		event := EnrichDebugEvent(ctx, e)
-		RecordDebugEvent(ctx, event)
-		f(ctx, event)
+		f(ctx, observation)
 	}
 }
 
-func (f DebugSinkFunc) IncludeSensitiveData() bool {
-	return false
+// ObservationEnabled reports whether ctx has an observation destination.
+func ObservationEnabled(ctx context.Context, sink ObservationSink) bool {
+	return sink != nil || trace.SpanFromContext(ctx).IsRecording()
 }
 
-// SensitiveDebugSinkFunc enables the legacy raw, unbounded content path.
-//
-// Deprecated: use DebugSinkFunc with WithContentCapturePolicy.
-type SensitiveDebugSinkFunc func(ctx context.Context, e DebugEvent)
-
-func (f SensitiveDebugSinkFunc) Emit(ctx context.Context, e DebugEvent) {
-	if f != nil {
-		event := EnrichDebugEvent(ctx, e)
-		RecordDebugEvent(ctx, event)
-		f(ctx, event)
-	}
-}
-
-func (f SensitiveDebugSinkFunc) IncludeSensitiveData() bool {
-	return true
-}
-
-// DebugContentEnabled reports whether a library-managed debug field of kind
-// would be captured for ctx and sink. It is useful for avoiding expensive
-// serialization before calling AddDebugContent.
-func DebugContentEnabled(ctx context.Context, sink DebugSink, kind ContentKind) bool {
-	if sink == nil {
+// ObservationContentEnabled reports whether a library-managed content field of
+// kind would be captured under ctx's ContentCapturePolicy.
+func ObservationContentEnabled(ctx context.Context, sink ObservationSink, kind ContentKind) bool {
+	if !ObservationEnabled(ctx, sink) {
 		return false
 	}
-	if policy, hasPolicy := ContentCapturePolicyFromContext(ctx); hasPolicy {
-		return policy.captureMode(kind) == CaptureEnabled
-	}
-	return sink.IncludeSensitiveData()
+	policy, ok := ContentCapturePolicyFromContext(ctx)
+	return ok && policy.captureMode(kind) == CaptureEnabled
 }
 
-// AddDebugContent adds one library-managed content field after applying the
-// request-scoped ContentCapturePolicy. An installed policy is authoritative,
-// including for legacy sensitive sinks. With no installed policy, the original
-// IncludeSensitiveData behavior and field shape are preserved.
-func AddDebugContent(ctx context.Context, sink DebugSink, fields map[string]any, field string, kind ContentKind, value any) {
-	if sink == nil || fields == nil || field == "" {
+// AddObservationContent adds one library-managed content field after applying
+// the request-scoped ContentCapturePolicy. With no installed policy, content
+// capture is disabled.
+func AddObservationContent(ctx context.Context, sink ObservationSink, fields map[string]any, field string, kind ContentKind, value any) {
+	if fields == nil || field == "" {
 		return
 	}
-	policy, hasPolicy := ContentCapturePolicyFromContext(ctx)
-	if !hasPolicy {
-		if sink.IncludeSensitiveData() {
-			fields[field] = value
-		}
+	if !ObservationContentEnabled(ctx, sink, kind) {
 		return
 	}
-	if policy.captureMode(kind) != CaptureEnabled {
-		return
-	}
-
 	raw, ok := debugContentBytes(value)
 	if !ok {
 		return
@@ -124,26 +105,114 @@ func debugContentBytes(value any) (raw []byte, ok bool) {
 	}
 }
 
-func EnrichDebugEvent(ctx context.Context, e DebugEvent) DebugEvent {
-	traceID, spanID, err := SpanContextIDs(ctx)
-	if err != nil {
-		return e
+// EnrichObservation stamps time, run and trace correlation, and snapshots Fields
+// so callers cannot mutate an emitted observation after the fact.
+func EnrichObservation(ctx context.Context, observation Observation) Observation {
+	if observation.OccurredAt.IsZero() {
+		observation.OccurredAt = time.Now().UTC()
+	}
+	if observation.RunID == "" {
+		observation.RunID, _ = ObservationRunIDFromContext(ctx)
+	}
+	if traceID, spanID, err := SpanContextIDs(ctx); err == nil {
+		observation.TraceID = traceID
+		observation.SpanID = spanID
+	}
+	fields := make(map[string]any, len(observation.Fields))
+	for key, value := range observation.Fields {
+		fields[key] = snapshotObservationField(value)
+	}
+	if observation.Err != nil {
+		delete(fields, "error")
+		fields["outcome"] = "error"
+		fields["error_type"] = observationErrorType(observation.Err)
+		// Errors may include provider responses, prompts, or tool output. Raw
+		// errors remain available to control flow, but never leave it through a
+		// finalized observation unless explicitly captured as managed content.
+		observation.Err = nil
+	}
+	observation.Fields = fields
+	return observation
+}
+
+// snapshotObservationField copies maps and slices recursively. These are the
+// supported mutable structured field values; scalar values are immutable.
+func snapshotObservationField(value any) any {
+	if value == nil {
+		return nil
+	}
+	return snapshotObservationReflectValue(reflect.ValueOf(value)).Interface()
+}
+
+func snapshotObservationReflectValue(value reflect.Value) reflect.Value {
+	if !value.IsValid() {
+		return value
 	}
 
-	capHint := 0
-	if len(e.Fields) <= math.MaxInt-2 {
-		capHint = len(e.Fields) + 2
+	switch value.Kind() {
+	case reflect.Interface:
+		if value.IsNil() {
+			return value
+		}
+		copy := reflect.New(value.Type()).Elem()
+		copy.Set(snapshotObservationReflectValue(value.Elem()))
+		return copy
+	case reflect.Map:
+		if value.IsNil() {
+			return value
+		}
+		copy := reflect.MakeMapWithSize(value.Type(), value.Len())
+		iter := value.MapRange()
+		for iter.Next() {
+			copy.SetMapIndex(iter.Key(), snapshotObservationReflectValue(iter.Value()))
+		}
+		return copy
+	case reflect.Slice:
+		if value.IsNil() {
+			return value
+		}
+		copy := reflect.MakeSlice(value.Type(), value.Len(), value.Len())
+		for i := 0; i < value.Len(); i++ {
+			copy.Index(i).Set(snapshotObservationReflectValue(value.Index(i)))
+		}
+		return copy
+	default:
+		return value
 	}
-	fields := make(map[string]any, capHint)
-	for key, value := range e.Fields {
-		fields[key] = value
+}
+
+func observationErrorType(err error) string {
+	const maxErrorTypeBytes = 256
+	typeName := reflect.TypeOf(err).String()
+	if len(typeName) == 0 || len(typeName) > maxErrorTypeBytes {
+		return "error"
 	}
-	fields["otel"] = map[string]any{
-		"trace_id": traceID,
-		"span_id":  spanID,
+	return typeName
+}
+
+// EmitObservation finalizes and projects one semantic occurrence to OpenTelemetry
+// and the optional application sink. Domain observers should use this helper
+// rather than calling a sink directly.
+func EmitObservation(ctx context.Context, sink ObservationSink, observation Observation) {
+	observation = EnrichObservation(ctx, observation)
+	RecordObservation(ctx, observation)
+	if sink != nil {
+		sink.Emit(ctx, observation)
 	}
-	fields["trace_id"] = traceID
-	fields["span_id"] = spanID
-	e.Fields = fields
-	return e
+}
+
+type observationRunIDContextKey struct{}
+
+// WithObservationRunID attaches workflow correlation to derived observations.
+func WithObservationRunID(ctx context.Context, runID string) context.Context {
+	return context.WithValue(ctx, observationRunIDContextKey{}, runID)
+}
+
+// ObservationRunIDFromContext returns the workflow correlation ID when present.
+func ObservationRunIDFromContext(ctx context.Context) (string, bool) {
+	if ctx == nil {
+		return "", false
+	}
+	runID, ok := ctx.Value(observationRunIDContextKey{}).(string)
+	return runID, ok && runID != ""
 }

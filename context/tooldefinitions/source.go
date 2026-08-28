@@ -30,7 +30,7 @@ The name must match a listed tool, type must be exactly "function" and arguments
 type Source struct {
 	tools         []gaictx.ToolSignature
 	renderer      gaictx.Renderer
-	debug         gai.DebugSink
+	debug         gai.ObservationSink
 	usageProtocol string
 	toolChoice    ai.ToolChoice
 }
@@ -73,7 +73,7 @@ func toolChoiceInstruction(choice ai.ToolChoice) string {
 
 // New creates a context source from tool signatures and a renderer. The slice is
 // copied so callers can safely reuse or modify their input slice after construction.
-func New(renderer gaictx.Renderer, tools []gaictx.ToolSignature, debug gai.DebugSink, options ...Option) (*Source, error) {
+func New(renderer gaictx.Renderer, tools []gaictx.ToolSignature, debug gai.ObservationSink, options ...Option) (*Source, error) {
 	if len(tools) == 0 {
 		return nil, ErrToolsEmpty
 	}

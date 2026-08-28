@@ -25,7 +25,7 @@ type Provider struct {
 	apiKey     string
 	baseURL    string
 	httpClient *http.Client
-	debug      gai.DebugSink
+	debug      gai.ObservationSink
 	catalog    ai.ModelCatalogCache
 	catalogMu  ai.ContextMutex
 }
@@ -34,7 +34,7 @@ var _ ai.Provider = (*Provider)(nil)
 var _ ai.ModelCatalogProvider = (*Provider)(nil)
 
 // New creates an Anthropic provider using apiKey.
-func New(apiKey string, debug gai.DebugSink) *Provider {
+func New(apiKey string, debug gai.ObservationSink) *Provider {
 	return &Provider{apiKey: strings.TrimSpace(apiKey), baseURL: "https://api.anthropic.com", httpClient: &http.Client{}, debug: debug}
 }
 

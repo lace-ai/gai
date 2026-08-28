@@ -120,14 +120,14 @@ type Workflow struct {
 	loop       *loop.Loop
 	middleware []Middleware
 	name       string
-	debug      gai.DebugSink
+	debug      gai.ObservationSink
 
 	mu      sync.RWMutex
 	started bool
 	result  WorkflowResult
 }
 
-func newWorkflow(input RunInput, l *loop.Loop, name string, debug gai.DebugSink, middleware []Middleware) *Workflow {
+func newWorkflow(input RunInput, l *loop.Loop, name string, debug gai.ObservationSink, middleware []Middleware) *Workflow {
 	input = cloneRunInput(input)
 	return &Workflow{
 		loop:       l,
@@ -205,10 +205,13 @@ func (w *Workflow) Run(ctx context.Context) (<-chan ai.Token, <-chan loop.Iterat
 }
 
 func applyWorkflowTraceContext(ctx context.Context, workflow *Workflow) context.Context {
-	if workflow == nil || workflow.result.Input.TraceContext == nil {
+	if workflow == nil {
 		return ctx
 	}
-	return gai.WithTraceContext(ctx, *workflow.result.Input.TraceContext)
+	if workflow.result.Input.TraceContext != nil {
+		ctx = gai.WithTraceContext(ctx, *workflow.result.Input.TraceContext)
+	}
+	return gai.WithObservationRunID(ctx, workflow.result.Input.ID)
 }
 
 func loopEventsToStream(ctx context.Context, events <-chan loop.Event) Stream {

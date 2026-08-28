@@ -7,12 +7,43 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lace-ai/gai"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 )
+
+func TestGenerationObservationEmitsFinalizedOutcomeToSink(t *testing.T) {
+	var emitted gai.Observation
+	sink := gai.ObservationSinkFunc(func(_ context.Context, observation gai.Observation) {
+		emitted = observation
+	})
+
+	_, observation := StartGenerationObservation(context.Background(), AIRequest{}, GenerationConfig{
+		Provider: "openai",
+		Model:    "gpt-test",
+		Sink:     sink,
+	})
+	observation.Finish(GenerationResult{
+		ResponseModel: "gpt-resolved",
+		RequestID:     "req-1",
+		FinishReason:  "stop",
+		Usage:         &Usage{InputTokens: 3, OutputTokens: 5},
+		HTTPStatus:    200,
+	})
+
+	if emitted.Name != "generation_finished" || emitted.Source != "ai:GenerationObservation" {
+		t.Fatalf("observation identity = %#v", emitted)
+	}
+	if emitted.Fields["provider"] != "openai" || emitted.Fields["model"] != "gpt-test" || emitted.Fields["response_model"] != "gpt-resolved" {
+		t.Fatalf("generation fields = %#v", emitted.Fields)
+	}
+	if emitted.Fields["input_tokens"] != 3 || emitted.Fields["output_tokens"] != 5 || emitted.Fields["total_tokens"] != 8 {
+		t.Fatalf("generation usage = %#v", emitted.Fields)
+	}
+}
 
 func TestGenerationObservationRecordsSemanticContract(t *testing.T) {
 	recorder, restore := installGenerationSpanRecorder(t)
@@ -57,7 +88,13 @@ func TestGenerationObservationRecordsSemanticContract(t *testing.T) {
 	} else if _, err := time.Parse(time.RFC3339Nano, value); err != nil {
 		t.Fatalf("completion start time %q: %v", value, err)
 	}
-	if len(span.Events()) != 1 || span.Events()[0].Name != "gen_ai.completion.start" {
+	var completionEvents int
+	for _, event := range span.Events() {
+		if event.Name == "gen_ai.completion.start" {
+			completionEvents++
+		}
+	}
+	if completionEvents != 1 {
 		t.Fatalf("completion events = %#v", span.Events())
 	}
 	if span.Parent().SpanID() != parent.SpanContext().SpanID() {
@@ -70,6 +107,25 @@ func TestGenerationObservationRecordsSemanticContract(t *testing.T) {
 		if strings.Contains(value.String(), "private prompt") || strings.Contains(value.String(), "private completion") {
 			t.Fatalf("content leaked through %s", key)
 		}
+	}
+}
+
+func TestGenerationObservationFailureRecordsOneException(t *testing.T) {
+	recorder, restore := installGenerationSpanRecorder(t)
+	defer restore()
+
+	_, observation := StartGenerationObservation(context.Background(), AIRequest{}, GenerationConfig{Provider: "test", Model: "m"})
+	observation.Finish(GenerationResult{Err: errors.New("generation failed")})
+
+	span := generationSpan(t, recorder.Ended())
+	var exceptions int
+	for _, event := range span.Events() {
+		if event.Name == "exception" {
+			exceptions++
+		}
+	}
+	if exceptions != 1 {
+		t.Fatalf("exception events = %d, want 1; events = %#v", exceptions, span.Events())
 	}
 }
 

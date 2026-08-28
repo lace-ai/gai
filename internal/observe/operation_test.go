@@ -13,7 +13,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
-func TestOperationPreservesSpanAndDebugEventSemantics(t *testing.T) {
+func TestOperationPreservesSpanAndObservationSemantics(t *testing.T) {
 	previousProvider := otel.GetTracerProvider()
 	recorder := tracetest.NewSpanRecorder()
 	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
@@ -23,8 +23,8 @@ func TestOperationPreservesSpanAndDebugEventSemantics(t *testing.T) {
 		otel.SetTracerProvider(previousProvider)
 	})
 
-	var events []gai.DebugEvent
-	sink := gai.DebugSinkFunc(func(_ context.Context, event gai.DebugEvent) {
+	var events []gai.Observation
+	sink := gai.ObservationSinkFunc(func(_ context.Context, event gai.Observation) {
 		events = append(events, event)
 	})
 	ctx, operation := observe.Start(t.Context(), sink, "test-tracer", "test", "test.operation", "run", "test:observer", attribute.String("test.initial", "value"))
@@ -37,15 +37,15 @@ func TestOperationPreservesSpanAndDebugEventSemantics(t *testing.T) {
 		t.Fatalf("events = %d, want 1", len(events))
 	}
 	event := events[0]
-	if event.Name != "completed" || event.Source != "test:observer" || event.Fields["result"] != "ok" || !errors.Is(event.Err, emitErr) {
+	if event.Name != "completed" || event.Source != "test:observer" || event.Fields["result"] != "ok" || event.Err != nil || event.Fields["outcome"] != "error" || event.Fields["error_type"] != "*errors.errorString" {
 		t.Fatalf("event = %#v", event)
 	}
 	traceID, spanID, err := gai.SpanContextIDs(ctx)
 	if err != nil {
 		t.Fatalf("SpanContextIDs() error = %v", err)
 	}
-	if event.Fields["trace_id"] != traceID || event.Fields["span_id"] != spanID {
-		t.Fatalf("event correlation fields = trace_id:%#v span_id:%#v, want trace_id:%q span_id:%q", event.Fields["trace_id"], event.Fields["span_id"], traceID, spanID)
+	if event.TraceID != traceID || event.SpanID != spanID {
+		t.Fatalf("event correlation = trace_id:%q span_id:%q, want trace_id:%q span_id:%q", event.TraceID, event.SpanID, traceID, spanID)
 	}
 
 	spans := recorder.Ended()
@@ -65,8 +65,29 @@ func TestOperationPreservesSpanAndDebugEventSemantics(t *testing.T) {
 	}
 }
 
-func TestOperationHandlesNilSink(t *testing.T) {
+func TestOperationRecordsObservationWithNilSink(t *testing.T) {
+	previousProvider := otel.GetTracerProvider()
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	otel.SetTracerProvider(provider)
+	t.Cleanup(func() {
+		_ = provider.Shutdown(context.Background())
+		otel.SetTracerProvider(previousProvider)
+	})
+
 	ctx, operation := observe.Start(t.Context(), nil, "test-tracer", "test", "test.operation", "run", "test:observer")
-	operation.Emit(ctx, "completed", nil, nil)
+	operation.Emit(ctx, "completed", map[string]any{"result": "ok"}, nil)
 	operation.Finish(nil)
+
+	spans := recorder.Ended()
+	if len(spans) != 1 {
+		t.Fatalf("spans = %d, want 1", len(spans))
+	}
+	events := spans[0].Events()
+	if len(events) != 1 {
+		t.Fatalf("events = %d, want 1", len(events))
+	}
+	if events[0].Name != "observation.completed" {
+		t.Fatalf("event name = %q, want observation.completed", events[0].Name)
+	}
 }

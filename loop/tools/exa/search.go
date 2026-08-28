@@ -69,7 +69,7 @@ type SearchTool struct {
 	client      *http.Client
 	searchType  string
 	numResults  int
-	debug       gai.DebugSink
+	debug       gai.ObservationSink
 	description string
 	params      ai.ToolParameters
 }
@@ -115,9 +115,9 @@ func WithHTTPClient(client *http.Client) Option {
 	}
 }
 
-// WithDebugSink emits lifecycle and failure events for the search operation.
+// WithObservationSink emits lifecycle and failure events for the search operation.
 // Query text is emitted only when the sink opts into sensitive data.
-func WithDebugSink(debug gai.DebugSink) Option {
+func WithObservationSink(debug gai.ObservationSink) Option {
 	return func(tool *SearchTool) error {
 		tool.debug = debug
 		return nil

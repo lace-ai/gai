@@ -252,7 +252,7 @@ func TestTurnTokenizeIgnoresNegativeCachedMessageCounts(t *testing.T) {
 	}
 }
 
-func TestTurnTokenizeEmitsDebugEventWhenSavingTokensFails(t *testing.T) {
+func TestTurnTokenizeEmitsObservationWhenSavingTokensFails(t *testing.T) {
 	t.Parallel()
 
 	saveErr := errors.New("save tokens")
@@ -264,8 +264,8 @@ func TestTurnTokenizeEmitsDebugEventWhenSavingTokensFails(t *testing.T) {
 			{Content: gaictx.NewTextContent("three token message")},
 		},
 	}
-	var event gai.DebugEvent
-	turn.SetDebugSink(gai.DebugSinkFunc(func(_ context.Context, emitted gai.DebugEvent) {
+	var event gai.Observation
+	turn.SetObservationSink(gai.ObservationSinkFunc(func(_ context.Context, emitted gai.Observation) {
 		event = emitted
 	}))
 
@@ -282,8 +282,8 @@ func TestTurnTokenizeEmitsDebugEventWhenSavingTokensFails(t *testing.T) {
 	if event.Source != "context:Turn.Tokenize" {
 		t.Fatalf("unexpected event source: %q", event.Source)
 	}
-	if !errors.Is(event.Err, saveErr) {
-		t.Fatalf("expected save error on event, got %v", event.Err)
+	if event.Err != nil || event.Fields["outcome"] != "error" {
+		t.Fatalf("expected safe save-error observation, got %#v", event)
 	}
 	if event.Fields["turn_id"] != "turn-1" || event.Fields["turn_count"] != 2 ||
 		event.Fields["tokenizer_id"] != "mock.tokenizer" || event.Fields["token_count"] != 3 {

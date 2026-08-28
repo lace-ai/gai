@@ -44,6 +44,7 @@ var (
 
 type loopRunState struct {
 	obs        *loopObserver
+	sink       gai.ObservationSink
 	err        error
 	cancelErr  error
 	retryCount int
@@ -59,10 +60,13 @@ type loopRunStats struct {
 
 type loopIterationState struct {
 	obs   *iterationObserver
+	ctx   context.Context
+	sink  gai.ObservationSink
 	stats loopIterationStats
 }
 
 type loopIterationStats struct {
+	Iteration      int
 	Retrying       bool
 	Final          bool
 	Canceled       bool
@@ -85,6 +89,7 @@ func newLoopRunState(ctx context.Context, l *Loop) (context.Context, *loopRunSta
 	maxTokens := 0
 	toolCount := 0
 	modelName := ""
+	var sink gai.ObservationSink
 	if l != nil {
 		maxIterations = l.MaxLoopIterations
 		if l.RetryPolicy != nil {
@@ -95,6 +100,7 @@ func newLoopRunState(ctx context.Context, l *Loop) (context.Context, *loopRunSta
 		if l.Model != nil {
 			modelName = l.Model.Name()
 		}
+		sink = l.ObservationSink
 	}
 
 	ctx, span := gai.StartOperationSpan(ctx, loopTracerName, "loop", "loop.operation", "run",
@@ -104,14 +110,16 @@ func newLoopRunState(ctx context.Context, l *Loop) (context.Context, *loopRunSta
 		attribute.Int("loop.tool_count", toolCount),
 		attribute.String("ai.model", modelName),
 	)
-	return ctx, &loopRunState{obs: &loopObserver{span: span}}
+	return ctx, &loopRunState{obs: &loopObserver{span: span}, sink: sink}
 }
 
 func (s *loopRunState) startIteration(ctx context.Context, count int, attempt int) (context.Context, *loopIterationState) {
 	incrementalPrompt := false
+	var sink gai.ObservationSink
 	if s != nil {
 		s.stats.IterationCount = count
 		incrementalPrompt = s.stats.IncrementalPrompt
+		sink = s.sink
 	}
 	ctx, span := gai.StartOperationSpan(ctx, loopTracerName, "loop", "loop.operation", "iteration",
 		attribute.Int("loop.iteration", count),
@@ -120,7 +128,9 @@ func (s *loopRunState) startIteration(ctx context.Context, count int, attempt in
 	)
 	return ctx, &loopIterationState{
 		obs:   &iterationObserver{span: span},
-		stats: loopIterationStats{AttemptID: attempt},
+		ctx:   ctx,
+		sink:  sink,
+		stats: loopIterationStats{Iteration: count, AttemptID: attempt},
 	}
 }
 
@@ -227,6 +237,17 @@ func (s *loopIterationState) markRetrying(retryCount int, reason string, delay t
 	s.stats.RetryCount = retryCount
 	s.stats.RetryReason = reason
 	s.stats.RetryDelay = delay
+	gai.EmitObservation(s.ctx, s.sink, gai.Observation{
+		Name:   "loop_retry_scheduled",
+		Source: "loop:Iteration",
+		Fields: map[string]any{
+			"iteration":      s.stats.Iteration,
+			"attempt":        s.stats.AttemptID,
+			"retry_count":    retryCount,
+			"retry_reason":   reason,
+			"retry_delay_ms": delay.Milliseconds(),
+		},
+	})
 }
 
 func (s *loopIterationState) markFinal() {
@@ -287,10 +308,12 @@ func (o *iterationObserver) finish(err error, stats loopIterationStats) {
 type toolObservation struct {
 	ctx        context.Context
 	span       trace.Span
+	sink       gai.ObservationSink
+	call       ai.ToolCall
 	finishOnce sync.Once
 }
 
-func startToolSpan(ctx context.Context, call ai.ToolCall) (context.Context, *toolObservation) {
+func startToolSpan(ctx context.Context, call ai.ToolCall, sinks ...gai.ObservationSink) (context.Context, *toolObservation) {
 	ctx, span := gai.StartOperationSpan(ctx, loopTracerName, "loop", "loop.operation", "tool",
 		attribute.String("tool.name", call.Name),
 		attribute.String("tool.call_id", call.ID),
@@ -306,24 +329,30 @@ func startToolSpan(ctx context.Context, call ai.ToolCall) (context.Context, *too
 			"langfuse.observation.input",
 		)
 	}
-	return ctx, &toolObservation{ctx: ctx, span: span}
+	var sink gai.ObservationSink
+	if len(sinks) > 0 {
+		sink = sinks[0]
+	}
+	return ctx, &toolObservation{ctx: ctx, span: span, sink: sink, call: call}
 }
 
-func callObservedTool(ctx context.Context, call ai.ToolCall, tools []Tool) (response *ToolResponse) {
-	toolCtx, observation := startToolSpan(ctx, call)
+func callObservedTool(ctx context.Context, call ai.ToolCall, tools []Tool, sinks ...gai.ObservationSink) (response *ToolResponse, duration time.Duration) {
+	toolCtx, observation := startToolSpan(ctx, call, sinks...)
 	missingResponse := false
+	started := time.Now()
 	defer func() {
+		duration = time.Since(started)
 		if panicValue := recover(); panicValue != nil {
-			observation.finishPanic()
+			observation.finishPanic(duration)
 			panic(panicValue)
 		}
-		observation.finish(response, missingResponse)
+		observation.finish(response, missingResponse, duration)
 	}()
 	response, missingResponse = callTool(toolCtx, &call, tools)
-	return response
+	return response, duration
 }
 
-func (o *toolObservation) finish(response *ToolResponse, missingResponse bool) {
+func (o *toolObservation) finish(response *ToolResponse, missingResponse bool, duration time.Duration) {
 	if o == nil {
 		return
 	}
@@ -338,20 +367,20 @@ func (o *toolObservation) finish(response *ToolResponse, missingResponse bool) {
 				setCapturedToolContent(o.span, "tool.output", captured, aliases...)
 			}
 		}
-		o.setOutcome(outcome, spanErr)
+		o.setOutcome(outcome, spanErr, duration)
 	})
 }
 
-func (o *toolObservation) finishPanic() {
+func (o *toolObservation) finishPanic(duration time.Duration) {
 	if o == nil {
 		return
 	}
 	o.finishOnce.Do(func() {
-		o.setOutcome(toolOutcomePanic, errObservedToolPanic)
+		o.setOutcome(toolOutcomePanic, errObservedToolPanic, duration)
 	})
 }
 
-func (o *toolObservation) setOutcome(outcome string, spanErr error) {
+func (o *toolObservation) setOutcome(outcome string, spanErr error, duration time.Duration) {
 	status := "success"
 	attrs := []attribute.KeyValue{attribute.String("gai.tool.outcome", outcome)}
 	if spanErr != nil {
@@ -360,6 +389,19 @@ func (o *toolObservation) setOutcome(outcome string, spanErr error) {
 	}
 	attrs = append(attrs, attribute.String("tool.status", status))
 	o.span.SetAttributes(attrs...)
+	gai.EmitObservation(o.ctx, o.sink, gai.Observation{
+		Name:   "loop_tool_finished",
+		Source: "loop:Tool",
+		Fields: map[string]any{
+			"tool_name":    o.call.Name,
+			"tool_call_id": o.call.ID,
+			"tool_type":    o.call.Type,
+			"outcome":      outcome,
+			"status":       status,
+			"duration_ms":  duration.Milliseconds(),
+		},
+		Err: spanErr,
+	})
 	gai.EndSpan(o.span, spanErr)
 }
 

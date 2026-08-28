@@ -13,13 +13,13 @@ import (
 // NewModelRepository. It is not safe for concurrent mutation.
 type ModelRepository struct {
 	providers map[string]Provider
-	debug     gai.DebugSink
+	debug     gai.ObservationSink
 }
 
 // NewModelRepository creates an empty provider registry.
 //
 // When debug is non-nil, repository operations emit diagnostic events.
-func NewModelRepository(debug gai.DebugSink) *ModelRepository {
+func NewModelRepository(debug gai.ObservationSink) *ModelRepository {
 	return &ModelRepository{
 		providers: make(map[string]Provider),
 		debug:     debug,
@@ -45,7 +45,7 @@ func (r *ModelRepository) RegisterProvider(ctx context.Context, provider Provide
 	}
 	if err := provider.Validate(); err != nil {
 		if r.debug != nil {
-			r.debug.Emit(ctx, gai.DebugEvent{
+			gai.EmitObservation(ctx, r.debug, gai.Observation{
 				Name:   "provider_validation_failed",
 				Source: "ai:ModelRepository.RegisterProvider",
 				Fields: map[string]any{
@@ -61,7 +61,7 @@ func (r *ModelRepository) RegisterProvider(ctx context.Context, provider Provide
 	_, exists := r.providers[provider.Name()]
 	if exists {
 		if r.debug != nil {
-			r.debug.Emit(ctx, gai.DebugEvent{
+			gai.EmitObservation(ctx, r.debug, gai.Observation{
 				Name:   "provider_already_registered",
 				Source: "ai:ModelRepository.RegisterProvider",
 				Fields: map[string]any{
@@ -73,7 +73,7 @@ func (r *ModelRepository) RegisterProvider(ctx context.Context, provider Provide
 	}
 	r.providers[provider.Name()] = provider
 	if r.debug != nil {
-		r.debug.Emit(ctx, gai.DebugEvent{
+		gai.EmitObservation(ctx, r.debug, gai.Observation{
 			Name:   "provider_registered",
 			Source: "ai:ModelRepository.RegisterProvider",
 			Fields: map[string]any{
@@ -94,7 +94,7 @@ func (r *ModelRepository) UnregisterProvider(ctx context.Context, providerName s
 	_, exists := r.providers[providerName]
 	if !exists {
 		if r.debug != nil {
-			r.debug.Emit(ctx, gai.DebugEvent{
+			gai.EmitObservation(ctx, r.debug, gai.Observation{
 				Name:   "provider_not_found_for_unregister",
 				Source: "ai:ModelRepository.UnregisterProvider",
 				Fields: map[string]any{
@@ -106,7 +106,7 @@ func (r *ModelRepository) UnregisterProvider(ctx context.Context, providerName s
 	}
 	delete(r.providers, providerName)
 	if r.debug != nil {
-		r.debug.Emit(ctx, gai.DebugEvent{
+		gai.EmitObservation(ctx, r.debug, gai.Observation{
 			Name:   "provider_unregistered",
 			Source: "ai:ModelRepository.UnregisterProvider",
 			Fields: map[string]any{
@@ -126,7 +126,7 @@ func (r *ModelRepository) GetModel(ctx context.Context, providerName, modelName 
 	provider, ok := r.providers[providerName]
 	if !ok {
 		if r.debug != nil {
-			r.debug.Emit(ctx, gai.DebugEvent{
+			gai.EmitObservation(ctx, r.debug, gai.Observation{
 				Name:   "provider_not_found_for_model",
 				Source: "ai:ModelRepository.GetModel",
 				Fields: map[string]any{
@@ -138,7 +138,7 @@ func (r *ModelRepository) GetModel(ctx context.Context, providerName, modelName 
 		return nil, ErrProviderNotFound
 	}
 	if r.debug != nil {
-		r.debug.Emit(ctx, gai.DebugEvent{
+		gai.EmitObservation(ctx, r.debug, gai.Observation{
 			Name:   "getting_model",
 			Source: "ai:ModelRepository.GetModel",
 			Fields: map[string]any{
@@ -161,7 +161,7 @@ func (r *ModelRepository) ListModels(ctx context.Context) ([]string, error) {
 		providerModels, err := provider.ListModels()
 		if err != nil {
 			if r.debug != nil {
-				r.debug.Emit(ctx, gai.DebugEvent{
+				gai.EmitObservation(ctx, r.debug, gai.Observation{
 					Name:   "list_provider_models_failed",
 					Source: "ai:ModelRepository.ListModels",
 					Fields: map[string]any{
@@ -179,7 +179,7 @@ func (r *ModelRepository) ListModels(ctx context.Context) ([]string, error) {
 	}
 	sort.Strings(models)
 	if r.debug != nil {
-		r.debug.Emit(ctx, gai.DebugEvent{
+		gai.EmitObservation(ctx, r.debug, gai.Observation{
 			Name:   "models_listed",
 			Source: "ai:ModelRepository.ListModels",
 			Fields: map[string]any{

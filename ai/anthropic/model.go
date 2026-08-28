@@ -25,7 +25,7 @@ const (
 type Model struct {
 	name   string
 	client *Provider
-	debug  gai.DebugSink
+	debug  gai.ObservationSink
 }
 
 var _ ai.Model = (*Model)(nil)
@@ -291,16 +291,13 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 	if err != nil {
 		return nil, err
 	}
-	if gai.DebugContentEnabled(ctx, m.debug, gai.ContentKindPrompt) {
-		fields := map[string]any{}
-		if _, hasPolicy := gai.ContentCapturePolicyFromContext(ctx); !hasPolicy && m.debug.IncludeSensitiveData() {
-			fields["payload"] = payload
-		}
-		gai.AddDebugContent(ctx, m.debug, fields, "prompt", gai.ContentKindPrompt, req.Prompt)
-		m.debug.Emit(ctx, gai.DebugEvent{Name: "anthropic_generate_request", Source: "ai:anthropic.Model.Generate", Fields: fields})
-	}
 	client := m.client.sdkClient()
-	ctx, observation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "anthropic", Model: m.name})
+	ctx, observation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "anthropic", Model: m.name, Sink: m.debug})
+	if gai.ObservationEnabled(ctx, m.debug) {
+		fields := map[string]any{}
+		gai.AddObservationContent(ctx, m.debug, fields, "prompt", gai.ContentKindPrompt, req.Prompt)
+		gai.EmitObservation(ctx, m.debug, gai.Observation{Name: "anthropic_generate_request", Source: "ai:anthropic.Model.Generate", Fields: fields})
+	}
 	generationResult := ai.GenerationResult{}
 	defer func() {
 		generationResult.Err = err
@@ -329,14 +326,11 @@ func (m *Model) Generate(ctx context.Context, req ai.AIRequest) (response *ai.AI
 	if message.JSON.Usage.Valid() {
 		generationResult.Usage = &usage
 	}
-	if m.debug != nil {
+	if gai.ObservationEnabled(ctx, m.debug) {
 		fields := map[string]any{"input_tokens": input, "output_tokens": output}
-		if _, hasPolicy := gai.ContentCapturePolicyFromContext(ctx); !hasPolicy && m.debug.IncludeSensitiveData() {
-			fields["response"] = message.RawJSON()
-		}
-		gai.AddDebugContent(ctx, m.debug, fields, "response_text", gai.ContentKindCompletion, text)
-		gai.AddDebugContent(ctx, m.debug, fields, "reasoning", gai.ContentKindReasoning, thinking)
-		m.debug.Emit(ctx, gai.DebugEvent{Name: "anthropic_generate_success", Source: "ai:anthropic.Model.Generate", Fields: fields})
+		gai.AddObservationContent(ctx, m.debug, fields, "response_text", gai.ContentKindCompletion, text)
+		gai.AddObservationContent(ctx, m.debug, fields, "reasoning", gai.ContentKindReasoning, thinking)
+		gai.EmitObservation(ctx, m.debug, gai.Observation{Name: "anthropic_generate_success", Source: "ai:anthropic.Model.Generate", Fields: fields})
 	}
 	return &ai.AIResponse{Text: text, Reasoning: thinking, ToolCalls: calls, Raw: json.RawMessage(message.RawJSON()), FinishReason: string(message.StopReason), InputTokens: input, OutputTokens: output, ReasoningTokens: usage.ReasoningTokens}, nil
 }
@@ -430,7 +424,7 @@ func (m *Model) GenerateStream(ctx context.Context, req ai.AIRequest) <-chan ai.
 			return
 		}
 		client := m.client.sdkClient()
-		generationCtx, startedObservation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "anthropic", Model: m.name, Streaming: true})
+		generationCtx, startedObservation := ai.StartGenerationObservation(ctx, req, ai.GenerationConfig{Provider: "anthropic", Model: m.name, Streaming: true, Sink: m.debug})
 		observation = startedObservation
 		ctx = generationCtx
 		stream := client.Messages.NewStreaming(generationCtx, payload)
@@ -563,7 +557,7 @@ func anthropicHTTPStatus(err error) int {
 type Tokenizer struct {
 	modelName string
 	client    *Provider
-	debug     gai.DebugSink
+	debug     gai.ObservationSink
 }
 
 func (t *Tokenizer) ID() string { return "anthropic." + t.modelName }

@@ -189,15 +189,15 @@ func TestNativeContentsPreservesThoughtSignatureOnFunctionCall(t *testing.T) {
 	}
 }
 
-func TestGenerateEmitsDebugEventOnGenerationFailure(t *testing.T) {
+func TestGenerateEmitsObservationOnGenerationFailure(t *testing.T) {
 	recorder := obstest.Install(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, `{"error":{"code":429,"message":"generation failed"}}`, http.StatusTooManyRequests)
 	}))
 	defer server.Close()
 
-	var events []gai.DebugEvent
-	provider := New("test-api-key", gai.DebugSinkFunc(func(_ context.Context, event gai.DebugEvent) {
+	var events []gai.Observation
+	provider := New("test-api-key", gai.ObservationSinkFunc(func(_ context.Context, event gai.Observation) {
 		events = append(events, event)
 	}))
 	provider.httpClient = server.Client()
@@ -213,7 +213,7 @@ func TestGenerateEmitsDebugEventOnGenerationFailure(t *testing.T) {
 	}
 	found := false
 	for _, event := range events {
-		if event.Name == "gemini_generate_content_failed" && event.Err != nil {
+		if event.Name == "gemini_generate_content_failed" && event.Err == nil && event.Fields["outcome"] == "error" {
 			found = true
 		}
 	}

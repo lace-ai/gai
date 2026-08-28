@@ -19,6 +19,7 @@ type GenerationConfig struct {
 	Provider  string
 	Model     string
 	Streaming bool
+	Sink      gai.ObservationSink
 }
 
 // GenerationResult contains provider metadata known when a generation ends.
@@ -38,6 +39,8 @@ type GenerationResult struct {
 // one provider invocation. It is safe to finish more than once; only the first
 // call ends the span.
 type GenerationObservation struct {
+	ctx        context.Context
+	config     GenerationConfig
 	span       trace.Span
 	startedAt  time.Time
 	firstOnce  sync.Once
@@ -69,7 +72,7 @@ func StartGenerationObservation(ctx context.Context, req AIRequest, config Gener
 	}
 	ctx, span := gai.StartClientOperationSpan(ctx, generationTracerName, "chat "+config.Model, "gen_ai.operation.name", "chat", attrs...)
 	startedAt := time.Now()
-	return ctx, &GenerationObservation{span: span, startedAt: startedAt}
+	return ctx, &GenerationObservation{ctx: ctx, config: config, span: span, startedAt: startedAt}
 }
 
 func semanticProviderName(provider string) string {
@@ -147,8 +150,53 @@ func (o *GenerationObservation) Finish(result GenerationResult) {
 		result = mergeGenerationResults(o.stream, result)
 		o.mu.Unlock()
 		o.span.SetAttributes(generationResultAttributes(result)...)
+		gai.EmitObservation(o.ctx, o.config.Sink, gai.Observation{
+			Name:   "generation_finished",
+			Source: "ai:GenerationObservation",
+			Fields: generationResultFields(o.config, result),
+			Err:    result.Err,
+		})
 		gai.EndSpan(o.span, result.Err)
 	})
+}
+
+func generationResultFields(config GenerationConfig, result GenerationResult) map[string]any {
+	fields := map[string]any{
+		"provider":        config.Provider,
+		"model":           config.Model,
+		"streaming":       config.Streaming,
+		"tool_call_count": result.ToolCallCount,
+	}
+	if result.ResponseModel != "" {
+		fields["response_model"] = result.ResponseModel
+	}
+	if result.RequestID != "" {
+		fields["request_id"] = result.RequestID
+	}
+	if result.FinishReason != "" {
+		fields["finish_reason"] = result.FinishReason
+	}
+	if result.HTTPStatus > 0 {
+		fields["http_status"] = result.HTTPStatus
+	}
+	if result.Usage != nil {
+		fields["input_tokens"] = result.Usage.InputTokens
+		fields["output_tokens"] = result.Usage.OutputTokens
+		fields["total_tokens"] = result.Usage.InputTokens + result.Usage.OutputTokens
+		if result.Usage.ReasoningTokens > 0 {
+			fields["reasoning_tokens"] = result.Usage.ReasoningTokens
+		}
+		if result.Usage.CachedTokens > 0 {
+			fields["cached_tokens"] = result.Usage.CachedTokens
+		}
+		if result.Usage.CacheCreationTokens > 0 {
+			fields["cache_creation_tokens"] = result.Usage.CacheCreationTokens
+		}
+		if result.Usage.ToolUseTokens > 0 {
+			fields["tool_use_tokens"] = result.Usage.ToolUseTokens
+		}
+	}
+	return fields
 }
 
 func mergeGenerationResults(stream, final GenerationResult) GenerationResult {

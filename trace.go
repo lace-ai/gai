@@ -65,32 +65,29 @@ func SpanContextIDs(ctx context.Context) (traceID string, spanID string, err err
 	return sc.TraceID().String(), sc.SpanID().String(), nil
 }
 
-func RecordDebugEvent(ctx context.Context, e DebugEvent) {
+func RecordObservation(ctx context.Context, e Observation) {
 	span := trace.SpanFromContext(ctx)
 	if !span.SpanContext().IsValid() {
 		return
 	}
-	if e.Err != nil {
-		RecordSpanError(span, e.Err)
-	}
-	span.AddEvent("debug."+e.Name, trace.WithAttributes(debugEventAttributes(e)...))
+	span.AddEvent("observation."+e.Name, trace.WithAttributes(observationEventAttributes(e)...))
 }
 
-func debugEventAttributes(e DebugEvent) []attribute.KeyValue {
+func observationEventAttributes(e Observation) []attribute.KeyValue {
 	attrs := []attribute.KeyValue{
-		attribute.String("debug.name", e.Name),
-		attribute.String("debug.source", e.Source),
+		attribute.String("observation.name", e.Name),
+		attribute.String("observation.source", e.Source),
 	}
 	if e.Err != nil {
 		attrs = append(attrs, attribute.String("error", e.Err.Error()))
 	}
 	for key, value := range e.Fields {
-		attrs = append(attrs, debugFieldAttribute("debug."+key, value))
+		attrs = append(attrs, observationFieldAttribute("observation."+key, value))
 	}
 	return attrs
 }
 
-func debugFieldAttribute(key string, value any) attribute.KeyValue {
+func observationFieldAttribute(key string, value any) attribute.KeyValue {
 	switch v := value.(type) {
 	case nil:
 		return attribute.String(key, "")

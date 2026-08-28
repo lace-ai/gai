@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -47,6 +48,69 @@ func TestLoopRunSpanUsesRetryPolicyLimit(t *testing.T) {
 	}
 	if got := obstest.Attributes(runSpan)["loop.retry_limit"].AsInt64(); got != 0 {
 		t.Fatalf("loop.retry_limit = %d, want 0", got)
+	}
+}
+
+func TestToolObservationEmitsOutcomeToSink(t *testing.T) {
+	var emitted gai.Observation
+	sink := gai.ObservationSinkFunc(func(_ context.Context, observation gai.Observation) {
+		emitted = observation
+	})
+	call := ai.ToolCall{ID: "call-1", Type: "function", Name: "test", Args: json.RawMessage(`{}`)}
+
+	callObservedTool(t.Context(), call, []Tool{observedTestTool{name: "test", call: func(context.Context, *ai.ToolCall) *ToolResponse {
+		return NewToolSuccess("ok")
+	}}}, sink)
+
+	if emitted.Name != "loop_tool_finished" || emitted.Source != "loop:Tool" {
+		t.Fatalf("observation identity = %#v", emitted)
+	}
+	if emitted.Fields["tool_name"] != "test" || emitted.Fields["tool_call_id"] != "call-1" || emitted.Fields["outcome"] != toolOutcomeSuccess {
+		t.Fatalf("tool fields = %#v", emitted.Fields)
+	}
+}
+
+func TestExecuteToolCallsDurationExcludesSinkEmissionLatency(t *testing.T) {
+	sinkEntered := make(chan struct{})
+	releaseSink := make(chan struct{})
+	var observed gai.Observation
+	sink := gai.ObservationSinkFunc(func(_ context.Context, observation gai.Observation) {
+		observed = observation
+		close(sinkEntered)
+		<-releaseSink
+	})
+	tool := observedTestTool{name: "fast", call: func(context.Context, *ai.ToolCall) *ToolResponse {
+		return NewToolSuccess("ok")
+	}}
+	l := &Loop{Tools: []Tool{tool}, ObservationSink: sink}
+	iteration := &Iteration{Parts: make([]IterationPart, 1)}
+	calls := []pendingToolCall{{partIndex: 0, call: ai.ToolCall{ID: "call-fast", Type: "function", Name: "fast", Args: json.RawMessage(`{}`)}}}
+	events := make(chan Event, 2)
+	done := make(chan error, 1)
+
+	go func() { done <- l.executeToolCalls(t.Context(), iteration, calls, l.Tools, events, 1, 1, 0) }()
+	<-sinkEntered
+	time.Sleep(50 * time.Millisecond)
+	close(releaseSink)
+	if err := <-done; err != nil {
+		t.Fatalf("executeToolCalls error = %v", err)
+	}
+	close(events)
+
+	var result Event
+	for event := range events {
+		if event.Type == EventToolResult {
+			result = event
+		}
+	}
+	if result.Type != EventToolResult {
+		t.Fatal("tool result event was not emitted")
+	}
+	if result.Duration >= 25*time.Millisecond {
+		t.Fatalf("tool duration = %s, includes sink emission latency", result.Duration)
+	}
+	if got, ok := observed.Fields["duration_ms"].(int64); !ok || got != result.Duration.Milliseconds() {
+		t.Fatalf("observation duration_ms = %#v, want %d", observed.Fields["duration_ms"], result.Duration.Milliseconds())
 	}
 }
 
@@ -97,7 +161,7 @@ func TestToolObservationOutcomes(t *testing.T) {
 				ctx = tt.ctx(t)
 			}
 			call := ai.ToolCall{ID: "call-1", Type: "function", Name: "test", Args: json.RawMessage(`{}`)}
-			response := callObservedTool(ctx, call, []Tool{observedTestTool{name: "test", call: tt.call}})
+			response, _ := callObservedTool(ctx, call, []Tool{observedTestTool{name: "test", call: tt.call}})
 			if response == nil {
 				t.Fatal("observed tool returned nil response")
 			}
@@ -124,15 +188,20 @@ func TestToolObservationOutcomes(t *testing.T) {
 func TestObservedToolPanicFinalizesAndRepanics(t *testing.T) {
 	recorder := obstest.Install(t)
 	panicValue := errors.New("panic-sentinel-secret")
+	var emitted gai.Observation
+	sink := gai.ObservationSinkFunc(func(_ context.Context, observation gai.Observation) {
+		emitted = observation
+	})
 	call := ai.ToolCall{ID: "call-panic", Type: "function", Name: "panic", Args: json.RawMessage(`{}`)}
 	tool := observedTestTool{name: "panic", call: func(context.Context, *ai.ToolCall) *ToolResponse {
+		time.Sleep(10 * time.Millisecond)
 		panic(panicValue)
 	}}
 
 	var recovered any
 	func() {
 		defer func() { recovered = recover() }()
-		callObservedTool(t.Context(), call, []Tool{tool})
+		callObservedTool(t.Context(), call, []Tool{tool}, sink)
 	}()
 	if recovered != panicValue {
 		t.Fatalf("recovered panic = %#v, want original value", recovered)
@@ -145,6 +214,9 @@ func TestObservedToolPanicFinalizesAndRepanics(t *testing.T) {
 	}
 	if strings.Contains(toolSpanText(span), "panic-sentinel-secret") {
 		t.Fatalf("panic value reached span: %s", toolSpanText(span))
+	}
+	if got, ok := emitted.Fields["duration_ms"].(int64); !ok || got <= 0 {
+		t.Fatalf("panic observation duration_ms = %#v, want a positive measured duration", emitted.Fields["duration_ms"])
 	}
 }
 
@@ -265,9 +337,9 @@ func TestToolObservationOmitsContentByDefault(t *testing.T) {
 func TestToolObservationFinishesOnce(t *testing.T) {
 	recorder := obstest.Install(t)
 	_, observation := startToolSpan(t.Context(), ai.ToolCall{ID: "call-once", Name: "once"})
-	observation.finish(NewToolSuccess("ok"), false)
-	observation.finish(NewToolError(errors.New("late error")), false)
-	observation.finishPanic()
+	observation.finish(NewToolSuccess("ok"), false, 0)
+	observation.finish(NewToolError(errors.New("late error")), false, 0)
+	observation.finishPanic(0)
 
 	span := requireToolSpans(t, recorder, 1)[0]
 	if got := obstest.Attributes(span)["gai.tool.outcome"].AsString(); got != toolOutcomeSuccess {
@@ -279,12 +351,25 @@ func TestExecuteToolCallsCreatesConcurrentChildSpans(t *testing.T) {
 	recorder := obstest.Install(t)
 	entered := make(chan string, 2)
 	release := make(chan struct{})
+	sinkEntered := make(chan struct{}, 2)
+	releaseSink := make(chan struct{})
+	var observationsMu sync.Mutex
+	var observations []gai.Observation
 	tool := observedTestTool{name: "concurrent", call: func(_ context.Context, call *ai.ToolCall) *ToolResponse {
 		entered <- call.ID
 		<-release
 		return NewToolSuccess(call.ID)
 	}}
-	l := &Loop{Tools: []Tool{tool}}
+	l := &Loop{
+		Tools: []Tool{tool},
+		ObservationSink: gai.ObservationSinkFunc(func(_ context.Context, observation gai.Observation) {
+			observationsMu.Lock()
+			observations = append(observations, observation)
+			observationsMu.Unlock()
+			sinkEntered <- struct{}{}
+			<-releaseSink
+		}),
+	}
 	iteration := &Iteration{Parts: make([]IterationPart, 2)}
 	calls := []pendingToolCall{
 		{partIndex: 0, call: ai.ToolCall{ID: "call-1", Type: "function", Name: "concurrent", Args: json.RawMessage(`{}`)}},
@@ -304,12 +389,30 @@ func TestExecuteToolCallsCreatesConcurrentChildSpans(t *testing.T) {
 		}
 	}
 	close(release)
+	for range calls {
+		select {
+		case <-sinkEntered:
+		case <-time.After(time.Second):
+			t.Fatal("observation sink calls did not overlap")
+		}
+	}
+	close(releaseSink)
 	if err := <-done; err != nil {
 		t.Fatalf("executeToolCalls error: %v", err)
 	}
 	parent.End()
 	if !seen["call-1"] || !seen["call-2"] {
 		t.Fatalf("executed calls = %#v", seen)
+	}
+	observationsMu.Lock()
+	defer observationsMu.Unlock()
+	if len(observations) != 2 {
+		t.Fatalf("observations = %#v, want one per concurrent tool call", observations)
+	}
+	for _, observation := range observations {
+		if observation.Name != "loop_tool_finished" {
+			t.Fatalf("observation name = %q, want loop_tool_finished", observation.Name)
+		}
 	}
 
 	spans := requireToolSpans(t, recorder, 2)

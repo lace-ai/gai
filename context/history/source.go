@@ -32,7 +32,7 @@ type HistorySource struct {
 	historyStateStore HistoryStore
 	sessionID         string
 
-	debug     gai.DebugSink
+	debug     gai.ObservationSink
 	tokenizer ai.Tokenizer
 
 	summarizer       *summary.Summarizer
@@ -104,7 +104,7 @@ func (s *HistorySource) SetTokenizer(tokenizer ai.Tokenizer) {
 	s.tokenizer = tokenizer
 }
 
-func (s *HistorySource) DebugSink(debug gai.DebugSink, conv gaictx.Conversation) {
+func (s *HistorySource) ObservationSink(debug gai.ObservationSink, conv gaictx.Conversation) {
 	s.debug = debug
 }
 

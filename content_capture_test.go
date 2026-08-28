@@ -156,8 +156,7 @@ func TestCaptureContentKeepsOversizedJSONValidAndDeterministic(t *testing.T) {
 }
 
 type capturePolicyTestSink struct {
-	sensitive bool
-	event     DebugEvent
+	event Observation
 }
 
 type panickingJSONMarshaler struct{}
@@ -171,53 +170,63 @@ func (m countingJSONMarshaler) MarshalJSON() ([]byte, error) {
 	return []byte(`{"value":"serialized"}`), nil
 }
 
-func TestAddDebugContentSerializationPanicFailsClosed(t *testing.T) {
+func TestAddObservationContentSerializationPanicFailsClosed(t *testing.T) {
 	ctx := WithContentCapturePolicy(t.Context(), ContentCapturePolicy{Prompt: CaptureEnabled})
 	fields := map[string]any{}
-	AddDebugContent(ctx, &capturePolicyTestSink{}, fields, "prompt", ContentKindPrompt, panickingJSONMarshaler{})
+	AddObservationContent(ctx, &capturePolicyTestSink{}, fields, "prompt", ContentKindPrompt, panickingJSONMarshaler{})
 	if len(fields) != 0 {
 		t.Fatalf("panicking serializer emitted fields: %#v", fields)
 	}
 }
 
-func TestAddDebugContentDisabledCategorySkipsSerialization(t *testing.T) {
+func TestAddObservationContentDisabledCategorySkipsSerialization(t *testing.T) {
 	calls := 0
 	ctx := WithContentCapturePolicy(t.Context(), ContentCapturePolicy{Completion: CaptureEnabled})
 	fields := map[string]any{}
-	AddDebugContent(ctx, &capturePolicyTestSink{}, fields, "prompt", ContentKindPrompt, countingJSONMarshaler{calls: &calls})
+	AddObservationContent(ctx, &capturePolicyTestSink{}, fields, "prompt", ContentKindPrompt, countingJSONMarshaler{calls: &calls})
 	if calls != 0 || len(fields) != 0 {
 		t.Fatalf("disabled category serialized content: calls=%d fields=%#v", calls, fields)
 	}
 }
 
-func (s *capturePolicyTestSink) Emit(_ context.Context, event DebugEvent) { s.event = event }
-func (s *capturePolicyTestSink) IncludeSensitiveData() bool               { return s.sensitive }
+func (s *capturePolicyTestSink) Emit(_ context.Context, event Observation) { s.event = event }
 
-func TestAddDebugContentPreservesLegacyAndPolicyOverridesSink(t *testing.T) {
-	legacy := &capturePolicyTestSink{sensitive: true}
-	legacyFields := map[string]any{}
-	legacyValue := map[string]string{"secret": "raw"}
-	AddDebugContent(t.Context(), legacy, legacyFields, "payload", ContentKindPrompt, legacyValue)
-	if got, ok := legacyFields["payload"].(map[string]string); !ok || got["secret"] != "raw" {
-		t.Fatalf("legacy field shape changed: %#v", legacyFields["payload"])
-	}
-
-	strictCtx := WithContentCapturePolicy(t.Context(), ContentCapturePolicy{Completion: CaptureEnabled, MaxBytes: 64})
-	strictFields := map[string]any{}
-	AddDebugContent(strictCtx, legacy, strictFields, "prompt", ContentKindPrompt, "must-not-leak")
-	AddDebugContent(strictCtx, legacy, strictFields, "completion", ContentKindCompletion, "allowed")
-	if _, ok := strictFields["prompt"]; ok {
-		t.Fatal("explicit policy did not override sensitive legacy sink")
-	}
-	if strictFields["completion"] != "allowed" || strictFields["completion_content_kind"] != "completion" {
-		t.Fatalf("enabled policy content missing: %#v", strictFields)
-	}
-
-	nonSensitive := &capturePolicyTestSink{}
+func TestAddObservationContentRequiresAnInstalledPolicy(t *testing.T) {
+	sink := &capturePolicyTestSink{}
 	fields := map[string]any{}
-	AddDebugContent(strictCtx, nonSensitive, fields, "completion", ContentKindCompletion, "policy-enabled")
-	if fields["completion"] != "policy-enabled" {
-		t.Fatalf("policy should enable a field independently of the legacy sink boolean: %#v", fields)
+	AddObservationContent(t.Context(), sink, fields, "payload", ContentKindPrompt, "must-not-leak")
+	if len(fields) != 0 {
+		t.Fatalf("content captured without a policy: %#v", fields)
+	}
+
+	policyCtx := WithContentCapturePolicy(t.Context(), ContentCapturePolicy{Completion: CaptureEnabled, MaxBytes: 64})
+	AddObservationContent(policyCtx, sink, fields, "prompt", ContentKindPrompt, "must-not-leak")
+	AddObservationContent(policyCtx, sink, fields, "completion", ContentKindCompletion, "allowed")
+	if _, ok := fields["prompt"]; ok {
+		t.Fatal("disabled policy category captured content")
+	}
+	if fields["completion"] != "allowed" || fields["completion_content_kind"] != "completion" {
+		t.Fatalf("enabled policy content missing: %#v", fields)
+	}
+}
+
+func TestAddObservationContentCapturesForActiveSpanWithoutSink(t *testing.T) {
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
+
+	ctx := WithContentCapturePolicy(t.Context(), ContentCapturePolicy{Prompt: CaptureEnabled})
+	ctx, span := provider.Tracer("content-capture-test").Start(ctx, "capture")
+	fields := map[string]any{}
+	AddObservationContent(ctx, nil, fields, "prompt", ContentKindPrompt, "allowed-content")
+	EmitObservation(ctx, nil, Observation{Name: "capture", Source: "test", Fields: fields})
+	span.End()
+
+	if fields["prompt"] != "allowed-content" {
+		t.Fatalf("policy-enabled content missing: %#v", fields)
+	}
+	if len(recorder.Ended()) != 1 || !containsAttribute(recorder.Ended()[0].Events()[0].Attributes, "observation.prompt", "allowed-content") {
+		t.Fatalf("policy-enabled content missing from OTel event: %#v", recorder.Ended())
 	}
 }
 
@@ -233,11 +242,11 @@ func TestRedactedOrDisabledContentNeverReachesOTelEvent(t *testing.T) {
 		},
 	})
 	ctx, span := provider.Tracer("content-capture-test").Start(ctx, "capture")
-	sink := DebugSinkFunc(func(context.Context, DebugEvent) {})
+	sink := ObservationSinkFunc(func(context.Context, Observation) {})
 	fields := map[string]any{}
-	AddDebugContent(ctx, sink, fields, "prompt", ContentKindPrompt, "disabled-sentinel-secret")
-	AddDebugContent(ctx, sink, fields, "completion", ContentKindCompletion, "enabled-sentinel-secret")
-	sink.Emit(ctx, DebugEvent{Name: "capture", Source: "test", Fields: fields})
+	AddObservationContent(ctx, sink, fields, "prompt", ContentKindPrompt, "disabled-sentinel-secret")
+	AddObservationContent(ctx, sink, fields, "completion", ContentKindCompletion, "enabled-sentinel-secret")
+	EmitObservation(ctx, sink, Observation{Name: "capture", Source: "test", Fields: fields})
 	span.End()
 
 	var exported strings.Builder
@@ -255,7 +264,7 @@ func TestRedactedOrDisabledContentNeverReachesOTelEvent(t *testing.T) {
 	if !strings.Contains(exported.String(), "[REDACTED]") {
 		t.Fatalf("redacted value missing from OTel: %s", exported.String())
 	}
-	if !containsAttribute(recorder.Ended()[0].Events()[0].Attributes, "debug.completion_redaction_applied", "true") {
+	if !containsAttribute(recorder.Ended()[0].Events()[0].Attributes, "observation.completion_redaction_applied", "true") {
 		t.Fatal("redaction metadata missing from OTel")
 	}
 }
@@ -267,4 +276,41 @@ func containsAttribute(attrs []attribute.KeyValue, key, value string) bool {
 		}
 	}
 	return false
+}
+
+func TestEmitObservationDoesNotExportRawErrorsWithoutContentPolicy(t *testing.T) {
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
+
+	ctx, span := provider.Tracer("content-capture-test").Start(t.Context(), "capture")
+	sink := &capturePolicyTestSink{}
+	EmitObservation(ctx, sink, Observation{
+		Name:   "failed",
+		Source: "test",
+		Fields: map[string]any{"retained": "yes", "error": "caller-supplied"},
+		Err:    errors.New("sentinel-error-content"),
+	})
+	span.End()
+
+	if sink.event.Err != nil || strings.Contains(fmt.Sprintf("%#v", sink.event), "sentinel-error-content") {
+		t.Fatalf("raw error reached observation sink: %#v", sink.event)
+	}
+	if sink.event.Fields["outcome"] != "error" || sink.event.Fields["error_type"] != "*errors.errorString" || sink.event.Fields["retained"] != "yes" {
+		t.Fatalf("safe error metadata = %#v", sink.event.Fields)
+	}
+	if _, ok := sink.event.Fields["error"]; ok {
+		t.Fatalf("caller-supplied error field reached observation sink: %#v", sink.event.Fields)
+	}
+
+	var exported strings.Builder
+	for _, event := range recorder.Ended()[0].Events() {
+		for _, attr := range event.Attributes {
+			exported.WriteString(string(attr.Key))
+			exported.WriteString(attr.Value.String())
+		}
+	}
+	if strings.Contains(exported.String(), "sentinel-error-content") {
+		t.Fatalf("raw error reached OTel observation: %s", exported.String())
+	}
 }

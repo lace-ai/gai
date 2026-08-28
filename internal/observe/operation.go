@@ -9,27 +9,27 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// Operation owns the OpenTelemetry span and debug-event plumbing for one
+// Operation owns the OpenTelemetry span and observation plumbing for one
 // domain-specific observation. Domain observers retain event names, fields,
 // attributes, errors, and content-capture decisions.
 type Operation struct {
-	debug  gai.DebugSink
+	sink   gai.ObservationSink
 	span   trace.Span
 	source string
 }
 
-// New returns an operation that emits domain-specific debug events without
+// New returns an operation that emits domain-specific observations without
 // owning a span.
-func New(debug gai.DebugSink, source string) *Operation {
-	return &Operation{debug: debug, source: source}
+func New(sink gai.ObservationSink, source string) *Operation {
+	return &Operation{sink: sink, source: source}
 }
 
 // Start starts an operation span and returns an operation that can emit domain
 // events and complete the span. This helper is internal so callers do not
 // depend on a generic public observability abstraction.
-func Start(ctx context.Context, debug gai.DebugSink, tracerName, spanPrefix, operationAttr, operation, source string, attrs ...attribute.KeyValue) (context.Context, *Operation) {
+func Start(ctx context.Context, sink gai.ObservationSink, tracerName, spanPrefix, operationAttr, operation, source string, attrs ...attribute.KeyValue) (context.Context, *Operation) {
 	ctx, span := gai.StartOperationSpan(ctx, tracerName, spanPrefix, operationAttr, operation, attrs...)
-	return ctx, &Operation{debug: debug, span: span, source: source}
+	return ctx, &Operation{sink: sink, span: span, source: source}
 }
 
 // Set adds attributes to the operation span.
@@ -40,12 +40,12 @@ func (o *Operation) Set(attrs ...attribute.KeyValue) {
 	o.span.SetAttributes(attrs...)
 }
 
-// Emit sends a domain-specific debug event through the configured sink.
+// Emit finalizes and projects one domain-specific observation.
 func (o *Operation) Emit(ctx context.Context, name string, fields map[string]any, err error) {
-	if o == nil || o.debug == nil {
+	if o == nil {
 		return
 	}
-	o.debug.Emit(ctx, gai.DebugEvent{Name: name, Source: o.source, Fields: fields, Err: err})
+	gai.EmitObservation(ctx, o.sink, gai.Observation{Name: name, Source: o.source, Fields: fields, Err: err})
 }
 
 // Finish records err on the span, when present, and ends it.

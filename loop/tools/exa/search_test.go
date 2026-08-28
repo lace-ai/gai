@@ -50,8 +50,8 @@ func TestSearchTool(t *testing.T) {
 	}))
 	defer server.Close()
 
-	sink := &captureDebugSink{}
-	tool, err := exa.NewSearchTool("secret", exa.WithEndpoint(server.URL), exa.WithSearchType("fast"), exa.WithNumResults(3), exa.WithDebugSink(sink))
+	sink := &captureObservationSink{}
+	tool, err := exa.NewSearchTool("secret", exa.WithEndpoint(server.URL), exa.WithSearchType("fast"), exa.WithNumResults(3), exa.WithObservationSink(sink))
 	if err != nil {
 		t.Fatalf("NewSearchTool: %v", err)
 	}
@@ -124,8 +124,8 @@ func TestSearchToolReturnsAPIError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	sink := &captureDebugSink{}
-	tool, err := exa.NewSearchTool("secret", exa.WithEndpoint(server.URL), exa.WithDebugSink(sink))
+	sink := &captureObservationSink{}
+	tool, err := exa.NewSearchTool("secret", exa.WithEndpoint(server.URL), exa.WithObservationSink(sink))
 	if err != nil {
 		t.Fatalf("NewSearchTool: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestSearchToolReturnsAPIError(t *testing.T) {
 		t.Fatalf("unexpected API error: %#v", apiErr)
 	}
 	events := sink.Events()
-	if len(events) != 2 || events[1].Name != "exa_search_failed" || events[1].Err == nil {
+	if len(events) != 2 || events[1].Name != "exa_search_failed" || events[1].Err != nil || events[1].Fields["outcome"] != "error" {
 		t.Fatalf("unexpected failure events: %#v", events)
 	}
 	if got := events[1].Fields["stage"]; got != "api_response" {
@@ -154,7 +154,7 @@ func TestSearchToolReturnsAPIError(t *testing.T) {
 	}
 }
 
-func TestSearchToolSensitiveDebugIncludesQuery(t *testing.T) {
+func TestSearchToolPolicyCaptureIncludesQuery(t *testing.T) {
 	t.Parallel()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -162,12 +162,13 @@ func TestSearchToolSensitiveDebugIncludesQuery(t *testing.T) {
 	}))
 	defer server.Close()
 
-	sink := &captureDebugSink{sensitive: true}
-	tool, err := exa.NewSearchTool("secret", exa.WithEndpoint(server.URL), exa.WithDebugSink(sink))
+	sink := &captureObservationSink{}
+	tool, err := exa.NewSearchTool("secret", exa.WithEndpoint(server.URL), exa.WithObservationSink(sink))
 	if err != nil {
 		t.Fatalf("NewSearchTool: %v", err)
 	}
-	response := tool.Function(context.Background(), &ai.ToolCall{
+	ctx := gai.WithContentCapturePolicy(context.Background(), gai.ContentCapturePolicy{ToolInput: gai.CaptureEnabled})
+	response := tool.Function(ctx, &ai.ToolCall{
 		ID: "call-1", Type: "function", Name: tool.Name(), Args: json.RawMessage(`{"query":"private query"}`),
 	})
 	if err := response.ErrorValue(); err != nil {
@@ -266,26 +267,21 @@ func TestNewSearchToolValidatesConfiguration(t *testing.T) {
 	}
 }
 
-type captureDebugSink struct {
-	mu        sync.Mutex
-	sensitive bool
-	events    []gai.DebugEvent
+type captureObservationSink struct {
+	mu     sync.Mutex
+	events []gai.Observation
 }
 
-func (s *captureDebugSink) Emit(_ context.Context, event gai.DebugEvent) {
+func (s *captureObservationSink) Emit(_ context.Context, event gai.Observation) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.events = append(s.events, event)
 }
 
-func (s *captureDebugSink) IncludeSensitiveData() bool {
-	return s.sensitive
-}
-
-func (s *captureDebugSink) Events() []gai.DebugEvent {
+func (s *captureObservationSink) Events() []gai.Observation {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]gai.DebugEvent(nil), s.events...)
+	return append([]gai.Observation(nil), s.events...)
 }
 
 func attributeMap(attrs []attribute.KeyValue) map[string]attribute.Value {
